@@ -69,29 +69,38 @@ test("discovery stays private and catalog, search and media routes use the disco
       },
     });
     const appUrl = await listen(app);
+    let visitorToken;
+    async function sessionFetch(route, options = {}) {
+      const headers = new Headers(options.headers);
+      if (visitorToken) headers.set("x-intimora-route", visitorToken);
+      const response = await fetch(`${appUrl}${route}`, { ...options, headers });
+      visitorToken = response.headers.get("x-intimora-route") || visitorToken;
+      return response;
+    }
 
-    const catalog = await fetch(`${appUrl}/_api/api/videos`);
+    const catalog = await sessionFetch("/_api/api/videos");
     assert.equal(catalog.status, 200);
     const body = await catalog.text();
     assert.ok(!body.includes(upstreamUrl));
     assert.ok(!body.includes(privateMarker));
     assert.ok(!JSON.stringify([...catalog.headers]).includes(privateMarker));
     const { videos, nextCursor } = JSON.parse(body).data;
-    assert.equal(videos[0].thumbnailUrl, "/_api/api/videos/video-1/thumbnail");
-    assert.equal(videos[0].streamUrl, "/_api/api/videos/video-1/stream");
+    assert.match(videos[0].thumbnailUrl, /^\/_api\/media\/[A-Za-z0-9_-]+$/);
+    assert.match(videos[0].streamUrl, /^\/_api\/media\/[A-Za-z0-9_-]+$/);
     assert.ok(!nextCursor.includes("next cursor"));
+    assert.ok(visitorToken);
 
-    assert.equal((await fetch(`${appUrl}/_api/api/videos?cursor=${encodeURIComponent(nextCursor)}`)).status, 200);
+    assert.equal((await sessionFetch(`/_api/api/videos?cursor=${encodeURIComponent(nextCursor)}`)).status, 200);
     const query = "mobile search & सुरक्षित";
-    assert.equal((await fetch(`${appUrl}/_api/api/search?q=${encodeURIComponent(query)}`)).status, 200);
-    assert.deepEqual(await (await fetch(`${appUrl}/_api/api/videos/video-1`)).json(), { ok: true });
+    assert.equal((await sessionFetch(`/_api/api/search?q=${encodeURIComponent(query)}`)).status, 200);
+    assert.deepEqual(await (await sessionFetch("/_api/api/videos/video-1")).json(), { ok: true });
     assert.equal((await fetch(`${appUrl}${videos[0].thumbnailUrl}`)).status, 200);
     const stream = await fetch(`${appUrl}${videos[0].streamUrl}`, { headers: { Range: "bytes=2-5" } });
     assert.equal(stream.status, 206);
     assert.equal(stream.headers.get("content-range"), "bytes 2-5/10");
     assert.equal(await stream.text(), "2345");
     for (const action of ["like", "share"]) {
-      const response = await fetch(`${appUrl}/_api/api/videos/video-1/${action}`, {
+      const response = await sessionFetch(`/_api/api/videos/video-1/${action}`, {
         method: "POST",
         headers: { Origin: appUrl, "Sec-Fetch-Site": "same-origin" },
       });

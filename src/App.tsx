@@ -14,7 +14,8 @@ const AGE_VERIFIED_KEY = "intimora_age_verified";
 
 function App() {
   const [ageVerified, setAgeVerified] = useState(() => {
-    return sessionStorage.getItem(AGE_VERIFIED_KEY) === "true";
+    try { return sessionStorage.getItem(AGE_VERIFIED_KEY) === "true"; }
+    catch { return false; }
   });
   const [videos, setVideos] = useState<Video[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -30,7 +31,8 @@ function App() {
 
   // Age gate confirm
   const handleAgeConfirm = () => {
-    sessionStorage.setItem(AGE_VERIFIED_KEY, "true");
+    try { sessionStorage.setItem(AGE_VERIFIED_KEY, "true"); }
+    catch { /* The current page can still be used when storage is disabled. */ }
     setAgeVerified(true);
   };
 
