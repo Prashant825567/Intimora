@@ -3,25 +3,20 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import { createApiHandler } from "./server/api-proxy.mjs";
 import { applySecurityHeaders } from "./server/security.mjs";
+import { DEFAULT_DISCOVERY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ mode }) => {
-  // These values are used only inside the Node process, never in client code.
+  // Only this explicitly public endpoint enters the bundle. Validate before
+  // Vite can embed it; server-only variables are never used by the client.
   const env = loadEnv(mode, __dirname, "");
-  const privateApi: Plugin = {
-    name: "private-api",
+  const discoveryUrl = publicHttpsUrl(env.INTIMORA_PUBLIC_API_DISCOVERY_URL || DEFAULT_DISCOVERY_URL);
+  if (!discoveryUrl) throw new Error("Invalid public discovery URL: use HTTPS without credentials, a query, or a fragment.");
+  const developmentSecurity: Plugin = {
+    name: "development-security",
     configureServer(server) {
-      const handler = createApiHandler({
-        discoveryUrl: env.API_DISCOVERY_URL,
-        upstreamUrl: env.API_PROXY_UPSTREAM,
-        allowedHosts: env.API_ALLOWED_HOSTS,
-        mediaAllowedHosts: env.API_MEDIA_ALLOWED_HOSTS,
-        tokenSecret: env.PROXY_TOKEN_SECRET,
-        allowLoopback: env.API_ALLOW_LOOPBACK === "1",
-      });
       server.middlewares.use((_req, res, next) => {
         applySecurityHeaders(res, { development: true, allowPreviewEmbed: true });
         next();
@@ -46,12 +41,12 @@ export default defineConfig(({ mode }) => {
         res.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
         return res.end("Not found");
       });
-      server.middlewares.use(handler);
     },
   };
 
   return {
     base: "/",
+    define: { __INTIMORA_DISCOVERY_URL__: JSON.stringify(discoveryUrl) },
     // Vite's default VITE_ prefix can accidentally expose secrets at build time.
     // Only explicitly public variables may be referenced by client code.
     envPrefix: "INTIMORA_PUBLIC_",
@@ -63,7 +58,7 @@ export default defineConfig(({ mode }) => {
       fs: { deny: [".env", ".env.*", "*.{crt,pem,key,p12,pfx}", "**/.git/**", "**/server/**"] },
     },
     build: { sourcemap: false },
-    plugins: [privateApi, react(), tailwindcss()],
+    plugins: [developmentSecurity, react(), tailwindcss()],
     resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   };
 });

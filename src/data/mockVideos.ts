@@ -8,6 +8,8 @@ export interface Video {
   category: string;
   tags: string[];
   videoUrl: string;
+  // Source of this public video; retained when the visitor's selection changes.
+  backendBase?: string;
   creator: string;
   creatorAvatar: string;
   uploadedAt: string;

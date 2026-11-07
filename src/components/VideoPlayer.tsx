@@ -117,9 +117,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
     setLikeCount((c) => (newLiked ? c + 1 : c - 1));
     
     try {
-      if (newLiked) {
-        await likeVideo(video.id);
-      }
+      await likeVideo(video.id, video.backendBase);
     } catch {
       // Revert on failure
       setLiked(!newLiked);
@@ -143,6 +141,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
           <video
             ref={videoRef}
             src={video.videoUrl}
+            crossOrigin="anonymous"
             className="w-full h-full object-contain"
             onClick={togglePlay}
             onEnded={() => setPlaying(false)}
@@ -296,6 +295,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleLike}
+              aria-label={liked ? "Unlike video" : "Like video"}
+              aria-pressed={liked}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border transition-all ${
                 liked
                   ? "bg-yellow-500/20 border-yellow-500 text-yellow-400"

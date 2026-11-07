@@ -38,18 +38,25 @@ async function availablePort() {
 }
 
 async function mockApi(page) {
-  await page.route("**/_api/**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname === "/_api/api/videos" || url.pathname === "/_api/api/search") {
-      return route.fulfill({ json: { ok: true, data: { videos, nextCursor: null } } });
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
+    if (url.hostname === "intimora.tmc78lxnu.workers.dev" && url.pathname === "/api/get-server") {
+      return route.fulfill({ headers, json: { ok: true, data: { server: "https://mobile-backend.example" } } });
+    }
+    if (url.hostname !== "mobile-backend.example") return route.continue();
+    if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+    if (url.pathname === "/api/videos" || url.pathname === "/api/search") {
+      return route.fulfill({ headers, json: { ok: true, data: { videos, nextCursor: null } } });
     }
     if (url.pathname.endsWith("/thumbnail")) {
-      return route.fulfill({ status: 200, contentType: "image/png", body: thumbnail });
+      return route.fulfill({ status: 200, headers, contentType: "image/png", body: thumbnail });
     }
     if (url.pathname.endsWith("/stream")) {
-      return route.fulfill({ status: 200, contentType: "video/mp4", body: Buffer.alloc(0) });
+      return route.fulfill({ status: 200, headers, contentType: "video/mp4", body: Buffer.alloc(0) });
     }
-    return route.fulfill({ json: { ok: true } });
+    return route.fulfill({ headers, json: { ok: true } });
   });
 }
 

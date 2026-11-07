@@ -27,6 +27,8 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
       <div className="relative overflow-hidden" style={{ aspectRatio: "16/9" }}>
         <img
           src={video.thumbnail}
+          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
           alt={video.title}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
           loading="lazy"

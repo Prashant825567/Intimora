@@ -5,9 +5,11 @@ export function applySecurityHeaders(res, { development = false, allowPreviewEmb
     "default-src 'self'",
     `script-src 'self'${development ? " 'unsafe-inline'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "media-src 'self' blob:",
-    `connect-src 'self'${development ? " ws: wss:" : ""}`,
+    // The static client contacts the public discovery service and its selected
+    // HTTPS backend directly; the rest of the policy remains restrictive.
+    "img-src 'self' data: https:",
+    "media-src 'self' blob: https:",
+    `connect-src 'self' https:${development ? " ws: wss:" : ""}`,
     "font-src 'self' data:",
     "object-src 'none'",
     "base-uri 'none'",

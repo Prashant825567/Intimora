@@ -1,10 +1,15 @@
 export interface VisitorRequestOptions {
+  discoveryUrl: string;
   fetcher?: typeof fetch;
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
   now?: () => number;
+  monotonicNow?: () => number;
+  reuseStoredSelection?: boolean;
 }
 
-export function createVisitorRequest(options?: VisitorRequestOptions): (
-  url: string,
-  init?: RequestInit,
-) => Promise<any>;
+export interface VisitorRequest {
+  selectBackend(): Promise<string>;
+  requestJson(path: string, init?: Pick<RequestInit, "method">, pinnedBackend?: string): Promise<{ body: any; backend: string; invalidate(): void }>;
+}
+
+export function createVisitorRequest(options: VisitorRequestOptions): VisitorRequest;
