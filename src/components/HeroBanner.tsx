@@ -30,7 +30,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
           className="absolute inset-0 transition-opacity duration-1000"
           style={{ opacity: i === current ? 1 : 0 }}
         >
-          <img src={v.thumbnail} alt={v.title} className="w-full h-full object-cover" />
+          <img src={v.thumbnail} crossOrigin="anonymous" referrerPolicy="no-referrer" alt={v.title} className="w-full h-full object-cover" />
           <div
             className="absolute inset-0"
             style={{

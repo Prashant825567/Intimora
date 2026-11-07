@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { once } from "node:events";
-import { createServer as createHttpServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import { test } from "node:test";
@@ -12,160 +10,234 @@ import { createServer as createViteServer } from "vite";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const browserPath = process.env.CHROMIUM_PATH || chromium.executablePath();
 const browserAvailable = existsSync(browserPath);
+const discovery = "https://discovery.example/api/get-server";
+const backends = { A: "https://backend-a.example", B: "https://backend-b.example" };
 const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
-
-async function listen(server) {
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  return `http://127.0.0.1:${server.address().port}`;
-}
 
 async function availablePort() {
   const server = createNetServer();
-  const address = await listen(server);
-  const port = new URL(address).port;
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const port = server.address().port;
   await new Promise((resolve) => server.close(resolve));
-  return Number(port);
+  return port;
 }
 
-async function close(server) {
-  if (!server) return;
-  server.closeAllConnections();
-  await new Promise((resolve) => server.close(resolve));
+function video(label, id = "video-1") {
+  return {
+    id, title: `Session ${label} sample`, category: "New", creator: "Test", likes: 2,
+    thumbnailUrl: `/api/videos/${id}/thumbnail`, streamUrl: `/api/videos/${id}/stream`, tags: ["demo"],
+    description: "A description with https://private.invalid/?token=secret-marker", password: "secret-marker",
+  };
 }
 
-function sendJson(res, value) {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(value));
+async function installMocks(context, state, { invalidDiscovery = false } = {}) {
+  await context.route("**/*", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const cors = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Range",
+      "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length",
+    };
+    if (request.url() === discovery) {
+      state.discoveries += 1;
+      const label = state.forcedNext || (state.discoveries % 2 ? "A" : "B");
+      state.forcedNext = null;
+      state.calls.push({ label: "discovery", url: request.url(), method: request.method(), headers: request.headers() });
+      const server = invalidDiscovery ? "https://private.example/?token=secret-marker" : backends[label];
+      return route.fulfill({ headers: cors, json: { ok: true, data: { server } } });
+    }
+    const label = Object.entries(backends).find(([, base]) => url.origin === base)?.[0];
+    if (!label) return route.continue();
+    state.calls.push({ label, url: request.url(), path: url.pathname, search: url.search, method: request.method(), headers: request.headers(), body: request.postData() });
+    if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    if (url.pathname === "/api/videos" || url.pathname === "/api/search") {
+      const isNext = url.searchParams.has("cursor");
+      const item = video(label, isNext ? "video-2" : "video-1");
+      if (isNext) {
+        item.thumbnailUrl = "https://tracker.example/image?token=secret-marker";
+        item.streamUrl = "https://tracker.example/stream?token=secret-marker";
+      }
+      return route.fulfill({ headers: cors, json: { ok: true, data: { videos: [item], nextCursor: isNext ? null : `next-${label}` } } });
+    }
+    if (url.pathname.endsWith("/thumbnail")) return route.fulfill({ status: 200, headers: cors, contentType: "image/png", body: image });
+    if (url.pathname.endsWith("/stream")) {
+      const content = "0123456789";
+      const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers().range || "");
+      if (range) {
+        const start = Number(range[1]);
+        const end = Math.min(range[2] ? Number(range[2]) : content.length - 1, content.length - 1);
+        return route.fulfill({ status: 206, headers: { ...cors, "Accept-Ranges": "bytes", "Content-Range": `bytes ${start}-${end}/${content.length}` }, contentType: "video/mp4", body: content.slice(start, end + 1) });
+      }
+      return route.fulfill({ status: 200, headers: { ...cors, "Accept-Ranges": "bytes" }, contentType: "video/mp4", body: content });
+    }
+    if (/\/api\/videos\/video-1(?:\/(?:like|share))?$/.test(url.pathname)) {
+      return route.fulfill({ headers: cors, json: { ok: true, data: video(label) } });
+    }
+    return route.fulfill({ status: 404, headers: cors, json: { ok: false, error: "private details" } });
+  });
 }
 
-test("real browser sessions discover independently and reuse only their own backend", {
+test("browser calls public discovery and backends directly, with per-tab routing and pinned actions", {
   skip: browserAvailable ? false : "Install Chromium with npx playwright-core install chromium, or set CHROMIUM_PATH",
   timeout: 120_000,
 }, async () => {
-  const calls = [];
-  const backends = ["A", "B"].map((label) => {
-    let base;
-    const server = createHttpServer((req, res) => {
-      const url = new URL(req.url, "http://internal.invalid");
-      calls.push({ backend: label, path: url.pathname, route: req.headers["x-intimora-route"] });
-      if (url.pathname === "/api/videos" || url.pathname === "/api/search") {
-        return sendJson(res, {
-          ok: true,
-          data: {
-            videos: [{ id: "video-1", title: `Session ${label} sample`, category: "New", creator: "Test", thumbnailUrl: `${base}/image`, tags: ["demo"] }],
-            nextCursor: null,
-          },
-        });
-      }
-      if (url.pathname === "/image") {
-        res.writeHead(200, { "Content-Type": "image/png" });
-        return res.end(image);
-      }
-      if (url.pathname === "/api/videos/video-1/stream") {
-        res.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": "0" });
-        return res.end();
-      }
-      if (url.pathname === "/api/videos/video-1") return sendJson(res, { ok: true });
-      res.writeHead(404);
-      res.end();
-    });
-    return { server, setBase(value) { base = value; } };
-  });
-  const addresses = [];
-  let discoveries = 0;
-  const discovery = createHttpServer((_req, res) => {
-    const address = addresses[discoveries % addresses.length];
-    discoveries += 1;
-    return sendJson(res, { ok: true, data: { server: address } });
-  });
-  const names = ["API_DISCOVERY_URL", "API_PROXY_UPSTREAM", "API_ALLOWED_HOSTS", "API_MEDIA_ALLOWED_HOSTS", "API_ALLOW_LOOPBACK", "PROXY_TOKEN_SECRET"];
-  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  const previous = process.env.INTIMORA_PUBLIC_API_DISCOVERY_URL;
+  process.env.INTIMORA_PUBLIC_API_DISCOVERY_URL = discovery;
+  const state = { discoveries: 0, forcedNext: null, calls: [] };
   let vite;
   let browser;
   try {
-    for (const backend of backends) {
-      const address = await listen(backend.server);
-      backend.setBase(address);
-      addresses.push(address);
-    }
-    process.env.API_DISCOVERY_URL = await listen(discovery);
-    process.env.API_PROXY_UPSTREAM = "";
-    process.env.API_ALLOWED_HOSTS = "";
-    process.env.API_MEDIA_ALLOWED_HOSTS = "";
-    process.env.API_ALLOW_LOOPBACK = "1";
-    process.env.PROXY_TOKEN_SECRET = "browser-routing-test-secret-0123456789";
     vite = await createViteServer({
-      configFile: path.join(root, "vite.config.ts"),
-      logLevel: "silent",
+      configFile: path.join(root, "vite.config.ts"), logLevel: "silent",
       server: { host: "127.0.0.1", port: await availablePort(), strictPort: true },
     });
     await vite.listen();
     const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
     browser = await chromium.launch({ executablePath: browserPath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
-    const contextA = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-    const contextB = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-    const pageA = await contextA.newPage();
-    const pageB = await contextB.newPage();
+    const contexts = await Promise.all(["A", "B"].map(async () => {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+      await installMocks(context, state);
+      await context.addInitScript(() => {
+        const originalNow = Date.now;
+        window.__timeOffset = 0;
+        Date.now = () => originalNow() + window.__timeOffset;
+        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+      });
+      return context;
+    }));
+    const [pageA, pageB] = await Promise.all(contexts.map((context) => context.newPage()));
     const browserRequests = [];
-    for (const page of [pageA, pageB]) page.on("request", (request) => browserRequests.push(request.url()));
-    await Promise.all([pageA.goto(base), pageB.goto(base)]);
-    await Promise.all([
-      pageA.getByRole("button", { name: /I AM 18/i }).click(),
-      pageB.getByRole("button", { name: /I AM 18/i }).click(),
-    ]);
-    await Promise.all([
-      pageA.getByRole("button", { name: /WATCH NOW/i }).waitFor(),
-      pageB.getByRole("button", { name: /WATCH NOW/i }).waitFor(),
-    ]);
-    const labels = await Promise.all([pageA, pageB].map((page) => page.locator(".hero-banner__title").textContent()));
-    assert.deepEqual(new Set(labels), new Set(["Session A sample", "Session B sample"]));
-    assert.equal(discoveries, 2, "each visitor contacts discovery once, even with React's concurrent initial requests");
-    const stored = await Promise.all([pageA, pageB].map((page) => page.evaluate(() => sessionStorage.getItem("intimora_visitor_route_v1"))));
-    assert.ok(stored.every(Boolean));
-    assert.notEqual(JSON.parse(stored[0]).token, JSON.parse(stored[1]).token);
-    for (const entry of stored) {
-      for (const address of addresses) assert.ok(!entry.includes(address), "session storage must not contain a backend address");
+    const pageErrors = [];
+    for (const page of [pageA, pageB]) {
+      page.on("request", (request) => browserRequests.push(request.url()));
+      page.on("pageerror", (error) => pageErrors.push(error.message));
     }
+    const discoveryResponses = [pageA, pageB].map((page) => page.waitForResponse((response) => response.url() === discovery));
+    await Promise.all([pageA.goto(base), pageB.goto(base), ...discoveryResponses]);
+    assert.equal(state.discoveries, 2, "discovery starts once for each arriving tab, before age confirmation");
+    assert.ok(!state.calls.some((call) => call.path === "/api/videos"), "catalog is not loaded before age confirmation");
+    await Promise.all([pageA, pageB].map((page) => page.getByRole("button", { name: /I AM 18/i }).click()));
+    await Promise.all([pageA, pageB].map((page) => page.getByRole("button", { name: /WATCH NOW/i }).waitFor()));
+    const labels = await Promise.all([pageA, pageB].map(async (page) => (await page.locator(".hero-banner__title").textContent()).includes(" A ") ? "A" : "B"));
+    assert.deepEqual(new Set(labels), new Set(["A", "B"]));
+    assert.equal(state.discoveries, 2);
+    const stored = await Promise.all([pageA, pageB].map((page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("intimora_direct_backend_v1")))));
+    assert.equal(stored[0].backend, backends[labels[0]]);
+    assert.equal(stored[1].backend, backends[labels[1]]);
+    await pageA.waitForFunction(() => document.querySelector(".hero-banner img")?.naturalWidth > 0);
+    assert.equal(await pageA.locator(".hero-banner img").first().getAttribute("src"), `${backends[labels[0]]}/api/videos/video-1/thumbnail`);
+    assert.ok(browserRequests.some((url) => url === discovery));
+    assert.ok(browserRequests.some((url) => url.startsWith(backends.A)));
+    assert.ok(browserRequests.some((url) => url.startsWith(backends.B)));
+    assert.ok(browserRequests.every((url) => !url.includes("/_api/")), "the frontend does not call the old proxy");
 
-    for (const [index, page] of [pageA, pageB].entries()) {
-      const label = labels[index].includes(" A ") ? "A" : "B";
-      const detail = page.waitForResponse((response) => response.url().endsWith("/_api/api/videos/video-1"));
-      await page.getByRole("button", { name: /WATCH NOW/i }).click();
-      await detail;
-      await page.getByRole("button", { name: "Close video player" }).click();
-      const search = page.getByRole("textbox", { name: "Search videos" });
-      await search.fill("demo");
-      await search.press("Enter");
-      await page.getByText("Search results for").waitFor();
-      assert.ok(calls.some((call) => call.backend === label && call.path === "/api/search"));
-      assert.ok(calls.some((call) => call.backend === label && call.path === "/api/videos/video-1"));
-    }
-    assert.equal(discoveries, 2, "search, detail and media reuse the session selection");
-    assert.ok(calls.every((call) => call.route === undefined), "selection tokens never reach the backend");
-    assert.ok(browserRequests.every((url) => !addresses.some((address) => url.startsWith(address))), "the browser never contacts an upstream directly");
-    assert.ok(browserRequests.every((url) => !url.startsWith(process.env.API_DISCOVERY_URL)), "the browser never contacts discovery directly");
     await pageA.reload();
     await pageA.getByRole("button", { name: /WATCH NOW/i }).waitFor();
-    assert.equal(discoveries, 2, "reloading the same tab reuses its unexpired selection");
+    assert.equal(state.discoveries, 2, "reload reuses this tab's unexpired selection");
 
-    const restricted = await browser.newContext();
-    await restricted.addInitScript(() => {
-      Object.defineProperty(window, "sessionStorage", { configurable: true, get() { throw new Error("storage disabled"); } });
+    const popupPromise = pageA.waitForEvent("popup");
+    await pageA.evaluate(() => window.open("/", "_blank"));
+    const popup = await popupPromise;
+    await popup.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    assert.equal(state.discoveries, 3, "a new tab discovers independently even if sessionStorage was copied");
+    await popup.close();
+
+    const original = labels[0];
+    const renewed = original === "A" ? "B" : "A";
+    const cursor = await pageA.evaluate(async () => {
+      const api = await import("/src/services/api.ts");
+      return (await api.fetchVideos()).data.nextCursor;
     });
-    const restrictedPage = await restricted.newPage();
-    await restrictedPage.goto(base);
-    await restrictedPage.getByRole("button", { name: /I AM 18/i }).click();
-    await restrictedPage.getByRole("button", { name: /WATCH NOW/i }).waitFor();
-    assert.equal(discoveries, 3, "a new visitor still works when session storage is blocked");
+    assert.equal(cursor.backend, backends[original]);
+    await pageA.evaluate(() => { window.__timeOffset = 61_000; });
+    state.forcedNext = renewed;
+    const search = pageA.getByRole("textbox", { name: "Search videos" });
+    await search.fill("demo");
+    await search.press("Enter");
+    await pageA.getByText("Search results for").waitFor();
+    assert.equal(state.discoveries, 4);
+    assert.ok(state.calls.some((call) => call.label === renewed && call.path === "/api/search"));
+    const paged = await pageA.evaluate(async (savedCursor) => {
+      const api = await import("/src/services/api.ts");
+      const result = await api.fetchVideos(savedCursor);
+      return { result, mapped: api.mapApiVideoToVideo(result.data.videos[0], result.data.backend) };
+    }, cursor);
+    assert.equal(paged.result.data.backend, backends[original]);
+    assert.equal(paged.mapped.thumbnail, `${backends[original]}/api/videos/video-2/thumbnail`);
+    assert.equal(paged.mapped.videoUrl, `${backends[original]}/api/videos/video-2/stream`);
+    assert.ok(!JSON.stringify(paged.mapped).includes("secret-marker"));
+    assert.ok(!Object.hasOwn(paged.result.data.videos[0], "password"));
+    assert.ok(state.calls.some((call) => call.label === original && call.path === "/api/videos" && call.search.includes(`cursor=next-${original}`)));
+
+    await search.fill("");
+    const detailResponse = pageA.waitForResponse((response) => response.url() === `${backends[original]}/api/videos/video-1`);
+    await pageA.getByRole("button", { name: /WATCH NOW/i }).click();
+    await detailResponse;
+    const player = pageA.locator("#player-container");
+    await player.waitFor();
+    assert.equal(await player.locator("video").getAttribute("src"), `${backends[original]}/api/videos/video-1/stream`);
+    const range = await pageA.evaluate(async () => {
+      const response = await fetch(document.querySelector("video").src, { credentials: "omit", headers: { Range: "bytes=2-5" } });
+      return { status: response.status, contentRange: response.headers.get("content-range"), body: await response.text() };
+    });
+    assert.deepEqual(range, { status: 206, contentRange: "bytes 2-5/10", body: "2345" });
+    const likeResponse = pageA.waitForResponse((response) => response.url() === `${backends[original]}/api/videos/video-1/like` && response.request().method() === "POST");
+    await pageA.getByRole("button", { name: "Like video" }).click();
+    await likeResponse;
+    const unlikeResponse = pageA.waitForResponse((response) => response.url() === `${backends[original]}/api/videos/video-1/like` && response.request().method() === "POST");
+    await pageA.getByRole("button", { name: "Unlike video" }).click();
+    await unlikeResponse;
+    assert.ok(state.calls.some((call) => call.label === original && call.path.endsWith("/like") && call.method === "POST" && call.body === "{}"));
+
+    await pageA.evaluate(() => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text) => { window.__copied = text; } } });
+    });
+    await pageA.getByRole("button", { name: "Share", exact: true }).click();
+    const shareResponse = pageA.waitForResponse((response) => response.url() === `${backends[original]}/api/videos/video-1/share` && response.request().method() === "POST");
+    await pageA.getByRole("button", { name: "Copy", exact: true }).click();
+    await shareResponse;
+    const sharedUrl = await pageA.evaluate(() => window.__copied);
+    assert.equal(sharedUrl, `${base}/watch/video-1`);
+    assert.ok(!sharedUrl.includes(backends[original]));
+    assert.ok(state.calls.some((call) => call.label === original && call.path.endsWith("/share") && call.method === "POST"));
+    assert.ok(state.calls.filter((call) => call.label !== "discovery").every((call) => !call.headers.cookie && !call.headers.authorization));
+    assert.deepEqual(pageErrors, []);
+
+    const recipient = await browser.newContext();
+    await installMocks(recipient, state);
+    const sharedPage = await recipient.newPage();
+    await sharedPage.goto(sharedUrl);
+    await sharedPage.getByRole("button", { name: /I AM 18/i }).click();
+    await sharedPage.locator("#player-container").waitFor();
+    assert.match(await sharedPage.locator("#player-container video").getAttribute("src"), /^https:\/\/backend-[ab]\.example\/api\/videos\/video-1\/stream$/);
+    await recipient.close();
+
+    const denied = await browser.newContext();
+    await installMocks(denied, state);
+    await denied.addInitScript(() => {
+      Object.defineProperty(window, "sessionStorage", { configurable: true, get() { throw new Error("storage denied"); } });
+    });
+    const deniedPage = await denied.newPage();
+    await deniedPage.goto(base);
+    await deniedPage.getByRole("button", { name: /I AM 18/i }).click();
+    await deniedPage.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    await denied.close();
+
+    const bad = await browser.newContext();
+    await installMocks(bad, state, { invalidDiscovery: true });
+    const badPage = await bad.newPage();
+    await badPage.goto(base);
+    await badPage.getByRole("button", { name: /I AM 18/i }).click();
+    await badPage.getByRole("heading", { name: "Content Unavailable" }).waitFor();
+    const errorText = await badPage.locator("body").innerText();
+    assert.ok(!errorText.includes("private.example") && !errorText.includes("secret-marker"));
+    await bad.close();
   } finally {
     await browser?.close();
     await vite?.close();
-    await close(discovery);
-    for (const backend of backends) await close(backend.server);
-    for (const name of names) {
-      if (previous[name] === undefined) delete process.env[name];
-      else process.env[name] = previous[name];
-    }
+    if (previous === undefined) delete process.env.INTIMORA_PUBLIC_API_DISCOVERY_URL;
+    else process.env.INTIMORA_PUBLIC_API_DISCOVERY_URL = previous;
   }
 });

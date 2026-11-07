@@ -1,17 +1,31 @@
 services:
   - type: web
     name: intimora
-    runtime: node
+    runtime: static
     branch: master
     buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm start
-    healthCheckPath: /
+    staticPublishPath: ./dist
     autoDeployTrigger: commit
-    envVars:
-      - key: NODE_ENV
-        value: production
-      # Supply this privately in Render; it must not have a VITE_ prefix.
-      - key: API_DISCOVERY_URL
-        sync: false
-      - key: PROXY_TOKEN_SECRET
-        generateValue: true
+    routes:
+      - type: rewrite
+        source: /watch/*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-DNS-Prefetch-Control
+        value: "off"

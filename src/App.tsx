@@ -8,7 +8,8 @@ import ShareModal from "./components/ShareModal";
 import Footer from "./components/Footer";
 import type { Video } from "./data/mockVideos";
 import { TrendingUp, Flame, Sparkles, Crown, ChevronRight, Loader2, Upload, Wifi, WifiOff } from "lucide-react";
-import { fetchVideos, searchVideos, fetchVideoDetail, mapApiVideoToVideo } from "./services/api";
+import { fetchVideos, searchVideos, fetchVideoDetail, mapApiVideoToVideo, primeBackendSelection } from "./services/api";
+import type { BackendCursor } from "./services/api";
 
 const AGE_VERIFIED_KEY = "intimora_age_verified";
 
@@ -25,9 +26,14 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
-  const [nextCursor, setNextCursor] = useState<string | number | null>(null);
+  const [nextCursor, setNextCursor] = useState<BackendCursor | null>(null);
   const [apiError, setApiError] = useState(false);
+  const [sharedVideoUnavailable, setSharedVideoUnavailable] = useState(false);
   const loaderRef = useRef<HTMLDivElement>(null);
+  const sharedVideoRequest = useRef<ReturnType<typeof fetchVideoDetail> | null>(null);
+
+  // Discovery starts on arrival; no catalog or media is requested before age confirmation.
+  useEffect(() => { primeBackendSelection().catch(() => {}); }, []);
 
   // Age gate confirm
   const handleAgeConfirm = () => {
@@ -46,7 +52,7 @@ function App() {
       try {
         const res = await fetchVideos();
         if (res.ok && res.data) {
-          const apiVids = res.data.videos.map(mapApiVideoToVideo);
+          const apiVids = res.data.videos.map((video) => mapApiVideoToVideo(video, res.data.backend));
           setVideos(apiVids);
           setNextCursor(res.data.nextCursor);
           setHasMore(!!res.data.nextCursor);
@@ -68,6 +74,21 @@ function App() {
     loadInitial();
   }, [ageVerified]);
 
+  // Shared links resolve through the recipient's own selected backend.
+  useEffect(() => {
+    if (!ageVerified) return;
+    const match = /^\/watch\/([A-Za-z0-9_-]{1,128})\/?$/.exec(window.location.pathname);
+    if (!match) return;
+    let cancelled = false;
+    sharedVideoRequest.current ??= fetchVideoDetail(match[1]);
+    sharedVideoRequest.current.then(({ video, backend }) => {
+      if (cancelled) return;
+      if (video) setActiveVideo(mapApiVideoToVideo(video, backend));
+      else setSharedVideoUnavailable(true);
+    }).catch(() => { if (!cancelled) setSharedVideoUnavailable(true); });
+    return () => { cancelled = true; };
+  }, [ageVerified]);
+
   // Infinite scroll - load more from API
   const loadMore = useCallback(async () => {
     if (loading || !hasMore || !nextCursor) return;
@@ -75,7 +96,7 @@ function App() {
     try {
       const res = await fetchVideos(nextCursor);
       if (res.ok && res.data && res.data.videos.length > 0) {
-        const apiVids = res.data.videos.map(mapApiVideoToVideo);
+        const apiVids = res.data.videos.map((video) => mapApiVideoToVideo(video, res.data.backend));
         setVideos((prev) => [...prev, ...apiVids]);
         setNextCursor(res.data.nextCursor);
         setHasMore(!!res.data.nextCursor);
@@ -111,7 +132,7 @@ function App() {
     try {
       const res = await searchVideos(q);
       if (res.ok && res.data) {
-        setSearchResults(res.data.videos.map(mapApiVideoToVideo));
+        setSearchResults(res.data.videos.map((video) => mapApiVideoToVideo(video, res.data.backend)));
       } else {
         setSearchResults([]);
       }
@@ -125,7 +146,7 @@ function App() {
   const handlePlayVideo = async (v: Video) => {
     setActiveVideo(v);
     try {
-      await fetchVideoDetail(v.id);
+      await fetchVideoDetail(v.id, v.backendBase);
     } catch {
       // Playback can continue even if the view count cannot be updated.
     }
@@ -158,6 +179,10 @@ function App() {
 
       {/* Main content */}
       <main className="site-main max-w-[1600px] mx-auto px-4 pt-24 pb-10">
+
+        {sharedVideoUnavailable && !initialLoading && !apiError && (
+          <p role="status" className="mb-4 text-center text-sm text-gray-400">This video is currently unavailable.</p>
+        )}
 
         {/* INITIAL LOADING STATE */}
         {initialLoading && (
