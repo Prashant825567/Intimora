@@ -1,11 +1,17 @@
 services:
   - type: web
     name: intimora
-    runtime: static
+    runtime: node
     branch: master
-    buildCommand: npm ci && npm run build
-    staticPublishPath: ./dist
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /
     autoDeployTrigger: commit
     envVars:
-      - key: VITE_API_DISCOVERY_URL
-        value: https://intimora.tmc78lxnu.workers.dev/api/get-server
+      - key: NODE_ENV
+        value: production
+      # Supply this privately in Render; it must not have a VITE_ prefix.
+      - key: API_DISCOVERY_URL
+        sync: false
+      - key: PROXY_TOKEN_SECRET
+        generateValue: true

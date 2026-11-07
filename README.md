@@ -1,34 +1,55 @@
 # Intimora
 
-Intimora is a React + Vite frontend that loads its catalog and media from the real Intimora API. At runtime it asks the Worker discovery endpoint which API server to use; the production build does not pin the API base to a fixed host.
+Intimora is a React + Vite frontend with a Node server. The browser uses only same-origin `/_api` routes; the server discovers and contacts the upstream API privately. Catalog responses are reduced to the fields used by the UI, media URLs and pagination cursors are encrypted into short-lived opaque tokens, and errors never forward upstream details. Media byte ranges are preserved.
 
-## Deploy as a Render Static Site
+## Configuration
 
-This repository is configured for a Render **Static Site** in `render.yaml`.
+Copy `.env.example` to `.env` for local development and set **one** of these server-only variables:
 
-1. Push the project to GitHub on the `master` branch.
-2. In Render, select **New → Blueprint**, connect the repository, and apply `render.yaml`.
-3. Render builds the app and publishes the `dist` directory. New commits to `master` trigger another deploy.
-4. Ensure the API backend allows the exact Render origin that Render assigns to the site. If you add a custom domain, allow that origin too.
+- `API_DISCOVERY_URL`: the HTTPS discovery endpoint that returns `{ "ok": true, "data": { "server": "https://…" } }`.
+- `API_PROXY_UPSTREAM`: an optional fixed HTTPS API base, used instead of discovery when set.
 
-### Render settings (if creating the service manually)
+Keep these values and all credentials on the server. Never use a `VITE_` or `INTIMORA_PUBLIC_` prefix for secrets, put secrets in `public/`, or commit `.env` files, private keys or credentials. `.gitignore` prevents newly added local env files from being tracked; it cannot remove anything already committed in Git history.
 
-- **Service type:** Static Site
-- **Build Command:** `npm ci && npm run build`
-- **Publish Directory:** `dist`
-- **Start Command:** none (static sites do not run a start process)
-- **Environment variable:**
-  - `VITE_API_DISCOVERY_URL` = `https://intimora.tmc78lxnu.workers.dev/api/get-server`
+Additional settings:
 
-This is the discovery endpoint, not a fixed API base. The browser reads `data.server` from its response and uses that URL for catalog, search, thumbnails, and video requests. The environment value is public, not a secret.
+- `API_ALLOWED_HOSTS` (recommended): comma-separated, exact API hostnames permitted from discovery. Update this list when legitimate upstream hosts change. Wildcards are not accepted.
+- `API_MEDIA_ALLOWED_HOSTS`: comma-separated, exact external media CDN hostnames. Media on the API origin works automatically; other hosts and redirects are blocked unless explicitly allowed. If an external media URL is not allowed, the standard `/api/videos/:id/thumbnail` or `/stream` API route is used instead.
+- `PROXY_TOKEN_SECRET`: at least 32 random characters, shared by all running instances. Render can generate this automatically. Without it, a random per-process key is used and pagination/media tokens stop working after a restart or when requests reach another instance. Tokens expire after 24 hours.
+- `API_ALLOW_LOOPBACK=1`: **development only**, for testing against a local HTTP API. Production rejects private and loopback network targets.
 
-The API must allow the Render origin through CORS, and its media routes must allow cross-origin resource loading while preserving byte ranges (`206`, `Content-Range`, `Accept-Ranges`).
+The proxy permits only the catalog, search, video, thumbnail, stream, like and share routes. It does not proxy admin endpoints, cookies, browser authorization headers, arbitrary destination URLs, or raw upstream error responses. Public upstreams must use HTTPS on its standard port. Production adds a restrictive Content Security Policy and other security headers. Upstream image and video content types and redirects are restricted; configure the media host allowlist when needed.
 
 ## Local development
 
 ```bash
+cp .env.example .env  # add the discovery URL or fixed upstream privately
 npm ci
-npm run dev
+npm run dev           # http://localhost:5173
+npm test
+npm run typecheck
 ```
 
-Vite discovers the current API host from the same Worker and uses a development proxy. The production static build instead uses the Worker discovery response directly in the browser.
+The development server can start even if discovery is unavailable; visitors see a generic retry message rather than a server address or error details.
+
+To run the production server locally:
+
+```bash
+npm run build
+PORT=5173 npm start
+```
+
+For an embedded development preview only, `ALLOW_PREVIEW_EMBED=1` disables the production framing restriction. Do not set it on the public deployment.
+
+## Deploy on Render
+
+The Blueprint in `render.yaml` now creates a **Node Web Service**, not a Static Site: a server is necessary to keep upstream configuration and response details out of the browser.
+
+1. Create or update a Render Blueprint from this repository. An existing Static Site may need to be replaced by a new Web Service; configure its custom domain and deployment branch as appropriate.
+2. Set `API_DISCOVERY_URL` privately in Render's environment settings. Alternatively, configure `API_PROXY_UPSTREAM` and leave discovery unset. Set the host allowlists when applicable.
+3. Render runs `npm ci --include=dev && npm run build`, then `npm start`. `PROXY_TOKEN_SECRET` is generated by the Blueprint and must be the same across instances.
+4. Confirm that your upstream permits server-to-server requests and that its media routes support `Range`, `206`, `Content-Range` and `Accept-Ranges`. If media redirects to a CDN, add that exact hostname to `API_MEDIA_ALLOWED_HOSTS`.
+
+## Security boundaries
+
+A URL is not an authentication secret, and hiding it is not access control. The previous client and public discovery endpoint already exposed the API address; anyone who recorded it or can query that existing endpoint may still know it. Restrict or replace that discovery endpoint and protect the upstream API itself with appropriate authentication, authorization, rate limiting and network controls. Rotate any actual credentials that were ever exposed or committed. The client-side 18+ confirmation is not identity or age verification. No frontend or proxy can guarantee that future secrets are never leaked; review upstream responses, deployment configuration and access controls as well.

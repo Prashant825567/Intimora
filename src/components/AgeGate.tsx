@@ -96,7 +96,7 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
             </button>
           </div>
 
-          <p className="text-gray-700 text-xs mt-5">🔒 100% Secure & Private Access</p>
+          <p className="text-gray-700 text-xs mt-5">Adults only • Your privacy matters</p>
         </div>
       </div>
     </div>

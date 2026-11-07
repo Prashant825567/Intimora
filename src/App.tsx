@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import AgeGate from "./components/AgeGate";
 import Navbar from "./components/Navbar";
 import HeroBanner from "./components/HeroBanner";
@@ -8,7 +8,7 @@ import ShareModal from "./components/ShareModal";
 import Footer from "./components/Footer";
 import type { Video } from "./data/mockVideos";
 import { TrendingUp, Flame, Sparkles, Crown, ChevronRight, Loader2, Upload, Wifi, WifiOff } from "lucide-react";
-import { fetchVideos, searchVideos, fetchVideoDetail, mapApiVideoToVideo, DISCOVERY_URL, getApiBase, setApiBase } from "./services/api";
+import { fetchVideos, searchVideos, fetchVideoDetail, mapApiVideoToVideo } from "./services/api";
 
 const AGE_VERIFIED_KEY = "intimora_age_verified";
 
@@ -42,24 +42,6 @@ function App() {
       setInitialLoading(true);
       setLoading(true);
       try {
-        // Resolve the current API host at runtime from the Worker. Production
-        // has no hard-coded API base; development can continue through Vite's
-        // proxy if discovery is temporarily unavailable.
-        try {
-          const discoveryRes = await fetch(DISCOVERY_URL);
-          if (!discoveryRes.ok) throw new Error(`Discovery returned HTTP ${discoveryRes.status}`);
-          const discoveryData = await discoveryRes.json();
-          const discoveredServer = discoveryData?.ok && typeof discoveryData.data?.server === "string"
-            ? discoveryData.data.server
-            : "";
-          if (!discoveredServer) throw new Error("Discovery response did not include a server URL");
-          setApiBase(discoveredServer);
-          console.log("API discovered:", discoveredServer);
-        } catch (discoveryError) {
-          if (!import.meta.env.DEV) throw discoveryError;
-          console.warn("API discovery failed; trying the local Vite proxy.", discoveryError);
-        }
-
         const res = await fetchVideos();
         if (res.ok && res.data) {
           const apiVids = res.data.videos.map(mapApiVideoToVideo);
@@ -71,8 +53,7 @@ function App() {
           setVideos([]);
           setHasMore(false);
         }
-      } catch (err) {
-        console.error("API connection error:", err);
+      } catch {
         setApiError(true);
         setVideos([]);
         setHasMore(false);
@@ -99,8 +80,7 @@ function App() {
       } else {
         setHasMore(false);
       }
-    } catch (e) {
-      console.error("Load more error:", e);
+    } catch {
       setHasMore(false);
     }
     setLoading(false);
@@ -133,8 +113,7 @@ function App() {
       } else {
         setSearchResults([]);
       }
-    } catch (err) {
-      console.error("Search error:", err);
+    } catch {
       setSearchResults([]);
     }
     setLoading(false);
@@ -145,30 +124,10 @@ function App() {
     setActiveVideo(v);
     try {
       await fetchVideoDetail(v.id);
-    } catch (err) {
-      console.error("Failed to update views", err);
+    } catch {
+      // Playback can continue even if the view count cannot be updated.
     }
   };
-
-  // Prevent right-click
-  const handleContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-  };
-
-  // Disable devtools shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (
-        e.key === "F12" ||
-        (e.ctrlKey && e.shiftKey && ["I", "J", "C"].includes(e.key)) ||
-        (e.ctrlKey && e.key === "U")
-      ) {
-        e.preventDefault();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []);
 
   const displayedVideos = searchResults ?? videos;
 
@@ -187,7 +146,6 @@ function App() {
     <div
       className="min-h-screen"
       style={{ background: "#080808", color: "#fff" }}
-      onContextMenu={handleContextMenu}
     >
       {/* Navbar */}
       <Navbar
@@ -206,8 +164,7 @@ function App() {
               <img src="/logo.png" alt="Intimora" className="w-20 h-20 object-contain animate-pulse" />
             </div>
             <Loader2 className="w-8 h-8 animate-spin mb-4" style={{ color: "#c9a84c" }} />
-            <p className="text-gray-500 text-sm tracking-widest uppercase">Loading content from server...</p>
-            <p className="text-gray-700 text-xs mt-2 font-mono">{getApiBase()}</p>
+            <p className="text-gray-500 text-sm tracking-widest uppercase">Loading content...</p>
           </div>
         )}
 
@@ -217,9 +174,8 @@ function App() {
             <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6" style={{ background: "rgba(239,68,68,0.1)", border: "2px solid rgba(239,68,68,0.3)" }}>
               <WifiOff className="w-10 h-10 text-red-500" />
             </div>
-            <h2 className="text-white text-2xl font-bold mb-2">Server Connection Failed</h2>
-            <p className="text-gray-500 text-sm mb-1">Could not connect to backend API</p>
-            <p className="text-gray-700 text-xs font-mono mb-6">{getApiBase()}</p>
+            <h2 className="text-white text-2xl font-bold mb-2">Content Unavailable</h2>
+            <p className="text-gray-500 text-sm mb-6 text-center">We could not load content right now. Please try again.</p>
             <button
               onClick={() => window.location.reload()}
               className="px-6 py-3 rounded-full font-bold text-sm transition-all hover:scale-105"
@@ -241,22 +197,12 @@ function App() {
             </div>
             <h2 className="text-white text-2xl font-bold mb-2">No Videos Yet</h2>
             <p className="text-gray-500 text-sm mb-1 text-center max-w-md">
-              Your backend is connected successfully! Upload videos through the admin panel to see them here.
+              New videos will appear here when available.
             </p>
             <div className="flex items-center gap-2 mt-3 mb-6">
               <Wifi className="w-4 h-4 text-green-500" />
-              <span className="text-green-500 text-xs font-semibold">API Connected</span>
-              <span className="text-gray-700 text-xs font-mono ml-2">{getApiBase()}</span>
+              <span className="text-green-500 text-xs font-semibold">Content service available</span>
             </div>
-            <a
-              href={`${getApiBase()}/admin`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-6 py-3 rounded-full font-bold text-sm transition-all hover:scale-105"
-              style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000", boxShadow: "0 4px 20px rgba(201,168,76,0.4)" }}
-            >
-              🎬 Open Admin Panel → Upload Videos
-            </a>
           </div>
         )}
 
@@ -383,7 +329,7 @@ function App() {
           <div className="text-center py-20">
             <div className="text-6xl mb-4">🔍</div>
             <h3 className="text-white text-xl font-bold mb-2">No results found for "{searchQuery}"</h3>
-            <p className="text-gray-500">No videos available yet. Upload videos through admin panel first.</p>
+            <p className="text-gray-500">No videos are available yet.</p>
           </div>
         )}
 

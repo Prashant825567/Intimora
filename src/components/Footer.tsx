@@ -19,15 +19,15 @@ const Footer: React.FC = () => {
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2 text-gray-600 text-xs">
               <Shield className="w-4 h-4 text-green-500" />
-              <span>SSL Secured</span>
+              <span>Content Safety</span>
             </div>
             <div className="flex items-center gap-2 text-gray-600 text-xs">
               <Lock className="w-4 h-4 text-blue-500" />
-              <span>Private Access</span>
+              <span>Privacy Matters</span>
             </div>
             <div className="flex items-center gap-2 text-gray-600 text-xs">
               <Eye className="w-4 h-4 text-yellow-500" />
-              <span>18+ Verified</span>
+              <span>Adults Only</span>
             </div>
           </div>
         </div>

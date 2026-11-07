@@ -10,10 +10,10 @@ interface ShareModalProps {
 
 const ShareModal: React.FC<ShareModalProps> = ({ video, onClose }) => {
   const [copied, setCopied] = useState(false);
-  const shareUrl = `${window.location.origin}/watch/${video.id}`;
+  const shareUrl = `${window.location.origin}/watch/${encodeURIComponent(video.id)}`;
 
   const trackShare = () => {
-    shareVideo(video.id).catch(console.error);
+    shareVideo(video.id).catch(() => {});
   };
 
   const handleCopy = async () => {
@@ -34,7 +34,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ video, onClose }) => {
       color: "#1DA1F2",
       action: () => {
         trackShare();
-        window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(video.title)}`, "_blank");
+        window.open(`https://twitter.com/intent/tweet?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(video.title)}`, "_blank", "noopener,noreferrer");
       },
     },
     {
@@ -43,7 +43,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ video, onClose }) => {
       color: "#1877F2",
       action: () => {
         trackShare();
-        window.open(`https://facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank");
+        window.open(`https://facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank", "noopener,noreferrer");
       },
     },
     {
@@ -52,7 +52,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ video, onClose }) => {
       color: "#25D366",
       action: () => {
         trackShare();
-        window.open(`https://wa.me/?text=${encodeURIComponent(video.title + " " + shareUrl)}`, "_blank");
+        window.open(`https://wa.me/?text=${encodeURIComponent(video.title + " " + shareUrl)}`, "_blank", "noopener,noreferrer");
       },
     },
     {
