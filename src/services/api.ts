@@ -1,32 +1,15 @@
-export const DISCOVERY_URL = import.meta.env.VITE_API_DISCOVERY_URL
-  || "https://intimora.tmc78lxnu.workers.dev/api/get-server";
+import type { Video } from "../data/mockVideos";
 
-// Production has no fixed API host: the server is set from the Worker discovery
-// response at runtime. Local development uses Vite's proxy path.
-let API_BASE = import.meta.env.DEV ? "/_api" : "";
+// All browser requests are same-origin. The server resolves and contacts the
+// upstream privately, and only returns the fields needed by the UI.
+const API_BASE = "/_api";
+const videoPath = (id: string) => `${API_BASE}/api/videos/${encodeURIComponent(id)}`;
 
-export const setApiBase = (url: string) => {
-  const discoveredBase = url.trim().replace(/\/+$/, "");
-  if (!discoveredBase) throw new Error("API discovery returned an empty server URL");
-  API_BASE = import.meta.env.DEV ? "/_api" : discoveredBase;
+const safeMediaUrl = (url: string | undefined, id: string, type: "thumbnail" | "stream"): string => {
+  if (url && /^\/_api\/media\/[A-Za-z0-9_-]+$/.test(url)) return url;
+  return `${videoPath(id)}/${type}`;
 };
 
-export const getApiBase = () => API_BASE;
-
-// Helper: convert relative URL from API to full URL
-const toFullUrl = (urlOrPath: string | undefined, id: string, type: "thumbnail" | "stream"): string => {
-  if (!urlOrPath) {
-    return `${getApiBase()}/api/videos/${id}/${type}`;
-  }
-  // Already a full URL
-  if (urlOrPath.startsWith("http://") || urlOrPath.startsWith("https://")) {
-    return urlOrPath;
-  }
-  // Relative path like "/api/videos/.../thumbnail"
-  return `${getApiBase()}${urlOrPath}`;
-};
-
-// Format duration seconds -> "mm:ss"
 const formatDuration = (seconds: number | string | undefined): string => {
   if (!seconds || seconds === 0) return "0:00";
   const secs = typeof seconds === "string" ? parseFloat(seconds) : seconds;
@@ -36,7 +19,6 @@ const formatDuration = (seconds: number | string | undefined): string => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
-// Format views count
 const formatViews = (views: number | undefined): string => {
   if (!views || views === 0) return "0";
   if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
@@ -44,7 +26,6 @@ const formatViews = (views: number | undefined): string => {
   return views.toString();
 };
 
-// Format timestamp -> "X days ago"
 const formatDate = (createdAt: number | string | undefined): string => {
   if (!createdAt) return "Just now";
   const ts = typeof createdAt === "string" ? parseInt(createdAt) : createdAt;
@@ -69,66 +50,46 @@ export interface ApiVideo {
   category?: string;
   tags?: string[];
   creator?: string;
-  creatorAvatar?: string;
   uploadedAt?: string;
   createdAt?: number | string;
   thumbnailUrl?: string;
   streamUrl?: string;
 }
 
+const requestJson = async (url: string, options?: RequestInit) => {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error("Content is temporarily unavailable");
+  return response.json();
+};
+
 export const fetchVideos = async (cursor?: string | null | number) => {
-  const base = getApiBase();
-  const url = cursor ? `${base}/api/videos?cursor=${cursor}` : `${base}/api/videos`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Failed to fetch videos");
-  return res.json();
+  const params = new URLSearchParams();
+  if (cursor !== undefined && cursor !== null && cursor !== "") params.set("cursor", String(cursor));
+  const query = params.size ? `?${params}` : "";
+  return requestJson(`${API_BASE}/api/videos${query}`);
 };
 
-export const fetchVideoDetail = async (id: string) => {
-  const res = await fetch(`${getApiBase()}/api/videos/${id}`);
-  if (!res.ok) throw new Error("Failed to fetch video detail");
-  return res.json();
-};
+export const fetchVideoDetail = (id: string) => requestJson(videoPath(id));
+export const searchVideos = (query: string) =>
+  requestJson(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
+export const likeVideo = (id: string) => requestJson(`${videoPath(id)}/like`, { method: "POST" });
+export const shareVideo = (id: string) => requestJson(`${videoPath(id)}/share`, { method: "POST" });
+export const getThumbnailUrl = (id: string) => `${videoPath(id)}/thumbnail`;
+export const getStreamUrl = (id: string) => `${videoPath(id)}/stream`;
 
-export const searchVideos = async (query: string) => {
-  const res = await fetch(`${getApiBase()}/api/search?q=${encodeURIComponent(query)}`);
-  if (!res.ok) throw new Error("Failed to search videos");
-  return res.json();
-};
-
-export const likeVideo = async (id: string) => {
-  const res = await fetch(`${getApiBase()}/api/videos/${id}/like`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to like video");
-  return res.json();
-};
-
-export const shareVideo = async (id: string) => {
-  const res = await fetch(`${getApiBase()}/api/videos/${id}/share`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to share video");
-  return res.json();
-};
-
-export const getThumbnailUrl = (id: string) => `${getApiBase()}/api/videos/${id}/thumbnail`;
-export const getStreamUrl = (id: string) => `${getApiBase()}/api/videos/${id}/stream`;
-
-import type { Video } from "../data/mockVideos";
-
-export const mapApiVideoToVideo = (apiVideo: ApiVideo): Video => {
-  return {
-    id: apiVideo.id,
-    title: apiVideo.title || "Untitled Video",
-    // Fix relative thumbnailUrl -> full URL
-    thumbnail: toFullUrl(apiVideo.thumbnailUrl, apiVideo.id, "thumbnail"),
-    duration: formatDuration(apiVideo.duration),
-    views: formatViews(apiVideo.views),
-    likes: apiVideo.likes || 0,
-    category: apiVideo.category || "New",
-    tags: apiVideo.tags || [],
-    // Fix relative streamUrl -> full URL
-    videoUrl: toFullUrl(apiVideo.streamUrl, apiVideo.id, "stream"),
-    creator: apiVideo.creator || "Intimora",
-    creatorAvatar: apiVideo.creatorAvatar || `https://i.pravatar.cc/40?img=${Math.floor(Math.random() * 10) + 1}`,
-    uploadedAt: apiVideo.uploadedAt || formatDate(apiVideo.createdAt),
-    description: apiVideo.description || "",
-  };
-};
+export const mapApiVideoToVideo = (apiVideo: ApiVideo): Video => ({
+  id: apiVideo.id,
+  title: apiVideo.title || "Untitled Video",
+  thumbnail: safeMediaUrl(apiVideo.thumbnailUrl, apiVideo.id, "thumbnail"),
+  duration: formatDuration(apiVideo.duration),
+  views: formatViews(apiVideo.views),
+  likes: apiVideo.likes || 0,
+  category: apiVideo.category || "New",
+  tags: apiVideo.tags || [],
+  videoUrl: safeMediaUrl(apiVideo.streamUrl, apiVideo.id, "stream"),
+  creator: apiVideo.creator || "Intimora",
+  // Avoid exposing arbitrary external avatar URLs or sending viewer IPs to them.
+  creatorAvatar: "/logo.png",
+  uploadedAt: apiVideo.uploadedAt || formatDate(apiVideo.createdAt),
+  description: apiVideo.description || "",
+});

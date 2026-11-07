@@ -120,8 +120,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
       if (newLiked) {
         await likeVideo(video.id);
       }
-    } catch (e) {
-      console.error("Failed to like video", e);
+    } catch {
       // Revert on failure
       setLiked(!newLiked);
       setLikeCount((c) => (newLiked ? c - 1 : c + 1));
