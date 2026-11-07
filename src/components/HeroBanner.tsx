@@ -22,7 +22,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
   const video = featured[current];
 
   return (
-    <div className="relative w-full overflow-hidden rounded-2xl" style={{ height: "380px" }}>
+    <div className="hero-banner relative w-full h-[380px] overflow-hidden rounded-2xl">
       {/* Background image */}
       {featured.map((v, i) => (
         <div
@@ -42,7 +42,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
       ))}
 
       {/* Content */}
-      <div className="absolute inset-0 flex flex-col justify-center px-8 md:px-12 max-w-2xl">
+      <div className="hero-banner__content absolute inset-0 flex flex-col justify-center px-8 md:px-12 max-w-2xl">
         {/* Badge */}
         <div className="flex items-center gap-2 mb-3">
           <span
@@ -56,11 +56,11 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
           </div>
         </div>
 
-        <h2 className="text-white text-3xl md:text-4xl font-black leading-tight mb-2 drop-shadow-lg">
+        <h2 className="hero-banner__title text-white text-3xl md:text-4xl font-black leading-tight mb-2 drop-shadow-lg">
           {video.title}
         </h2>
-        <p className="text-gray-400 text-sm mb-1">{video.creator}</p>
-        <div className="flex items-center gap-3 text-sm text-gray-400 mb-5">
+        <p className="hero-banner__creator text-gray-400 text-sm mb-1">{video.creator}</p>
+        <div className="hero-banner__meta flex items-center gap-3 text-sm text-gray-400 mb-5">
           <span>👁 {video.views} views</span>
           <span>•</span>
           <span>⏱ {video.duration}</span>
@@ -72,7 +72,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
 
         <button
           onClick={() => onPlay(video)}
-          className="flex items-center gap-3 w-fit px-6 py-3 rounded-full font-bold text-sm transition-all hover:scale-105 active:scale-95"
+          className="hero-banner__cta flex items-center gap-3 w-fit px-6 py-3 rounded-full font-bold text-sm transition-all hover:scale-105 active:scale-95"
           style={{
             background: "linear-gradient(135deg, #c9a84c, #f0d080)",
             color: "#000",
@@ -85,7 +85,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
       </div>
 
       {/* Dot indicators */}
-      <div className="absolute bottom-4 right-6 flex gap-2">
+      <div className="hero-banner__dots absolute bottom-4 right-6 flex gap-2">
         {featured.map((_, i) => (
           <button
             key={i}
@@ -103,13 +103,15 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
       {/* Arrows */}
       <button
         onClick={() => setCurrent((c) => (c - 1 + featured.length) % featured.length)}
-        className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-yellow-800/50 transition"
+        aria-label="Previous featured video"
+        className="hero-banner__previous absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-yellow-800/50 transition"
       >
         <ChevronLeft className="w-5 h-5" />
       </button>
       <button
         onClick={() => setCurrent((c) => (c + 1) % featured.length)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-yellow-800/50 transition"
+        aria-label="Next featured video"
+        className="hero-banner__next absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-yellow-800/50 transition"
       >
         <ChevronRight className="w-5 h-5" />
       </button>

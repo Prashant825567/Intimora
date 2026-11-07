@@ -43,7 +43,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
 
         {/* Category badge */}
         <div
-          className="absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold tracking-wider"
+          className="video-card__badge absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold tracking-wider"
           style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
         >
           {video.category.toUpperCase()}
@@ -57,7 +57,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
 
         {/* Play button */}
         <div
-          className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200"
+          className="video-card__play absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200"
           onClick={() => onPlay(video)}
         >
           <div
@@ -69,15 +69,17 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
         </div>
 
         {/* Quick actions on hover */}
-        <div className="absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
+        <div className="video-card__quick-actions absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
           <button
             onClick={(e) => { e.stopPropagation(); setSaved(!saved); }}
+            aria-label={saved ? "Remove saved video" : "Save video"}
             className={`p-1.5 rounded-full transition-all ${saved ? "bg-yellow-500 text-black" : "bg-black/70 text-white hover:bg-yellow-500 hover:text-black"}`}
           >
             <Heart className="w-3.5 h-3.5" fill={saved ? "currentColor" : "none"} />
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); onShare(video); }}
+            aria-label="Share video"
             className="p-1.5 rounded-full bg-black/70 text-white hover:bg-yellow-500 hover:text-black transition-all"
           >
             <Share2 className="w-3.5 h-3.5" />
@@ -87,17 +89,17 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
 
       {/* Info */}
       <div className="p-3" onClick={() => onPlay(video)}>
-        <h3 className="text-white text-sm font-semibold line-clamp-2 leading-snug group-hover:text-yellow-300 transition-colors">
+        <h3 className="video-card__title text-white text-sm font-semibold line-clamp-2 leading-snug group-hover:text-yellow-300 transition-colors">
           {video.title}
         </h3>
 
-        <div className="flex items-center gap-2 mt-2">
-          <img src={video.creatorAvatar} alt={video.creator} className="w-5 h-5 rounded-full border border-yellow-800/50" />
-          <span className="text-gray-500 text-xs">{video.creator}</span>
+        <div className="video-card__creator flex items-center gap-2 mt-2">
+          <img src={video.creatorAvatar} alt={video.creator} className="video-card__avatar w-5 h-5 rounded-full border border-yellow-800/50" />
+          <span className="video-card__creator-name text-gray-500 text-xs">{video.creator}</span>
         </div>
 
-        <div className="flex items-center justify-between mt-2">
-          <div className="flex items-center gap-3 text-xs text-gray-600">
+        <div className="video-card__metadata flex items-center justify-between mt-2">
+          <div className="video-card__counts flex items-center gap-3 text-xs text-gray-600">
             <span className="flex items-center gap-1">
               <Eye className="w-3 h-3" />
               {video.views}
@@ -107,13 +109,13 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
               {video.likes.toLocaleString()}
             </span>
           </div>
-          <span className="text-gray-700 text-xs">{video.uploadedAt}</span>
+          <span className="video-card__date text-gray-700 text-xs">{video.uploadedAt}</span>
         </div>
 
         {/* Tags */}
         <div className="flex flex-wrap gap-1 mt-2">
           {video.tags.slice(0, 2).map((tag) => (
-            <span key={tag} className="px-1.5 py-0.5 bg-gray-800 rounded text-xs text-gray-500">
+            <span key={tag} className="video-card__tag px-1.5 py-0.5 bg-gray-800 rounded text-xs text-gray-500">
               #{tag}
             </span>
           ))}

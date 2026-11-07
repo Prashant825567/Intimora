@@ -130,8 +130,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
   const progress = duration ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95" style={{ backdropFilter: "blur(10px)" }}>
-      <div className="w-full max-w-6xl mx-auto px-2 sm:px-4">
+    <div className="mobile-overlay fixed inset-0 z-[200] flex items-center justify-center bg-black/95" style={{ backdropFilter: "blur(10px)" }}>
+      <div className="mobile-overlay__content video-player__content w-full max-w-6xl mx-auto px-2 sm:px-4">
         {/* Player container */}
         <div
           id="player-container"
@@ -152,25 +152,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
           {!playing && (
             <div className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
               <div
-                className="w-20 h-20 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                className="video-player__play-button w-20 h-20 rounded-full flex items-center justify-center transition-all hover:scale-110"
                 style={{ background: "rgba(201,168,76,0.9)", boxShadow: "0 0 30px rgba(201,168,76,0.5)" }}
               >
-                <Play className="w-10 h-10 text-black ml-1" fill="black" />
+                <Play className="video-player__play-icon w-10 h-10 text-black ml-1" fill="black" />
               </div>
             </div>
           )}
 
           {/* Top controls */}
           <div
-            className={`absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${showControls || !playing ? "opacity-100" : "opacity-0"}`}
+            className={`video-player__top absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${showControls || !playing ? "opacity-100" : "opacity-0"}`}
             style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)" }}
           >
             <div className="flex-1 min-w-0">
               <h3 className="text-white font-bold text-sm sm:text-base truncate">{video.title}</h3>
-              <p className="text-gray-400 text-xs">{video.creator} · {video.views} views</p>
+              <p className="video-player__top-meta text-gray-400 text-xs">{video.creator} · {video.views} views</p>
             </div>
             <button
               onClick={onClose}
+              aria-label="Close video player"
               className="ml-3 p-2 rounded-full text-white hover:text-yellow-400 transition flex-shrink-0"
               style={{ background: "rgba(0,0,0,0.5)" }}
             >
@@ -204,7 +205,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
             </div>
 
             {/* Controls row */}
-            <div className="flex items-center px-4 py-3 gap-3">
+            <div className="video-player__controls flex items-center px-4 py-3 gap-3">
               <button onClick={() => skip(-10)} className="text-white hover:text-yellow-400 transition">
                 <SkipBack className="w-5 h-5" />
               </button>
@@ -269,13 +270,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
         </div>
 
         {/* Video info & actions */}
-        <div className="mt-4 px-2 flex flex-col sm:flex-row sm:items-start gap-4">
+        <div className="video-player__info mt-4 px-2 flex flex-col sm:flex-row sm:items-start gap-4">
           <div className="flex-1 min-w-0">
-            <h2 className="text-white font-bold text-lg truncate">{video.title}</h2>
+            <h2 className="video-player__title text-white font-bold text-lg truncate">{video.title}</h2>
             <div className="flex items-center gap-3 mt-1 flex-wrap">
-              <div className="flex items-center gap-2">
-                <img src={video.creatorAvatar} alt={video.creator} className="w-7 h-7 rounded-full border border-yellow-800" />
-                <span className="text-sm text-gray-400">{video.creator}</span>
+              <div className="video-player__creator flex items-center gap-2">
+                <img src={video.creatorAvatar} alt={video.creator} className="video-player__avatar w-7 h-7 rounded-full border border-yellow-800" />
+                <span className="video-player__creator-name text-sm text-gray-400">{video.creator}</span>
               </div>
               <span className="text-gray-600 text-sm">•</span>
               <span className="text-gray-500 text-sm">{video.views} views</span>
@@ -284,7 +285,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
               {video.tags.map((tag) => (
-                <span key={tag} className="px-2 py-0.5 bg-yellow-900/20 border border-yellow-800/30 rounded text-xs text-yellow-500">
+                <span key={tag} className="video-player__tag px-2 py-0.5 bg-yellow-900/20 border border-yellow-800/30 rounded text-xs text-yellow-500">
                   #{tag}
                 </span>
               ))}
