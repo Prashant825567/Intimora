@@ -9,7 +9,11 @@ Copy `.env.example` to `.env` for local development and set **one** of these ser
 - `API_DISCOVERY_URL`: the HTTPS discovery endpoint that returns `{ "ok": true, "data": { "server": "https://…" } }`.
 - `API_PROXY_UPSTREAM`: an optional fixed HTTPS API base, used instead of discovery when set.
 
-With discovery enabled, the Node server reads `data.server` from the discovery response, caches it for up to 60 seconds, and appends the permitted `/api/...` routes for catalog, search, and media requests. The browser calls the same-origin `/_api/...` routes and does not contact discovery or the upstream directly.
+With discovery enabled, the Node server reads `data.server` separately for each new browser-tab session and appends the permitted `/api/...` routes. An encrypted, opaque selection is cached in that tab for at most 60 seconds; the next API request after expiry performs discovery again. Other visitors do not share this cache, although the discovery service may choose the same backend for multiple visitors. Previously issued media and pagination links remain pinned to the backend that produced them so playback and scrolling continue across a refresh. The browser calls the same-origin `/_api/...` routes and does not contact discovery or the upstream directly.
+
+This is a browser-tab session, not an authenticated identity. The opaque selection uses session storage with an in-memory fallback if storage is blocked. Reloading the same tab can reuse its unexpired choice; closing or clearing the session causes a new discovery. Some browsers copy session storage when duplicating a tab or opening one from another tab.
+
+For per-visitor discovery on Render, set `API_DISCOVERY_URL` privately and leave `API_PROXY_UPSTREAM` unset; the fixed upstream takes precedence and bypasses discovery if both are set.
 
 Keep these values and all credentials on the server. Never use a `VITE_` or `INTIMORA_PUBLIC_` prefix for secrets, put secrets in `public/`, or commit `.env` files, private keys or credentials. `.gitignore` prevents newly added local env files from being tracked; it cannot remove anything already committed in Git history.
 
@@ -17,7 +21,7 @@ Additional settings:
 
 - `API_ALLOWED_HOSTS` (recommended): comma-separated, exact API hostnames permitted from discovery. Update this list when legitimate upstream hosts change. Wildcards are not accepted.
 - `API_MEDIA_ALLOWED_HOSTS`: comma-separated, exact external media CDN hostnames. Media on the API origin works automatically; other hosts and redirects are blocked unless explicitly allowed. If an external media URL is not allowed, the standard `/api/videos/:id/thumbnail` or `/stream` API route is used instead.
-- `PROXY_TOKEN_SECRET`: at least 32 random characters, shared by all running instances. Render can generate this automatically. Without it, a random per-process key is used and pagination/media tokens stop working after a restart or when requests reach another instance. Tokens expire after 24 hours.
+- `PROXY_TOKEN_SECRET`: at least 32 random characters, shared by all running instances. Render can generate this automatically. Without it, a random per-process key is used and visitor selections or pagination/media tokens stop working after a restart or when requests reach another instance. Visitor selections last up to 60 seconds; media and cursor tokens expire after 24 hours.
 - `API_ALLOW_LOOPBACK=1`: **development only**, for testing against a local HTTP API. Production rejects private and loopback network targets.
 
 The proxy permits only the catalog, search, video, thumbnail, stream, like and share routes. It does not proxy admin endpoints, cookies, browser authorization headers, arbitrary destination URLs, or raw upstream error responses. Public upstreams must use HTTPS on its standard port. Production adds a restrictive Content Security Policy and other security headers. Upstream image and video content types and redirects are restricted; configure the media host allowlist when needed.

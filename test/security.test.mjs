@@ -172,8 +172,8 @@ test("catalog responses contain only public fields and opaque same-origin media 
   assert.match(data.videos[0].streamUrl, /^\/_api\/media\/[A-Za-z0-9_-]+$/);
   assert.equal(data.videos[0].creatorAvatar, undefined);
   assert.equal(data.videos[0].password, undefined);
-  assert.equal(data.videos[1].thumbnailUrl, "/_api/api/videos/video-2/thumbnail");
-  assert.equal(data.videos[1].streamUrl, "/_api/api/videos/video-2/stream");
+  assert.match(data.videos[1].thumbnailUrl, /^\/_api\/media\/[A-Za-z0-9_-]+$/);
+  assert.match(data.videos[1].streamUrl, /^\/_api\/media\/[A-Za-z0-9_-]+$/);
   assert.ok(!data.nextCursor.includes(PRIVATE));
   const forwarded = seen.filter((item) => item.pathname === "/api/videos").at(-1);
   assert.equal(forwarded.headers.authorization, undefined);

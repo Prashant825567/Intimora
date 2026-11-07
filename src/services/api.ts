@@ -1,4 +1,5 @@
 import type { Video } from "../data/mockVideos";
+import { createVisitorRequest } from "./visitor-route.mjs";
 
 // All browser requests are same-origin. The server resolves and contacts the
 // upstream privately, and only returns the fields needed by the UI.
@@ -56,11 +57,7 @@ export interface ApiVideo {
   streamUrl?: string;
 }
 
-const requestJson = async (url: string, options?: RequestInit) => {
-  const response = await fetch(url, options);
-  if (!response.ok) throw new Error("Content is temporarily unavailable");
-  return response.json();
-};
+const requestJson = createVisitorRequest();
 
 export const fetchVideos = async (cursor?: string | null | number) => {
   const params = new URLSearchParams();

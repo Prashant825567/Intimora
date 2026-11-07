@@ -7,6 +7,8 @@ export interface ApiProxyOptions {
   mediaAllowedHosts?: string;
   allowLoopback?: boolean;
   tokenSecret?: string;
+  /** Optional clock, useful for testing expiration deterministically. */
+  now?: () => number;
 }
 
 export function createApiHandler(

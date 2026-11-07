@@ -7,9 +7,11 @@ import { BlockList, isIP } from "node:net";
 const API_PREFIX = "/_api";
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_URL_LENGTH = 2048;
-const MAX_TOKEN_LENGTH = 4096;
+const MAX_TOKEN_LENGTH = 6144;
 const TOKEN_LIFETIME_MS = 24 * 60 * 60 * 1000;
 const DISCOVERY_CACHE_MS = 60 * 1000;
+const VISITOR_ROUTE_HEADER = "x-intimora-route";
+const VISITOR_TTL_HEADER = "x-intimora-route-ttl";
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -97,30 +99,36 @@ function isListedHost(url, hosts) {
   return hosts.has(url.hostname.toLowerCase()) || hosts.has(url.host.toLowerCase());
 }
 
-function createTokenCodec(secret) {
+function createTokenCodec(secret, now) {
   if (secret && secret.length < 32) throw new Error("Proxy token secret must be at least 32 characters");
   const key = secret ? createHash("sha256").update(secret).digest() : randomBytes(32);
+
+  function inspect(token, purpose) {
+    try {
+      if (typeof token !== "string" || token.length > MAX_TOKEN_LENGTH || !TOKEN_PATTERN.test(token)) return null;
+      const packed = Buffer.from(token, "base64url");
+      if (packed.length < 29 || packed.toString("base64url") !== token) return null;
+      const decipher = createDecipheriv("aes-256-gcm", key, packed.subarray(0, 12));
+      decipher.setAuthTag(packed.subarray(12, 28));
+      const payload = JSON.parse(Buffer.concat([decipher.update(packed.subarray(28)), decipher.final()]).toString("utf8"));
+      if (payload.purpose !== purpose || !Number.isFinite(payload.expires) || payload.expires <= now()) return null;
+      return payload;
+    } catch {
+      return null;
+    }
+  }
+
   return {
-    seal(purpose, value) {
+    seal(purpose, value, expires = now() + TOKEN_LIFETIME_MS) {
       const iv = randomBytes(12);
       const cipher = createCipheriv("aes-256-gcm", key, iv);
-      const payload = Buffer.from(JSON.stringify({ purpose, value, expires: Date.now() + TOKEN_LIFETIME_MS }));
+      const payload = Buffer.from(JSON.stringify({ purpose, value, expires }));
       const encrypted = Buffer.concat([cipher.update(payload), cipher.final()]);
       return Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString("base64url");
     },
+    inspect,
     open(token, purpose) {
-      try {
-        if (typeof token !== "string" || token.length > MAX_TOKEN_LENGTH || !TOKEN_PATTERN.test(token)) return null;
-        const packed = Buffer.from(token, "base64url");
-        if (packed.length < 29 || packed.toString("base64url") !== token) return null;
-        const decipher = createDecipheriv("aes-256-gcm", key, packed.subarray(0, 12));
-        decipher.setAuthTag(packed.subarray(12, 28));
-        const payload = JSON.parse(Buffer.concat([decipher.update(packed.subarray(28)), decipher.final()]).toString("utf8"));
-        if (payload.purpose !== purpose || !Number.isFinite(payload.expires) || payload.expires <= Date.now()) return null;
-        return payload.value;
-      } catch {
-        return null;
-      }
+      return inspect(token, purpose)?.value ?? null;
     },
   };
 }
@@ -239,10 +247,8 @@ export function createApiHandler(options = {}) {
   const allowedHosts = parseHostList(options.allowedHosts ?? process.env.API_ALLOWED_HOSTS ?? "");
   const mediaHosts = parseHostList(options.mediaAllowedHosts ?? process.env.API_MEDIA_ALLOWED_HOSTS ?? "");
   const allowLoopback = options.allowLoopback === true;
-  const codec = createTokenCodec(options.tokenSecret ?? process.env.PROXY_TOKEN_SECRET ?? "");
-  let cachedTarget;
-  let cachedUntil = 0;
-  let discoveryInFlight;
+  const now = options.now ?? Date.now;
+  const codec = createTokenCodec(options.tokenSecret ?? process.env.PROXY_TOKEN_SECRET ?? "", now);
 
   function validateTarget(value) {
     const target = validateNetworkUrl(value, { allowLoopback, allowQuery: false });
@@ -250,29 +256,44 @@ export function createApiHandler(options = {}) {
     return target;
   }
 
-  async function getTarget() {
-    if (fixedUpstream) return validateTarget(fixedUpstream);
-    if (cachedTarget && Date.now() < cachedUntil) return cachedTarget;
-    if (!discoveryInFlight) {
-      discoveryInFlight = (async () => {
-        const url = validateNetworkUrl(discoveryUrl, { allowLoopback });
-        const incoming = await requestUpstream(url, {
-          allowLoopback,
-          headers: { accept: "application/json" },
-          allowRedirect: (next, current) => next.origin === current.origin,
-        });
-        if (incoming.statusCode !== 200) {
-          incoming.resume();
-          throw new Error("Discovery unavailable");
-        }
-        const result = await readJson(incoming, 64 * 1024);
-        const target = validateTarget(result?.ok && typeof result?.data?.server === "string" ? result.data.server : "");
-        cachedTarget = target;
-        cachedUntil = Date.now() + DISCOVERY_CACHE_MS;
-        return target;
-      })().finally(() => { discoveryInFlight = undefined; });
+  async function discoverTarget() {
+    const url = validateNetworkUrl(discoveryUrl, { allowLoopback });
+    const incoming = await requestUpstream(url, {
+      allowLoopback,
+      headers: { accept: "application/json" },
+      allowRedirect: (next, current) => next.origin === current.origin,
+    });
+    if (incoming.statusCode !== 200) {
+      incoming.resume();
+      throw new Error("Discovery unavailable");
     }
-    return discoveryInFlight;
+    const result = await readJson(incoming, 64 * 1024);
+    return validateTarget(result?.ok && typeof result?.data?.server === "string" ? result.data.server : "");
+  }
+
+  // A selection belongs to the browser session that holds its encrypted token;
+  // no target or in-flight discovery is shared globally between visitors.
+  async function getSelection(req) {
+    const saved = codec.inspect(req.headers[VISITOR_ROUTE_HEADER], "visitor-route");
+    const fixed = fixedUpstream ? validateTarget(fixedUpstream) : null;
+    if (saved && typeof saved.value === "string") {
+      try {
+        const target = validateTarget(saved.value);
+        if (!fixed || target.href === fixed.href) {
+          return { target, token: req.headers[VISITOR_ROUTE_HEADER], expires: saved.expires };
+        }
+      } catch {
+        // A changed allowlist can revoke a previously valid selection.
+      }
+    }
+    const target = fixed ?? await discoverTarget();
+    const expires = now() + DISCOVERY_CACHE_MS;
+    return { target, token: codec.seal("visitor-route", target.href, expires), expires };
+  }
+
+  function setSelectionHeaders(res, selection) {
+    res.setHeader(VISITOR_ROUTE_HEADER, selection.token);
+    res.setHeader(VISITOR_TTL_HEADER, String(Math.max(0, selection.expires - now())));
   }
 
   function isAllowedMedia(url, target) {
@@ -280,16 +301,23 @@ export function createApiHandler(options = {}) {
   }
 
   function mediaPath(rawUrl, target, id, type) {
-    const fallback = `${API_PREFIX}/api/videos/${encodeURIComponent(id)}/${type}`;
-    if (typeof rawUrl !== "string" || !rawUrl || rawUrl.length > MAX_URL_LENGTH) return fallback;
-    try {
-      const resolved = validateNetworkUrl(new URL(rawUrl, `${target.href.replace(/\/+$/, "")}/`).href, { allowLoopback });
-      if (!isAllowedMedia(resolved, target)) return fallback;
-      const token = codec.seal(type, resolved.href);
-      return token.length <= MAX_TOKEN_LENGTH ? `${API_PREFIX}/media/${token}` : fallback;
-    } catch {
-      return fallback;
+    // Even the fallback is sealed to its catalog's backend: image and video
+    // elements cannot attach the visitor's custom request header themselves.
+    const fallback = { target: target.href, id };
+    if (typeof rawUrl === "string" && rawUrl && rawUrl.length <= MAX_URL_LENGTH) {
+      try {
+        const resolved = validateNetworkUrl(new URL(rawUrl, `${target.href.replace(/\/+$/, "")}/`).href, { allowLoopback });
+        if (isAllowedMedia(resolved, target)) {
+          const token = codec.seal(type, { target: target.href, url: resolved.href });
+          if (token.length <= MAX_TOKEN_LENGTH) return `${API_PREFIX}/media/${token}`;
+        }
+      } catch {
+        // Use the server's allowlisted fallback route below.
+      }
     }
+    const token = codec.seal(type, fallback);
+    if (token.length > MAX_TOKEN_LENGTH) throw new Error("Media token is too long");
+    return `${API_PREFIX}/media/${token}`;
   }
 
   function publicVideo(video, target) {
@@ -317,6 +345,10 @@ export function createApiHandler(options = {}) {
   async function handle(req, res, url) {
     if ((req.url || "").length > 8192) return sendError(res, 414);
     if (req.headers["sec-fetch-site"] === "cross-site") return sendError(res, 403);
+    const visitorToken = req.headers[VISITOR_ROUTE_HEADER];
+    if (visitorToken !== undefined && (typeof visitorToken !== "string" || visitorToken.length > MAX_TOKEN_LENGTH || !TOKEN_PATTERN.test(visitorToken))) {
+      return sendError(res, 400);
+    }
 
     const path = url.pathname.slice(API_PREFIX.length);
     const method = req.method || "GET";
@@ -348,10 +380,20 @@ export function createApiHandler(options = {}) {
       if (key !== allowedParam || url.searchParams.getAll(key).length !== 1) return sendError(res, 400);
     }
     const params = new URLSearchParams();
+    let cursorTarget;
     if (route === "list" && url.searchParams.has("cursor")) {
-      const cursor = codec.open(url.searchParams.get("cursor"), "cursor");
+      const decoded = codec.open(url.searchParams.get("cursor"), "cursor");
+      // Accept old cursor tokens after deployment, and bind new tokens to the
+      // backend that created them so pagination survives a later refresh.
+      const bound = decoded && typeof decoded === "object" && !Array.isArray(decoded) ? decoded : null;
+      const cursor = bound ? bound.cursor : decoded;
       if (!((typeof cursor === "string" && cursor.length <= 1024) || (typeof cursor === "number" && Number.isFinite(cursor)))) {
         return sendError(res, 400);
+      }
+      if (bound) {
+        if (typeof bound.target !== "string") return sendError(res, 400);
+        cursorTarget = validateTarget(bound.target);
+        if (fixedUpstream && cursorTarget.href !== validateTarget(fixedUpstream).href) return sendError(res, 400);
       }
       params.set("cursor", String(cursor));
     }
@@ -362,19 +404,39 @@ export function createApiHandler(options = {}) {
     }
     if (isMedia && req.headers.range && !validRange(req.headers.range)) return sendError(res, 416);
 
-    const target = await getTarget();
+    let target;
     let destination;
+    let selection;
     let mediaType = route;
     if (route === "opaque-media") {
       if (media[1].length > MAX_TOKEN_LENGTH) return sendError(res, 404);
       const thumbnail = codec.open(media[1], "thumbnail");
       const stream = thumbnail === null ? codec.open(media[1], "stream") : null;
-      const raw = thumbnail ?? stream;
+      const data = thumbnail ?? stream;
       mediaType = thumbnail !== null ? "thumbnail" : "stream";
-      if (typeof raw !== "string") return sendError(res, 404);
-      destination = validateNetworkUrl(raw, { allowLoopback });
-      if (!isAllowedMedia(destination, target)) return sendError(res, 404);
+      if (typeof data === "string") {
+        // Tokens from before visitor-specific routing did not carry a target.
+        selection = await getSelection(req);
+        target = selection.target;
+        destination = validateNetworkUrl(data, { allowLoopback });
+        if (!isAllowedMedia(destination, target)) return sendError(res, 404);
+      } else if (data && typeof data === "object" && !Array.isArray(data) && typeof data.target === "string") {
+        target = validateTarget(data.target);
+        if (fixedUpstream && target.href !== validateTarget(fixedUpstream).href) return sendError(res, 404);
+        if (typeof data.url === "string") {
+          destination = validateNetworkUrl(data.url, { allowLoopback });
+          if (!isAllowedMedia(destination, target)) return sendError(res, 404);
+        } else if (typeof data.id === "string" && ID_PATTERN.test(data.id)) {
+          destination = upstreamPath(target, `/api/videos/${encodeURIComponent(data.id)}/${mediaType}`, new URLSearchParams());
+        } else {
+          return sendError(res, 404);
+        }
+      } else {
+        return sendError(res, 404);
+      }
     } else {
+      selection = await getSelection(req);
+      target = cursorTarget ?? selection.target;
       destination = upstreamPath(target, path, params);
     }
 
@@ -409,6 +471,7 @@ export function createApiHandler(options = {}) {
         incoming.resume();
         return sendError(res, 503);
       }
+      if (selection) setSelectionHeaders(res, selection);
       res.setHeader("Content-Type", contentType);
       res.setHeader("Cache-Control", "private, no-store");
       const length = incoming.headers["content-length"];
@@ -434,11 +497,14 @@ export function createApiHandler(options = {}) {
       const cursor = payload.data.nextCursor;
       const validCursor = (typeof cursor === "string" && cursor.length > 0 && cursor.length <= 1024)
         || (typeof cursor === "number" && Number.isFinite(cursor));
-      return sendJson(res, 200, { ok: true, data: { videos, nextCursor: validCursor ? codec.seal("cursor", cursor) : null } });
+      const nextCursor = validCursor ? codec.seal("cursor", { target: target.href, cursor }) : null;
+      if (selection) setSelectionHeaders(res, selection);
+      return sendJson(res, 200, { ok: true, data: { videos, nextCursor: nextCursor && nextCursor.length <= MAX_TOKEN_LENGTH ? nextCursor : null } });
     }
     // Detail, like and share responses aren't needed by the UI. Never relay
     // upstream response bodies, error messages, headers or cookies to the client.
     incoming.resume();
+    if (selection) setSelectionHeaders(res, selection);
     return sendJson(res, 200, { ok: true });
   }
 
@@ -454,8 +520,6 @@ export function createApiHandler(options = {}) {
     handle(req, res, url).catch(() => {
       // Do not log or return upstream errors: they can contain private URLs,
       // headers, query-string credentials, or response bodies.
-      cachedTarget = undefined;
-      cachedUntil = 0;
       sendError(res);
     });
   };
