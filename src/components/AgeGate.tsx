@@ -48,16 +48,11 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
         >
           {/* Logo */}
           <div className="age-gate__logo-wrap flex items-center justify-center mb-6">
-            <img src="/logo.png" alt="Intimora" className="age-gate__logo w-20 h-20 object-contain" />
+            <img src="/logo.svg" alt="" className="age-gate__logo w-20 h-20 object-contain" />
           </div>
 
-          <h1
-            className="age-gate__title text-3xl font-black tracking-widest mb-1"
-            style={{ color: "#c9a84c", fontFamily: "Georgia, serif" }}
-          >
-            INTIMORA
-          </h1>
-          <p className="age-gate__subtitle text-gray-500 text-xs tracking-widest uppercase mb-8">Premium Adult Entertainment</p>
+          <h1 className="age-gate__title brand-wordmark mb-1">Intimora</h1>
+          <p className="age-gate__subtitle text-gray-500 text-xs tracking-widest uppercase mb-8">Adult Entertainment</p>
 
           {/* Age warning */}
           <div className="age-gate__warning flex items-center gap-2 bg-yellow-900/20 border border-yellow-800/30 rounded-xl p-4 mb-6 text-left">

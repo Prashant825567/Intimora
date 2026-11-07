@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Play, Clock, Eye, Share2, Heart, ThumbsUp } from "lucide-react";
 import type { Video } from "../data/mockVideos";
+import { isPremiumLabel } from "../utils/video-labels";
 
 interface VideoCardProps {
   video: Video;
@@ -44,12 +45,14 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
         />
 
         {/* Category badge */}
-        <div
-          className="video-card__badge absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold tracking-wider"
-          style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
-        >
-          {video.category.toUpperCase()}
-        </div>
+        {!isPremiumLabel(video.category) && (
+          <div
+            className="video-card__badge absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold tracking-wider"
+            style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
+          >
+            {video.category.toUpperCase()}
+          </div>
+        )}
 
         {/* Duration */}
         <div className="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded bg-black/80 text-white text-xs font-mono">
@@ -116,7 +119,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
 
         {/* Tags */}
         <div className="flex flex-wrap gap-1 mt-2">
-          {video.tags.slice(0, 2).map((tag) => (
+          {video.tags.filter((tag) => !isPremiumLabel(tag)).slice(0, 2).map((tag) => (
             <span key={tag} className="video-card__tag px-1.5 py-0.5 bg-gray-800 rounded text-xs text-gray-500">
               #{tag}
             </span>

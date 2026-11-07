@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import { likeVideo } from "../services/api";
+import { isPremiumLabel } from "../utils/video-labels";
 
 interface VideoPlayerProps {
   video: Video;
@@ -283,7 +284,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
               <span className="text-gray-500 text-sm">{video.uploadedAt}</span>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
-              {video.tags.map((tag) => (
+              {video.tags.filter((tag) => !isPremiumLabel(tag)).map((tag) => (
                 <span key={tag} className="video-player__tag px-2 py-0.5 bg-yellow-900/20 border border-yellow-800/30 rounded text-xs text-yellow-500">
                   #{tag}
                 </span>

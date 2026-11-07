@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Play, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import type { Video } from "../data/mockVideos";
+import { isPremiumLabel } from "../utils/video-labels";
 
 interface HeroBannerProps {
   videos: Video[];
@@ -64,10 +65,14 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
           <span>👁 {video.views} views</span>
           <span>•</span>
           <span>⏱ {video.duration}</span>
-          <span>•</span>
-          <span className="px-2 py-0.5 bg-yellow-900/40 border border-yellow-800/40 rounded text-yellow-500 text-xs">
-            {video.category}
-          </span>
+          {!isPremiumLabel(video.category) && (
+            <>
+              <span>•</span>
+              <span className="px-2 py-0.5 bg-yellow-900/40 border border-yellow-800/40 rounded text-yellow-500 text-xs">
+                {video.category}
+              </span>
+            </>
+          )}
         </div>
 
         <button

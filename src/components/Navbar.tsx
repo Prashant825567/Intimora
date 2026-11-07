@@ -11,7 +11,7 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
 
-  const categories = ["Home", "Trending", "New", "Premium", "Exclusive", "Categories"];
+  const categories = ["Home", "Trending", "New", "Exclusive", "Categories"];
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,15 +31,10 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
         {/* Top bar */}
         <div className="site-nav__bar flex items-center gap-4 h-16">
           {/* Logo */}
-          <div className="site-nav__brand flex items-center gap-2 flex-shrink-0">
-            <img src="/logo.png" alt="Intimora" className="w-9 h-9 object-contain" />
-            <span
-              className="site-nav__brand-text text-xl font-black tracking-widest hidden sm:block"
-              style={{ color: "#c9a84c", fontFamily: "Georgia, serif" }}
-            >
-              INTIMORA
-            </span>
-          </div>
+          <a href="/" aria-label="Intimora home" className="site-nav__brand flex items-center flex-shrink-0">
+            <img src="/logo.svg" alt="" className="site-nav__brand-mark" />
+            <span className="site-nav__brand-text brand-wordmark" aria-hidden="true">Intimora</span>
+          </a>
 
           {/* Search bar */}
           <form onSubmit={handleSearch} className="site-nav__search flex-1 max-w-2xl mx-auto">
@@ -86,10 +81,6 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
 
           {/* Right actions */}
           <div className="site-nav__actions flex items-center gap-2 flex-shrink-0">
-            <button className="site-nav__desktop-action hidden sm:flex items-center gap-1 px-4 py-2 rounded-full text-xs font-bold tracking-wider transition-all hover:scale-105"
-              style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}>
-              👑 PREMIUM
-            </button>
             <button aria-label="Notifications" className="site-nav__desktop-action p-2 rounded-full text-gray-400 hover:text-yellow-400 transition relative">
               <Bell className="w-5 h-5" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />

@@ -7,7 +7,7 @@ import VideoPlayer from "./components/VideoPlayer";
 import ShareModal from "./components/ShareModal";
 import Footer from "./components/Footer";
 import type { Video } from "./data/mockVideos";
-import { TrendingUp, Flame, Sparkles, Crown, ChevronRight, Loader2, Upload, Wifi, WifiOff } from "lucide-react";
+import { TrendingUp, Flame, Sparkles, ChevronRight, Loader2, Upload, Wifi, WifiOff } from "lucide-react";
 import { fetchVideos, searchVideos, fetchVideoDetail, mapApiVideoToVideo, primeBackendSelection } from "./services/api";
 import type { BackendCursor } from "./services/api";
 
@@ -157,7 +157,6 @@ function App() {
   const categories = [
     { icon: <Flame className="w-4 h-4" />, label: "Trending Now", key: "Trending" },
     { icon: <Sparkles className="w-4 h-4" />, label: "New Releases", key: "New" },
-    { icon: <Crown className="w-4 h-4" />, label: "Premium", key: "Premium" },
     { icon: <TrendingUp className="w-4 h-4" />, label: "Popular", key: "Popular" },
   ];
 
@@ -258,7 +257,7 @@ function App() {
               <>
                 {/* Quick category pills */}
                 <div className="flex items-center gap-3 mb-8 overflow-x-auto pb-2 scrollbar-hide">
-                  {["All", "Free", "Premium", "Trending", "New", "Exclusive", "HD", "4K", "Solo", "Couple"].map((tag) => (
+                  {["All", "Free", "Trending", "New", "Exclusive", "HD", "4K", "Solo", "Couple"].map((tag) => (
                     <button
                       key={tag}
                       className="flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold tracking-wider border transition-all hover:scale-105"
