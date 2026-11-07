@@ -8,12 +8,10 @@ const Footer: React.FC = () => {
         {/* Logo row */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6 mb-8">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Intimora" className="w-10 h-10 object-contain" />
+            <img src="/logo.svg" alt="" className="w-10 h-10 object-contain" />
             <div>
-              <span className="text-xl font-black tracking-widest" style={{ color: "#c9a84c", fontFamily: "Georgia, serif" }}>
-                INTIMORA
-              </span>
-              <p className="text-gray-600 text-xs tracking-wider">Premium Adult Entertainment</p>
+              <span className="brand-wordmark site-footer__brand-text">Intimora</span>
+              <p className="text-gray-600 text-xs tracking-wider">Adult Entertainment</p>
             </div>
           </div>
           <div className="site-footer__badges flex items-center gap-6">
@@ -38,7 +36,7 @@ const Footer: React.FC = () => {
             { title: "Company", links: ["About Us", "Careers", "Press", "Contact"] },
             { title: "Legal", links: ["Terms of Service", "Privacy Policy", "Cookie Policy", "DMCA"] },
             { title: "Safety", links: ["Safety Center", "Report Abuse", "2257 Statement", "Age Verification"] },
-            { title: "Platform", links: ["Become a Creator", "Premium Plans", "Help Center", "API"] },
+            { title: "Platform", links: ["Become a Creator", "Help Center", "API"] },
           ].map((col) => (
             <div key={col.title}>
               <h4 className="text-yellow-600 font-bold text-xs tracking-widest uppercase mb-3">{col.title}</h4>

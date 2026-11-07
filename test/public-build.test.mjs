@@ -20,6 +20,12 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     const assets = await readdir(path.join(output, "assets"));
     const js = await Promise.all(assets.filter((name) => name.endsWith(".js")).map((name) => readFile(path.join(output, "assets", name), "utf8")));
     assert.ok(js.some((content) => content.includes(publicUrl)), "the endpoint is intentionally public");
+    const html = await readFile(path.join(output, "index.html"), "utf8");
+    assert.match(html, /"@type":\s*"WebSite"/);
+    assert.match(html, /"name":\s*"Intimora"/);
+    for (const file of ["favicon-16.png", "favicon-32.png", "favicon-192.png", "favicon.ico", "apple-touch-icon.png", "logo.svg", "robots.txt"]) {
+      assert.ok((await readFile(path.join(output, file))).length > 0, `${file} is published`);
+    }
 
     const secret = "secret-query-marker-0123456789";
     let error;

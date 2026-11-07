@@ -24,6 +24,15 @@ const videos = [{
   creator: "CreatorWithAVeryVeryLongUnbrokenNameThatMustStayInsideTheScreen",
   uploadedAt: "7 months ago",
   tags: ["premium", "longtag".repeat(10)],
+}, {
+  id: "sample-2",
+  title: "Catalog item remains available",
+  category: " pReMiUm ",
+  duration: 900,
+  views: 250,
+  likes: 42,
+  creator: "Intimora",
+  tags: [" PREMIUM ", "#Premium", "recent", "hd"],
 }];
 
 async function availablePort() {
@@ -132,6 +141,7 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
 
       const enter = page.getByRole("button", { name: /I AM 18/i });
       await enter.waitFor();
+      assert.doesNotMatch(await page.locator(".age-gate__card").innerText(), /premium/i, `${label}: no premium branding on age gate`);
       await assertPageFits(page, `${label} age gate`);
       await assertInViewport(enter, width, height, `${label} enter button`);
       await assertInViewport(page.getByRole("button", { name: /under 18/i }), width, height, `${label} exit button`);
@@ -139,6 +149,12 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
 
       const watch = page.getByRole("button", { name: /WATCH NOW/i });
       await watch.waitFor();
+      await page.evaluate(() => document.fonts.ready);
+      const brand = page.getByRole("link", { name: "Intimora home" });
+      await assertInViewport(brand, width, height, `${label} brand`);
+      await assertTextNotClipped(brand.locator(".site-nav__brand-text"), `${label} wordmark`);
+      assert.equal(await brand.locator(".site-nav__brand-mark").evaluate((image) => image.complete && image.naturalWidth > 0), true, `${label}: brand image loaded`);
+      assert.equal(await page.evaluate(() => [...document.fonts].some((font) => font.family === "Dancing Script" && font.status === "loaded")), true, `${label}: local wordmark font loaded`);
       await assertPageFits(page, `${label} home`);
       await assertTextNotClipped(page.locator(".hero-banner__title"), `${label} featured title`);
       await assertTextNotClipped(page.locator(".hero-banner__creator"), `${label} featured creator`);
@@ -160,6 +176,7 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       assert.equal(await closeMenu.getAttribute("aria-expanded"), "true");
       await page.getByRole("button", { name: "Notifications", exact: true }).waitFor();
       await page.getByRole("button", { name: "Account", exact: true }).waitFor();
+      assert.doesNotMatch(await page.locator("#mobile-navigation").innerText(), /premium/i, `${label}: no premium mobile-menu item`);
       await assertPageFits(page, `${label} open menu`);
       await closeMenu.click();
 
@@ -200,6 +217,43 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
     }
     assert.deepEqual(errors, [], "no uncaught browser errors");
 
+    const markAudit = await page.evaluate(async () => {
+      const pixels = async (source, size = 32) => {
+        const image = new Image();
+        image.src = source;
+        await image.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0, size, size);
+        return context.getImageData(0, 0, size, size).data;
+      };
+      const svg = await pixels("/logo.svg");
+      const favicon = await pixels("/favicon-192.png");
+      const tabIcon = await pixels("/favicon-16.png", 16);
+      let bright = 0;
+      let dark = 0;
+      let tabBright = 0;
+      let tabDark = 0;
+      let difference = 0;
+      for (let index = 0; index < svg.length; index += 4) {
+        const [red, green, blue, alpha] = svg.slice(index, index + 4);
+        if (alpha > 200 && red > 160 && green > 120 && blue < 225) bright += 1;
+        if (alpha > 200 && red < 80 && green < 70 && blue < 60) dark += 1;
+        for (let channel = 0; channel < 4; channel += 1) difference += Math.abs(svg[index + channel] - favicon[index + channel]);
+      }
+      for (let index = 0; index < tabIcon.length; index += 4) {
+        const [red, green, blue, alpha] = tabIcon.slice(index, index + 4);
+        if (alpha > 200 && red > 160 && green > 120 && blue < 225) tabBright += 1;
+        if (alpha > 200 && red < 80 && green < 70 && blue < 60) tabDark += 1;
+      }
+      return { bright, dark, tabBright, tabDark, averageDifference: difference / svg.length };
+    });
+    assert.ok(markAudit.bright > 100 && markAudit.dark > 250, "the small logo has a prominent gold mark against a dark background");
+    assert.ok(markAudit.tabBright > 35 && markAudit.tabDark > 75, "the 16px tab icon remains high-contrast and recognizable");
+    assert.ok(markAudit.averageDifference < 20, "the Google PNG favicon matches the on-site SVG mark");
+
     const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     await mockApi(desktop);
     await desktop.goto(base, { waitUntil: "domcontentloaded" });
@@ -210,6 +264,25 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
     assert.equal(await desktop.locator(".site-nav__brand-text").evaluate((element) => getComputedStyle(element).display), "block");
     assert.equal(await desktop.locator(".site-nav__menu-toggle").evaluate((element) => getComputedStyle(element).display), "none");
     await assertPageFits(desktop, "desktop home");
+    assert.doesNotMatch(await desktop.locator("body").innerText(), /premium/i, "no premium controls, badges, tags, or footer links");
+
+    // A video previously tagged with the retired tier remains visible and playable.
+    const retiredCard = desktop.locator(".video-card__title").filter({ hasText: "Catalog item remains available" }).locator("../..");
+    assert.equal(await retiredCard.count(), 1);
+    assert.equal(await retiredCard.locator(".video-card__badge").count(), 0);
+    assert.deepEqual(await retiredCard.locator(".video-card__tag").allTextContents(), ["#recent", "#hd"]);
+    await desktop.getByRole("button", { name: "Next featured video" }).click();
+    await desktop.locator(".hero-banner__title").filter({ hasText: "Catalog item remains available" }).waitFor();
+    assert.doesNotMatch(await desktop.locator(".hero-banner__meta").innerText(), /premium/i);
+    await desktop.getByRole("button", { name: /WATCH NOW/i }).click();
+    await desktop.locator("#player-container").waitFor();
+    assert.match(await desktop.locator("#player-container video").getAttribute("src"), /\/api\/videos\/sample-2\/stream$/);
+    assert.deepEqual(await desktop.locator(".video-player__tag").allTextContents(), ["#recent", "#hd"]);
+    await desktop.getByRole("button", { name: "Close video player" }).click();
+    await desktop.getByRole("textbox", { name: "Search videos" }).fill("Catalog item");
+    await desktop.getByRole("textbox", { name: "Search videos" }).press("Enter");
+    await desktop.getByText("Search results for").waitFor();
+    assert.equal(await desktop.locator(".video-card__title").filter({ hasText: "Catalog item remains available" }).count(), 1);
   } finally {
     await browser?.close();
     await server.close();

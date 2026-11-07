@@ -86,7 +86,45 @@ img {
   animation: fadeInUp 0.4s ease forwards;
 }
 
-/* Mobile and touch layouts only. Desktop styling above remains unchanged. */
+/* A brighter, legible mark and a locally hosted script wordmark. */
+.brand-wordmark {
+  color: #f3d58a;
+  font-family: "Dancing Script", "Segoe Script", cursive;
+  font-weight: 700;
+  white-space: nowrap;
+  text-shadow: 0 1px 14px rgba(213, 170, 73, 0.18);
+}
+
+.site-nav__brand {
+  gap: 0.55rem;
+  text-decoration: none;
+}
+
+.site-nav__brand-mark {
+  display: block;
+  width: 2.625rem;
+  height: 2.625rem;
+  flex: none;
+}
+
+.site-nav__brand-text {
+  display: block;
+  font-size: 2rem;
+  line-height: 1.15;
+}
+
+.age-gate__title {
+  font-size: 2.5rem;
+  line-height: 1.15;
+}
+
+.site-footer__brand-text {
+  display: inline-block;
+  font-size: 1.75rem;
+  line-height: 1.15;
+}
+
+/* Mobile and touch layouts. */
 @media (max-width: 767px), (max-width: 1023px) and (pointer: coarse) {
   .site-nav__container {
     padding-inline: 0.75rem;
@@ -96,7 +134,19 @@ img {
     gap: 0.5rem;
   }
 
-  .site-nav__brand-text,
+  .site-nav__brand {
+    gap: 0.4rem;
+  }
+
+  .site-nav__brand-mark {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .site-nav__brand-text {
+    font-size: 1.45rem;
+  }
+
   .site-nav__desktop-action,
   .site-nav__desktop-links {
     display: none;
@@ -444,6 +494,14 @@ img {
   .share-modal__url {
     min-width: 0;
   }
+}
+
+/* Keep the wordmark and the search action usable on the narrowest phones. */
+@media (max-width: 360px) {
+  .site-nav__brand { gap: 0.3rem; }
+  .site-nav__brand-mark { width: 2rem; height: 2rem; }
+  .site-nav__brand-text { font-size: 1.25rem; }
+  .site-nav__search-icon { display: none; }
 }
 
 /* In phone landscape, keep the video itself visible before scrolling to details. */
