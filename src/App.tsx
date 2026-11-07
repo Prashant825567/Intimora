@@ -155,7 +155,7 @@ function App() {
       />
 
       {/* Main content */}
-      <main className="max-w-[1600px] mx-auto px-4 pt-24 pb-10">
+      <main className="site-main max-w-[1600px] mx-auto px-4 pt-24 pb-10">
 
         {/* INITIAL LOADING STATE */}
         {initialLoading && (
@@ -219,7 +219,7 @@ function App() {
             {/* Search results header */}
             {searchResults && (
               <div className="mb-6">
-                <h2 className="text-white text-2xl font-bold">
+                <h2 className="mobile-break-words text-white text-2xl font-bold">
                   Search results for <span style={{ color: "#c9a84c" }}>"{searchQuery}"</span>
                 </h2>
                 <p className="text-gray-500 text-sm mt-1">{searchResults.length} videos found</p>
@@ -328,7 +328,7 @@ function App() {
         {!initialLoading && !apiError && videos.length === 0 && searchResults && (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">🔍</div>
-            <h3 className="text-white text-xl font-bold mb-2">No results found for "{searchQuery}"</h3>
+            <h3 className="mobile-break-words text-white text-xl font-bold mb-2">No results found for "{searchQuery}"</h3>
             <p className="text-gray-500">No videos are available yet.</p>
           </div>
         )}

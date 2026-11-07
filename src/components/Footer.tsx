@@ -16,7 +16,7 @@ const Footer: React.FC = () => {
               <p className="text-gray-600 text-xs tracking-wider">Premium Adult Entertainment</p>
             </div>
           </div>
-          <div className="flex items-center gap-6">
+          <div className="site-footer__badges flex items-center gap-6">
             <div className="flex items-center gap-2 text-gray-600 text-xs">
               <Shield className="w-4 h-4 text-green-500" />
               <span>Content Safety</span>

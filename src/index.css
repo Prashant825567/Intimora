@@ -85,3 +85,372 @@ img {
 .fade-in {
   animation: fadeInUp 0.4s ease forwards;
 }
+
+/* Mobile and touch layouts only. Desktop styling above remains unchanged. */
+@media (max-width: 767px), (max-width: 1023px) and (pointer: coarse) {
+  .site-nav__container {
+    padding-inline: 0.75rem;
+  }
+
+  .site-nav__bar {
+    gap: 0.5rem;
+  }
+
+  .site-nav__brand-text,
+  .site-nav__desktop-action,
+  .site-nav__desktop-links {
+    display: none;
+  }
+
+  .site-nav__search {
+    min-width: 0;
+    margin-inline: 0;
+  }
+
+  .site-nav__search-icon {
+    margin-left: 0.75rem;
+  }
+
+  .site-nav__input {
+    width: 0;
+    min-width: 0;
+    padding-inline: 0.5rem;
+    /* iOS does not zoom the page when focusing a 16px input. */
+    font-size: 1rem;
+  }
+
+  .site-nav__clear,
+  .site-nav__submit {
+    flex-shrink: 0;
+  }
+
+  .site-nav__submit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    padding: 0;
+  }
+
+  .site-nav__submit-icon {
+    display: block;
+  }
+
+  .site-nav__submit-text {
+    display: none;
+  }
+
+  .site-nav__actions {
+    gap: 0.25rem;
+  }
+
+  .site-nav__menu-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+
+  .site-nav__mobile-menu {
+    display: block;
+    max-height: calc(100vh - 4rem);
+    max-height: calc(100dvh - 4rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .site-nav__mobile-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #1f2937;
+  }
+
+  .site-nav__mobile-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #1f2937;
+    border-radius: 9999px;
+    color: #9ca3af;
+    font-size: 0.75rem;
+  }
+
+  .site-main {
+    padding-inline: 0.75rem;
+    padding-top: 5rem;
+  }
+
+  .mobile-break-words {
+    overflow-wrap: anywhere;
+  }
+
+  /* A tall dialog can be scrolled instead of being cut off above the screen. */
+  .mobile-overlay {
+    align-items: flex-start;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-block: 1rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-overlay__content {
+    flex-shrink: 0;
+    margin-block: auto;
+  }
+
+  .age-gate__panel,
+  .share-modal__panel {
+    width: calc(100% - 2rem);
+  }
+
+  .age-gate__card {
+    padding: 1.25rem;
+  }
+
+  .age-gate__logo-wrap {
+    margin-bottom: 0.75rem;
+  }
+
+  .age-gate__logo {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+
+  .age-gate__title {
+    font-size: clamp(1.35rem, 7.5vw, 1.875rem);
+  }
+
+  .age-gate__subtitle,
+  .age-gate__warning,
+  .age-gate__terms {
+    margin-bottom: 1rem;
+  }
+
+  .age-gate__warning {
+    padding: 0.75rem;
+  }
+
+  .age-gate__privacy {
+    margin-top: 1rem;
+  }
+
+  .hero-banner {
+    height: auto;
+    min-height: 340px;
+  }
+
+  .hero-banner__content {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    min-height: 340px;
+    max-width: none;
+    padding: 1.25rem 1.25rem 3.5rem;
+  }
+
+  .hero-banner__title {
+    overflow-wrap: anywhere;
+    font-size: 1.5rem;
+    line-height: 1.15;
+  }
+
+  .hero-banner__creator {
+    overflow-wrap: anywhere;
+  }
+
+  .hero-banner__meta {
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+    margin-bottom: 1rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .hero-banner__meta > span:last-child {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .hero-banner__cta {
+    padding: 0.625rem 1rem;
+    font-size: 0.75rem;
+  }
+
+  .hero-banner__previous,
+  .hero-banner__next {
+    top: auto;
+    bottom: 0.65rem;
+    transform: none;
+    translate: 0 0;
+  }
+
+  .hero-banner__next {
+    left: 3.5rem;
+    right: auto;
+  }
+
+  .hero-banner__dots {
+    right: 1rem;
+    bottom: 1.15rem;
+  }
+
+  .video-card__play,
+  .video-card__quick-actions {
+    opacity: 1;
+  }
+
+  .video-card__badge {
+    max-width: calc(100% - 3rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .video-card__title {
+    display: block;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: unset;
+  }
+
+  .video-card__avatar {
+    flex-shrink: 0;
+  }
+
+  .video-card__creator,
+  .video-card__creator-name {
+    min-width: 0;
+  }
+
+  .video-card__creator-name {
+    overflow-wrap: anywhere;
+  }
+
+  .video-card__metadata,
+  .video-card__counts {
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+  }
+
+  .video-card__date {
+    flex-basis: 100%;
+  }
+
+  .video-card__tag,
+  .video-player__tag {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .site-footer__badges {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.75rem 1rem;
+  }
+
+  .video-player__content {
+    min-width: 0;
+  }
+
+  .video-player__play-button {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+
+  .video-player__play-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .video-player__top {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .video-player__top-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .video-player__controls {
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .video-player__info {
+    flex-direction: column;
+    align-items: stretch;
+    margin-top: 0.75rem;
+  }
+
+  .video-player__title {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .video-player__creator {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .video-player__avatar {
+    flex-shrink: 0;
+  }
+
+  .video-player__creator-name,
+  .share-modal__creator {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .share-modal__panel {
+    padding: 1.25rem;
+  }
+
+  .share-modal__thumbnail {
+    flex-shrink: 0;
+  }
+
+  .share-modal__title {
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .share-modal__options {
+    gap: 0.5rem;
+  }
+
+  .share-modal__option {
+    min-width: 0;
+    gap: 0.5rem;
+    padding: 0.625rem;
+  }
+
+  .share-modal__option-label {
+    font-size: 0.75rem;
+  }
+
+  .share-modal__url {
+    min-width: 0;
+  }
+}
+
+/* In phone landscape, keep the video itself visible before scrolling to details. */
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 767px),
+       (orientation: landscape) and (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .video-player__content {
+    max-width: calc(160vh - 6.25rem);
+    max-width: calc(160dvh - 6.25rem);
+  }
+}
