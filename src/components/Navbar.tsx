@@ -1,20 +1,28 @@
 import React, { useState } from "react";
 import { Search, X, Menu, Bell, User, ChevronDown } from "lucide-react";
+import type { BrowseView } from "../types/navigation";
 
 interface NavbarProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onSearchSubmit: (q: string) => void;
+  activeView: BrowseView;
+  onNavigate: (view: BrowseView) => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSubmit }) => {
+const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSubmit, activeView, onNavigate }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
 
-  const categories = ["Home", "Trending", "New", "Exclusive", "Categories"];
+  const categories: BrowseView[] = ["Home", "Trending", "New", "Exclusive", "Categories"];
+  const navigate = (view: BrowseView) => {
+    onNavigate(view);
+    setMobileMenuOpen(false);
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setMobileMenuOpen(false);
     onSearchSubmit(searchQuery);
   };
 
@@ -105,8 +113,11 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
           {categories.map((cat) => (
             <button
               key={cat}
+              type="button"
+              onClick={() => navigate(cat)}
+              aria-current={activeView === cat ? "page" : undefined}
               className="px-4 py-1.5 rounded-full text-xs font-semibold tracking-wider whitespace-nowrap transition-all hover:text-yellow-400"
-              style={{ color: cat === "Home" ? "#c9a84c" : "#666" }}
+              style={{ color: activeView === cat ? "#c9a84c" : "#666" }}
             >
               {cat === "Categories" ? (
                 <span className="flex items-center gap-1">
@@ -126,7 +137,11 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
               {categories.map((cat) => (
                 <button
                   key={cat}
+                  type="button"
+                  onClick={() => navigate(cat)}
+                  aria-current={activeView === cat ? "page" : undefined}
                   className="px-3 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-yellow-400 border border-gray-800 hover:border-yellow-800 transition"
+                  style={activeView === cat ? { color: "#f3d58a", borderColor: "#8c6c32" } : undefined}
                 >
                   {cat}
                 </button>

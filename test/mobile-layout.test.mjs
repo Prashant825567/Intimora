@@ -87,6 +87,29 @@ async function assertInViewport(locator, width, height, label) {
   assert.ok(box.y >= -1 && box.y + box.height <= height + 1, `${label} cannot be reached vertically`);
 }
 
+async function assertHeroImagesFit(page, label) {
+  await page.locator(".hero-banner__image").evaluate((image) => image.decode());
+  const layout = await page.locator(".hero-banner").evaluate((hero) => {
+    const media = hero.querySelector(".hero-banner__media").getBoundingClientRect();
+    const image = hero.querySelector(".hero-banner__image");
+    const title = hero.querySelector(".hero-banner__title").getBoundingClientRect();
+    const navigation = document.querySelector(".site-nav").getBoundingClientRect();
+    return {
+      fit: getComputedStyle(image).objectFit,
+      transform: getComputedStyle(image).transform,
+      naturalWidth: image.naturalWidth,
+      separate: title.right <= media.left + 1 || title.left >= media.right - 1 || title.top >= media.bottom - 1 || title.bottom <= media.top + 1,
+      belowNav: hero.getBoundingClientRect().top >= navigation.bottom - 1,
+    };
+  });
+  assert.equal(layout.fit, "contain", `${label}: hero image must not crop`);
+  assert.equal(layout.transform, "none", `${label}: hero image must not zoom`);
+  assert.ok(layout.naturalWidth > 0, `${label}: hero image loads`);
+  assert.ok(layout.separate, `${label}: title must be outside the image panel`);
+  assert.ok(layout.belowNav, `${label}: navigation must not cover the hero`);
+  assert.equal(await page.locator(".video-card__image").first().evaluate((image) => getComputedStyle(image).objectFit), "contain", `${label}: card image must not crop`);
+}
+
 async function assertTextNotClipped(locator, label) {
   const dimensions = await locator.evaluate((element) => ({
     width: element.clientWidth,
@@ -156,6 +179,7 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       assert.equal(await brand.locator(".site-nav__brand-mark").evaluate((image) => image.complete && image.naturalWidth > 0), true, `${label}: brand image loaded`);
       assert.equal(await page.evaluate(() => [...document.fonts].some((font) => font.family === "Dancing Script" && font.status === "loaded")), true, `${label}: local wordmark font loaded`);
       await assertPageFits(page, `${label} home`);
+      await assertHeroImagesFit(page, label);
       await assertTextNotClipped(page.locator(".hero-banner__title"), `${label} featured title`);
       await assertTextNotClipped(page.locator(".hero-banner__creator"), `${label} featured creator`);
       const heroContentsFit = await page.locator(".hero-banner").evaluate((hero) => {
@@ -260,14 +284,17 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
     await desktop.evaluate(() => sessionStorage.setItem("intimora_age_verified", "true"));
     await desktop.reload({ waitUntil: "domcontentloaded" });
     await desktop.getByRole("button", { name: /WATCH NOW/i }).waitFor();
-    assert.equal(await desktop.locator(".hero-banner").evaluate((element) => element.getBoundingClientRect().height), 380);
+    assert.ok(await desktop.locator(".hero-banner").evaluate((element) => element.getBoundingClientRect().height >= 380));
+    await assertHeroImagesFit(desktop, "desktop");
     assert.equal(await desktop.locator(".site-nav__brand-text").evaluate((element) => getComputedStyle(element).display), "block");
     assert.equal(await desktop.locator(".site-nav__menu-toggle").evaluate((element) => getComputedStyle(element).display), "none");
     await assertPageFits(desktop, "desktop home");
+    await desktop.locator(".video-card__play").first().hover();
+    assert.equal(await desktop.locator(".video-card__image").first().evaluate((image) => getComputedStyle(image).transform), "none", "hover does not zoom or crop card images");
     assert.doesNotMatch(await desktop.locator("body").innerText(), /premium/i, "no premium controls, badges, tags, or footer links");
 
     // A video previously tagged with the retired tier remains visible and playable.
-    const retiredCard = desktop.locator(".video-card__title").filter({ hasText: "Catalog item remains available" }).locator("../..");
+    const retiredCard = desktop.locator('section[aria-label="All Videos"] .video-card__title').filter({ hasText: "Catalog item remains available" }).locator("../..");
     assert.equal(await retiredCard.count(), 1);
     assert.equal(await retiredCard.locator(".video-card__badge").count(), 0);
     assert.deepEqual(await retiredCard.locator(".video-card__tag").allTextContents(), ["#recent", "#hd"]);
@@ -282,7 +309,9 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
     await desktop.getByRole("textbox", { name: "Search videos" }).fill("Catalog item");
     await desktop.getByRole("textbox", { name: "Search videos" }).press("Enter");
     await desktop.getByText("Search results for").waitFor();
-    assert.equal(await desktop.locator(".video-card__title").filter({ hasText: "Catalog item remains available" }).count(), 1);
+    const searchResult = desktop.locator(".video-card__title").filter({ hasText: "Catalog item remains available" });
+    await searchResult.waitFor();
+    assert.equal(await searchResult.count(), 1);
   } finally {
     await browser?.close();
     await server.close();

@@ -4,6 +4,10 @@ export interface Video {
   thumbnail: string;
   duration: string;
   views: string;
+  viewCount: number;
+  // Unix milliseconds; null when the source did not provide a trustworthy date.
+  createdAt: number | null;
+  isExclusive: boolean;
   likes: number;
   category: string;
   tags: string[];
@@ -71,19 +75,26 @@ export const generateMockVideos = (count: number, startId = 0): Video[] => {
   return Array.from({ length: count }, (_, i) => {
     const idx = (startId + i) % videoTitles.length;
     const creator = creators[idx % creators.length];
+    const displayViews = views[idx % views.length];
+    const viewCount = parseFloat(displayViews) * (displayViews.endsWith("M") ? 1_000_000 : 1_000);
+    const daysAgo = Math.floor(Math.random() * 30) + 1;
+    const category = categories[idx % categories.length];
     return {
       id: `video-${startId + i}`,
       title: videoTitles[idx],
       thumbnail: `${thumbnails[idx % thumbnails.length]}&sig=${startId + i}`,
       duration: durations[idx % durations.length],
-      views: views[idx % views.length],
+      views: displayViews,
+      viewCount,
+      createdAt: Date.now() - daysAgo * 86_400_000,
+      isExclusive: true,
       likes: Math.floor(Math.random() * 50000) + 1000,
-      category: categories[idx % categories.length],
+      category,
       tags: ["exclusive", "premium", "hd", "full scene"].slice(0, (idx % 3) + 2),
       videoUrl: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
       creator: creator.name,
       creatorAvatar: creator.avatar,
-      uploadedAt: `${Math.floor(Math.random() * 30) + 1} days ago`,
+      uploadedAt: `${daysAgo} days ago`,
       description: "Premium exclusive content. Available for all verified members.",
     };
   });

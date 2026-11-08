@@ -155,7 +155,9 @@ test("browser calls public discovery and backends directly, with per-tab routing
     state.forcedNext = renewed;
     const search = pageA.getByRole("textbox", { name: "Search videos" });
     await search.fill("demo");
+    const searchResponse = pageA.waitForResponse((response) => response.url().startsWith(`${backends[renewed]}/api/search?`));
     await search.press("Enter");
+    await searchResponse;
     await pageA.getByText("Search results for").waitFor();
     assert.equal(state.discoveries, 4);
     assert.ok(state.calls.some((call) => call.label === renewed && call.path === "/api/search"));

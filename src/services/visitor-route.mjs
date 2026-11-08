@@ -22,13 +22,17 @@ function apiUrl(base, path, method) {
     if (route.origin !== "https://route.invalid" || route.hash || !ROUTE.test(route.pathname)) return null;
     const action = /\/(?:like|share)$/.test(route.pathname);
     if ((action && method !== "POST") || (!action && method !== "GET")) return null;
-    const allowedParam = route.pathname === "/api/videos" ? "cursor"
-      : route.pathname === "/api/search" ? "q" : null;
+    const allowedParams = route.pathname === "/api/videos" ? ["cursor", "limit"]
+      : route.pathname === "/api/search" ? ["q"] : [];
     for (const key of route.searchParams.keys()) {
-      if (key !== allowedParam || route.searchParams.getAll(key).length !== 1) return null;
+      if (!allowedParams.includes(key) || route.searchParams.getAll(key).length !== 1) return null;
     }
     if (route.pathname === "/api/search" && (route.searchParams.get("q") || "").length > 200) return null;
-    if (route.pathname === "/api/videos" && (route.searchParams.get("cursor") || "").length > 1024) return null;
+    if (route.pathname === "/api/videos") {
+      if ((route.searchParams.get("cursor") || "").length > 1024) return null;
+      const limit = route.searchParams.get("limit");
+      if (limit !== null && (!/^(?:[1-9]|[1-4]\d|50)$/.test(limit))) return null;
+    }
     return `${base}${route.pathname}${route.search}`;
   } catch {
     return null;

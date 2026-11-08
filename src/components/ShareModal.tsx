@@ -80,7 +80,7 @@ const ShareModal: React.FC<ShareModalProps> = ({ video, onClose }) => {
 
         {/* Video preview */}
         <div className="flex items-center gap-3 p-3 bg-gray-900 rounded-xl mb-5">
-          <img src={video.thumbnail} crossOrigin="anonymous" referrerPolicy="no-referrer" alt={video.title} className="share-modal__thumbnail w-16 h-10 object-cover rounded-lg" />
+          <img src={video.thumbnail} crossOrigin="anonymous" referrerPolicy="no-referrer" alt={video.title} className="share-modal__thumbnail w-16 h-10 object-contain bg-black rounded-lg" />
           <div className="flex-1 min-w-0">
             <p className="share-modal__title text-white text-sm font-medium truncate">{video.title}</p>
             <p className="share-modal__creator text-gray-500 text-xs">{video.creator}</p>
