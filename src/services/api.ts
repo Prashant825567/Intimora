@@ -15,8 +15,10 @@ export interface ApiVideo {
   shares?: number;
   category?: string;
   tags?: string[];
+  exclusive?: boolean;
   creator?: string;
   uploadedAt?: string;
+  // Normalized to Unix milliseconds when present.
   createdAt?: number;
   thumbnailUrl?: string;
   streamUrl?: string;
@@ -29,7 +31,7 @@ export interface BackendCursor {
   backend: string;
 }
 
-interface CatalogResponse {
+export interface CatalogResponse {
   ok: true;
   data: { videos: ApiVideo[]; nextCursor: BackendCursor | null; backend: string };
 }
@@ -46,6 +48,50 @@ function nonnegativeNumber(value: unknown): number | undefined {
   return Number.isFinite(number) && number >= 0 ? number : undefined;
 }
 
+function timestampMs(value: unknown): number | undefined {
+  const numeric = nonnegativeNumber(value);
+  if (numeric !== undefined && numeric > 0) {
+    const milliseconds = numeric < 100_000_000_000 ? numeric * 1000 : numeric;
+    return Number.isFinite(new Date(milliseconds).getTime()) ? milliseconds : undefined;
+  }
+  if (typeof value !== "string") return undefined;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (dateOnly) {
+    const [year, month, day] = dateOnly.slice(1).map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
+      ? date.getTime() : undefined;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}T/i.test(value)) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function hasExclusiveMetadata(video: Record<string, unknown>): boolean {
+  const metadata = video.metadata && typeof video.metadata === "object" && !Array.isArray(video.metadata)
+    ? video.metadata as Record<string, unknown> : {};
+  const exclusiveFlag = (value: unknown): boolean | undefined => {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "exclusive"].includes(normalized)) return true;
+    if (["false", "0", "non-exclusive", "public"].includes(normalized)) return false;
+    return undefined;
+  };
+  // The backend's explicit boolean is authoritative; labels are only a
+  // fallback for other public API formats that do not supply a flag.
+  const flag = exclusiveFlag(video.exclusive) ?? exclusiveFlag(metadata.exclusive);
+  if (flag !== undefined) return flag;
+  const exclusiveLabel = (value: unknown) => typeof value === "string"
+    && value.trim().replace(/^#+\s*/, "").toLowerCase() === "exclusive";
+  const labels = [video.category, metadata.category, video.metadata];
+  for (const tags of [video.tags, metadata.tags]) {
+    if (Array.isArray(tags)) labels.push(...tags.slice(0, 30));
+  }
+  return labels.some(exclusiveLabel);
+}
+
 function publicVideo(input: unknown): ApiVideo | null {
   if (!input || typeof input !== "object") return null;
   const video = input as Record<string, unknown>;
@@ -59,9 +105,10 @@ function publicVideo(input: unknown): ApiVideo | null {
     likes: nonnegativeNumber(video.likes),
     shares: nonnegativeNumber(video.shares),
     category: safeText(video.category, 100),
+    exclusive: hasExclusiveMetadata(video),
     creator: safeText(video.creator, 200),
     uploadedAt: safeText(video.uploadedAt, 100),
-    createdAt: nonnegativeNumber(video.createdAt),
+    createdAt: timestampMs(video.createdAt) ?? timestampMs(video.uploadedAt),
     tags: Array.isArray(video.tags) ? video.tags.slice(0, 30)
       .map((tag: unknown) => safeText(tag, 80)).filter((tag: string | undefined): tag is string => tag !== undefined) : undefined,
     thumbnailUrl: typeof video.thumbnailUrl === "string" ? video.thumbnailUrl : undefined,
@@ -96,7 +143,7 @@ const formatDuration = (seconds: number | undefined): string => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
-const formatViews = (views: number | undefined): string => {
+export const formatViews = (views: number | undefined): string => {
   if (!views) return "0";
   if (views >= 1000000) return `${(views / 1000000).toFixed(1)}M`;
   if (views >= 1000) return `${(views / 1000).toFixed(1)}K`;
@@ -104,9 +151,8 @@ const formatViews = (views: number | undefined): string => {
 };
 
 const formatDate = (createdAt: number | undefined): string => {
-  if (!createdAt) return "Just now";
-  const ts = createdAt > 1e12 ? createdAt / 1000 : createdAt;
-  const diff = Date.now() / 1000 - ts;
+  if (!createdAt) return "Date unavailable";
+  const diff = Math.max(0, (Date.now() - createdAt) / 1000);
   if (diff < 60) return "Just now";
   if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
@@ -131,9 +177,13 @@ async function catalog(path: string, pinnedBackend?: string): Promise<CatalogRes
 // Start discovery when the visitor arrives, including while the age gate is open.
 export const primeBackendSelection = () => visitor.selectBackend();
 
-export const fetchVideos = (cursor?: BackendCursor | null) => {
+export const fetchVideos = (cursor?: BackendCursor | null, limit?: number) => {
   const params = new URLSearchParams();
   if (cursor) params.set("cursor", String(cursor.value));
+  if (limit !== undefined) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw unavailable();
+    params.set("limit", String(limit));
+  }
   const query = params.size ? `?${params}` : "";
   return catalog(`/api/videos${query}`, cursor?.backend);
 };
@@ -164,8 +214,11 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
   thumbnail: safeMediaUrl(apiVideo.thumbnailUrl, apiVideo.id, "thumbnail", backend),
   duration: formatDuration(apiVideo.duration),
   views: formatViews(apiVideo.views),
+  viewCount: apiVideo.views ?? 0,
+  createdAt: apiVideo.createdAt ?? null,
+  isExclusive: apiVideo.exclusive === true,
   likes: apiVideo.likes || 0,
-  category: apiVideo.category || "New",
+  category: apiVideo.category || (apiVideo.exclusive ? "Exclusive" : ""),
   tags: apiVideo.tags || [],
   videoUrl: safeMediaUrl(apiVideo.streamUrl, apiVideo.id, "stream", backend),
   backendBase: backend,

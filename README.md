@@ -10,6 +10,12 @@ Discovery starts on arrival, including while the age gate is open. Each new brow
 
 Shared `/watch/<id>` links do not contain a backend address. A recipient discovers their own backend and opens that ID there. The backends therefore need to serve the same video IDs for links to work across visitors. A missing video or failed request shows a generic message without a server address.
 
+## Catalog views
+
+The first catalog page is shown immediately; subsequent pages are collected from the same selected backend in the background, with overlapping IDs and repeated terminal cursors handled safely. Trending ranks the collected catalog by numeric view count. New shows all uploads from the visitor's local calendar day, or yesterday's uploads only when today has none; older, future, and undated items are not treated as new. Home includes both normal and exclusive videos. Exclusive uses a public `exclusive: true` flag (also accepting an exact `Exclusive` category or tag when no explicit flag is supplied); an explicit `exclusive: false` takes precedence over labels. The backend must include this metadata in its public response; the frontend cannot infer flags that were not returned. Categories currently shows only a Coming Soon message.
+
+The current backend offers date-ordered pages rather than server-side trending or exclusive queries. To avoid presenting an incomplete ranking as complete, the UI reports a retryable incomplete-catalog state on failed, ambiguous, or excessive pagination. Page requests are capped at 50 items and the scan at 120 pages; large catalogs are better served by dedicated server-side sort/filter endpoints. Entering a feed after the catalog has been idle for a minute refreshes the metadata. Cards render incrementally as the visitor scrolls.
+
 ## Security and CORS
 
 Direct access means the discovery response, selected backend URL, API responses and network requests are visible in browser developer tools. **Do not send secrets, tokens, signed URLs, private error details, or other confidential data in public Worker/backend responses or public build variables.** The frontend can filter displayed fields, but it cannot hide a response that the browser has already received. Secrets belong in backend-only environment variables and must not be committed. Public URLs and CORS are not authentication: protect sensitive backend routes with proper authentication, authorization and rate limits. The age gate is not age or identity verification.

@@ -15,7 +15,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
 
   return (
     <div
-      className="group rounded-xl overflow-hidden border border-gray-800/50 hover:border-yellow-800/50 transition-all duration-300 cursor-pointer"
+      className="video-card group rounded-xl overflow-hidden border border-gray-800/50 hover:border-yellow-800/50 transition-all duration-300 cursor-pointer"
       style={{
         background: "#0d0d0d",
         boxShadow: hovered ? "0 8px 30px rgba(201,168,76,0.12), 0 2px 8px rgba(0,0,0,0.5)" : "0 2px 8px rgba(0,0,0,0.3)",
@@ -25,27 +25,18 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
       onMouseLeave={() => setHovered(false)}
     >
       {/* Thumbnail */}
-      <div className="relative overflow-hidden" style={{ aspectRatio: "16/9" }}>
+      <div className="video-card__media relative overflow-hidden" style={{ aspectRatio: "16/9" }}>
         <img
           src={video.thumbnail}
           crossOrigin="anonymous"
           referrerPolicy="no-referrer"
           alt={video.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+          className="video-card__image w-full h-full object-contain"
           loading="lazy"
         />
 
-        {/* Overlay */}
-        <div
-          className="absolute inset-0 transition-opacity duration-300"
-          style={{
-            background: "linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.2) 50%, transparent 100%)",
-            opacity: hovered ? 1 : 0.6,
-          }}
-        />
-
         {/* Category badge */}
-        {!isPremiumLabel(video.category) && (
+        {video.category && !isPremiumLabel(video.category) && (
           <div
             className="video-card__badge absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold tracking-wider"
             style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
@@ -60,18 +51,17 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
           {video.duration}
         </div>
 
-        {/* Play button */}
-        <div
-          className="video-card__play absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200"
+        {/* The play control is separate from the image, which never zooms or crops. */}
+        <button
+          type="button"
+          aria-label={`Play ${video.title}`}
+          className="video-card__play absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity duration-200"
           onClick={() => onPlay(video)}
         >
-          <div
-            className="w-14 h-14 rounded-full flex items-center justify-center transition-transform hover:scale-110"
-            style={{ background: "rgba(201,168,76,0.9)", boxShadow: "0 0 25px rgba(201,168,76,0.6)" }}
-          >
+          <span className="video-card__play-icon w-14 h-14 rounded-full flex items-center justify-center">
             <Play className="w-7 h-7 text-black ml-1" fill="black" />
-          </div>
-        </div>
+          </span>
+        </button>
 
         {/* Quick actions on hover */}
         <div className="video-card__quick-actions absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200">

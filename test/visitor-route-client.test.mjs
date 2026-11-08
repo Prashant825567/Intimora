@@ -169,8 +169,10 @@ test("invalid or credential-bearing targets, malformed routes, and bad discovery
   } });
   await visitor.requestJson("/api/videos");
   assert.equal(urls.at(-1), `${backendA}/base/api/videos`);
+  await visitor.requestJson("/api/videos?cursor=next&limit=50");
+  assert.equal(urls.at(-1), `${backendA}/base/api/videos?cursor=next&limit=50`);
   const before = urls.length;
-  for (const route of ["/api/admin", "/api/videos/../admin", "//evil.example/api/videos", "/api/videos?unexpected=1"]) {
+  for (const route of ["/api/admin", "/api/videos/../admin", "//evil.example/api/videos", "/api/videos?unexpected=1", "/api/videos?limit=0", "/api/videos?limit=51", "/api/videos?limit=1&limit=2", "/api/videos?limit=secret-marker"]) {
     await assert.rejects(visitor.requestJson(route), { message: "Content is temporarily unavailable" });
   }
   assert.equal(urls.length, before);
