@@ -185,13 +185,15 @@ test("browser calls public discovery and backends directly, with per-tab routing
       return { status: response.status, contentRange: response.headers.get("content-range"), body: await response.text() };
     });
     assert.deepEqual(range, { status: 206, contentRange: "bytes 2-5/10", body: "2345" });
-    const likeResponse = pageA.waitForResponse((response) => response.url() === `${backends[original]}/api/videos/video-1/like` && response.request().method() === "POST");
+    // A guest like goes to sign-in instead of making an unauthenticated or
+    // optimistic mutation. Return to the original video for the share checks.
     await pageA.getByRole("button", { name: "Like video" }).click();
-    await likeResponse;
-    const unlikeResponse = pageA.waitForResponse((response) => response.url() === `${backends[original]}/api/videos/video-1/like` && response.request().method() === "POST");
-    await pageA.getByRole("button", { name: "Unlike video" }).click();
-    await unlikeResponse;
-    assert.ok(state.calls.some((call) => call.label === original && call.path.endsWith("/like") && call.method === "POST" && call.body === "{}"));
+    await pageA.getByRole("heading", { name: "Sign in to your account" }).waitFor();
+    assert.equal(new URL(pageA.url()).pathname, "/login");
+    assert.ok(!state.calls.some((call) => call.path?.endsWith("/like")));
+    await pageA.goBack();
+    await pageA.getByRole("button", { name: /WATCH NOW/i }).click();
+    await pageA.locator("#player-container").waitFor();
 
     await pageA.evaluate(() => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text) => { window.__copied = text; } } });

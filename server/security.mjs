@@ -3,8 +3,10 @@
 export function applySecurityHeaders(res, { development = false, allowPreviewEmbed = false } = {}) {
   const policy = [
     "default-src 'self'",
-    `script-src 'self'${development ? " 'unsafe-inline'" : ""}`,
+    `script-src 'self' https://apis.google.com${development ? " 'unsafe-inline'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
+    // Firebase's Google sign-in uses its hosted auth iframe and Google APIs.
+    "frame-src 'self' https://intimora-app.firebaseapp.com https://accounts.google.com",
     // The static client contacts the public discovery service and its selected
     // HTTPS backend directly; the rest of the policy remains restrictive.
     "img-src 'self' data: https:",

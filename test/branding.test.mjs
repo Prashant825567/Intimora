@@ -94,7 +94,7 @@ test("the production server serves icons and robots.txt to crawler user agents",
       const response = await fetch(`${base}${pathname}`, { headers: { "User-Agent": "Googlebot-Image" } });
       assert.equal(response.status, 200, pathname);
       assert.ok(response.headers.get("content-type").startsWith(contentType), pathname);
-      if (pathname === "/") assert.match(response.headers.get("content-security-policy"), /script-src 'self';/);
+      if (pathname === "/") assert.match(response.headers.get("content-security-policy"), /script-src 'self' https:\/\/apis\.google\.com;/);
     }
   } finally {
     if (server) {

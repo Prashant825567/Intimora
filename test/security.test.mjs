@@ -141,7 +141,7 @@ after(async () => {
 test("production pages have security headers and cannot serve private files", async () => {
   const response = await fetch(`${appUrl}/`);
   assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-security-policy"), /script-src 'self';/);
+  assert.match(response.headers.get("content-security-policy"), /script-src 'self' https:\/\/apis\.google\.com;/);
   assert.match(response.headers.get("content-security-policy"), /frame-ancestors 'none'/);
   assert.equal(response.headers.get("x-frame-options"), "DENY");
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");

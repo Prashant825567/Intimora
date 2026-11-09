@@ -9,6 +9,7 @@ const projectDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const contentTypes = new Map([
   [".html", "text/html; charset=utf-8"],
   [".txt", "text/plain; charset=utf-8"],
+  [".xml", "application/xml; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
   [".png", "image/png"],
@@ -35,7 +36,8 @@ function serveStatic(req, res, distDir) {
     if (pathname.includes("\\") || pathname.includes("\0") || pathname.split("/").some((part) => part.startsWith("."))) {
       return respond(res, 404, "Not found");
     }
-    if (pathname === "/" || /^\/watch\/[A-Za-z0-9_-]{1,128}\/?$/.test(pathname)) pathname = "/index.html";
+    if (pathname === "/" || /^\/watch\/[A-Za-z0-9_-]{1,128}\/?$/.test(pathname)
+      || /^\/(?:login|profile|referral|dashboard)\/?$/.test(pathname)) pathname = "/index.html";
     const extension = path.extname(pathname).toLowerCase();
     const contentType = contentTypes.get(extension);
     if (!contentType) return respond(res, 404, "Not found");

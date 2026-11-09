@@ -15,6 +15,8 @@
     "node": ">=20.19.0 <25.0.0"
   },
   "dependencies": {
+    "@firebase/app": "0.16.2",
+    "@firebase/auth": "1.13.6",
     "@fontsource/dancing-script": "5.3.0",
     "clsx": "2.1.1",
     "lucide-react": "^1.69.0",
