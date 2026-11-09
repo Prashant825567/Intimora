@@ -397,6 +397,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
               onClick={() => onLike(video)}
               aria-label={liked ? "Unlike video" : "Like video"}
               aria-pressed={liked}
+              aria-busy={likePending || undefined}
+              title={video.likes === null ? "Like count unavailable" : `${video.likes.toLocaleString()} likes`}
               disabled={likePending}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border transition-all ${
                 liked
@@ -404,11 +406,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
                   : "bg-gray-800 border-gray-700 text-gray-300 hover:border-yellow-700 hover:text-yellow-400"
               }`}
             >
-              <ThumbsUp className={`w-4 h-4 ${liked ? "fill-current" : ""}`} />
-              {video.likes.toLocaleString()}
+              <ThumbsUp className={`w-4 h-4 ${liked ? "fill-current" : ""} ${likePending ? "animate-pulse" : ""}`} />
+              {video.likes === null ? "—" : video.likes.toLocaleString()}
             </button>
-            <button type="button" onClick={() => onSave(video)} aria-label={saved ? "Remove saved video" : "Save video"} aria-pressed={saved} disabled={savePending} className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border transition ${saved ? "bg-yellow-500/20 border-yellow-500 text-yellow-400" : "border-gray-700 bg-gray-800 text-gray-300 hover:border-yellow-700 hover:text-yellow-400"}`}>
-              <Heart className={`w-4 h-4 ${saved ? "fill-current" : ""}`} />
+            <button type="button" onClick={() => onSave(video)} aria-label={saved ? "Remove saved video" : "Save video"} aria-pressed={saved} aria-busy={savePending || undefined} disabled={savePending} className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border transition ${saved ? "bg-yellow-500/20 border-yellow-500 text-yellow-400" : "border-gray-700 bg-gray-800 text-gray-300 hover:border-yellow-700 hover:text-yellow-400"}`}>
+              <Heart className={`w-4 h-4 ${saved ? "fill-current" : ""} ${savePending ? "animate-pulse" : ""}`} />
               {saved ? "Saved" : "Save"}
             </button>
             <button
@@ -424,6 +426,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             </button>
           </div>
         </div>
+        {(likePending || savePending) && (
+          <p role="status" className="mt-2 px-2 text-xs text-gray-400">
+            {likePending && savePending ? "Saving like and video…" : likePending ? "Saving like…" : "Saving video…"}
+          </p>
+        )}
         {actionError && <p role="alert" className="account-action-error">{actionError}</p>}
       </div>
     </div>

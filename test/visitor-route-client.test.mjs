@@ -197,3 +197,75 @@ test("untrusted stored timestamps cannot extend a route and backward clocks expi
   assert.equal((await visitor.requestJson("/api/videos")).backend, backendA);
   assert.equal(discoveries, 2);
 });
+
+test("optional public like-count requests are bounded, read-only, pinned, and do not disrupt routing", async () => {
+  const calls = [];
+  let discoveries = 0;
+  let failCounts = false;
+  let oversized = false;
+  const visitor = client({ storage: null, fetcher: async (url, init) => {
+    calls.push({ url, init });
+    if (url === discoveryUrl) {
+      discoveries += 1;
+      return Response.json({ ok: true, data: { server: backendA } });
+    }
+    if (url.includes("/api/likes/counts")) {
+      if (failCounts) return Response.json({ ok: false }, { status: 503 });
+      if (oversized) return new Response(JSON.stringify({ ok: true, data: { padding: "x".repeat(33_000) } }));
+      return Response.json({ ok: true, data: { counts: [{ id: "video-1", likes: 4, version: 2 }] } });
+    }
+    return Response.json({ ok: true });
+  } });
+  await visitor.requestJson("/api/videos");
+  const result = await visitor.requestJson("/api/likes/counts?ids=video-1%2Cvideo-2", undefined, backendA);
+  assert.equal(result.body.data.counts[0].likes, 4);
+  const request = calls.at(-1);
+  assert.equal(request.init.method, "GET");
+  assert.equal(request.init.credentials, "omit");
+  assert.equal(request.init.headers, undefined, "public counts never carry an auth token");
+  const before = calls.length;
+  const tooMany = Array.from({ length: 21 }, (_, index) => `video-${index}`).join(",");
+  for (const route of [
+    "/api/likes/counts", "/api/likes/counts?ids=", "/api/likes/counts?ids=one,one",
+    "/api/likes/counts?ids=../private", "/api/likes/counts?ids=one&ids=two",
+    "/api/likes/counts?ids=one&token=secret", `/api/likes/counts?ids=${tooMany}`,
+  ]) await assert.rejects(visitor.requestJson(route, undefined, backendA), { message: "Content is temporarily unavailable" });
+  await assert.rejects(visitor.requestJson("/api/likes/counts?ids=one", { method: "POST" }, backendA), { message: "Content is temporarily unavailable" });
+  assert.equal(calls.length, before);
+  failCounts = true;
+  await assert.rejects(visitor.requestJson("/api/likes/counts?ids=video-1", undefined, backendA), { message: "Content is temporarily unavailable" });
+  failCounts = false;
+  oversized = true;
+  await assert.rejects(visitor.requestJson("/api/likes/counts?ids=video-1", undefined, backendA), { message: "Content is temporarily unavailable" });
+  await visitor.requestJson("/api/videos");
+  assert.equal(discoveries, 1, "an unavailable optional endpoint does not evict the active backend");
+});
+
+test("aborting an optional like poll cancels its request without changing the backend", async () => {
+  let discoveries = 0;
+  let aborted = false;
+  let started;
+  const requestStarted = new Promise((resolve) => { started = resolve; });
+  const visitor = client({ storage: null, fetcher: async (url, init) => {
+    if (url === discoveryUrl) {
+      discoveries += 1;
+      return Response.json({ ok: true, data: { server: backendA } });
+    }
+    if (url.includes("/api/likes/counts")) {
+      started();
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => { aborted = true; reject(new Error("aborted")); }, { once: true });
+      });
+    }
+    return Response.json({ ok: true });
+  } });
+  await visitor.requestJson("/api/videos");
+  const controller = new AbortController();
+  const pending = visitor.requestJson("/api/likes/counts?ids=one", { signal: controller.signal }, backendA);
+  await requestStarted;
+  controller.abort();
+  await assert.rejects(pending, { message: "Content is temporarily unavailable" });
+  assert.equal(aborted, true);
+  await visitor.requestJson("/api/videos");
+  assert.equal(discoveries, 1);
+});

@@ -8,7 +8,8 @@ export interface Video {
   // Unix milliseconds; null when the source did not provide a trustworthy date.
   createdAt: number | null;
   isExclusive: boolean;
-  likes: number;
+  // Null means the public API did not provide a trustworthy count.
+  likes: number | null;
   category: string;
   tags: string[];
   videoUrl: string;

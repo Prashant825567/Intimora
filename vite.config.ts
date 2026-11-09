@@ -63,6 +63,9 @@ export default defineConfig(({ mode }) => {
       __INTIMORA_AUTH_BACKENDS__: JSON.stringify(authBackends),
       // Enable only after the backend returns privacy-filtered referral users.
       __INTIMORA_SAFE_REFERRALS__: JSON.stringify(env.INTIMORA_PUBLIC_SAFE_REFERRALS === "1"),
+      // Poll public counts only after every selected backend implements the
+      // versioned, privacy-safe contract documented in the README.
+      __INTIMORA_LIVE_LIKES__: JSON.stringify(env.INTIMORA_PUBLIC_LIVE_LIKES === "1"),
     },
     // Vite's default VITE_ prefix can accidentally expose secrets at build time.
     // Only explicitly public variables may be referenced by client code.

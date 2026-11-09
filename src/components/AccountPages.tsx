@@ -48,6 +48,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
   const [tree, setTree] = useState<ReferralTree | null>(null);
   const [treeError, setTreeError] = useState(false);
   const [treeLoading, setTreeLoading] = useState(false);
+  const [treeRevision, setTreeRevision] = useState(0);
 
   useEffect(() => {
     setName(account.identity?.displayName || "");
@@ -57,6 +58,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
   }, [account.identity?.uid]);
 
   const ownCode = account.profile?.referralCode;
+  const profileBackend = account.profile?.backendBase;
   const identity = account.identity;
   useEffect(() => {
     let cancelled = false;
@@ -67,13 +69,13 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
       return;
     }
     setTreeLoading(true);
-    getReferralTree(identity, ownCode).then((result) => {
+    getReferralTree(identity, ownCode, profileBackend).then((result) => {
       if (!cancelled) setTree(result);
     }).catch(() => {
       if (!cancelled) setTreeError(true);
     }).finally(() => { if (!cancelled) setTreeLoading(false); });
     return () => { cancelled = true; };
-  }, [page, identity, ownCode]);
+  }, [page, identity, ownCode, profileBackend, treeRevision]);
 
   const submitProfile = (event: FormEvent) => {
     event.preventDefault();
@@ -227,9 +229,10 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
       </section>
       <section className="dashboard__section" aria-label="Referral network">
         <h2><Users size={19} /> Your referral network</h2>
+        {referralsEnabled && !treeLoading && !treeError && tree && <button type="button" className="catalog-status__retry" onClick={() => setTreeRevision((revision) => revision + 1)}>Refresh referrals</button>}
         {!referralsEnabled ? <p className="dashboard__empty">Referral details are temporarily unavailable while privacy protection is updated.</p>
           : treeLoading ? <p className="dashboard__empty">Loading referrals…</p>
-            : treeError ? <p className="dashboard__empty" role="alert">Could not load referrals right now.</p>
+            : treeError ? <div className="dashboard__empty"><p role="alert">Could not load referrals right now.</p><button type="button" className="catalog-status__retry" onClick={() => setTreeRevision((revision) => revision + 1)}>Retry referrals</button></div>
               : tree?.direct.length ? <>
                 <p className="account-hint">Direct: {tree.direct.length} · Level 2: {tree.level2.length}</p>
                 <div className="referral-tree">{tree.direct.map((item) => (
