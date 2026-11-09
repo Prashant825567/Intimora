@@ -7,11 +7,13 @@ interface VideoCardProps {
   video: Video;
   onPlay: (video: Video) => void;
   onShare: (video: Video) => void;
+  onSave: (video: Video) => void;
+  saved: boolean;
+  savePending: boolean;
 }
 
-const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
+const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, saved, savePending }) => {
   const [hovered, setHovered] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   return (
     <div
@@ -66,8 +68,11 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare }) => {
         {/* Quick actions on hover */}
         <div className="video-card__quick-actions absolute top-2 right-2 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
           <button
-            onClick={(e) => { e.stopPropagation(); setSaved(!saved); }}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onSave(video); }}
             aria-label={saved ? "Remove saved video" : "Save video"}
+            aria-pressed={saved}
+            disabled={savePending}
             className={`p-1.5 rounded-full transition-all ${saved ? "bg-yellow-500 text-black" : "bg-black/70 text-white hover:bg-yellow-500 hover:text-black"}`}
           >
             <Heart className="w-3.5 h-3.5" fill={saved ? "currentColor" : "none"} />

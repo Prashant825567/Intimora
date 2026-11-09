@@ -138,12 +138,13 @@ test("pinned requests use their original backend while a new selection is discov
   assert.equal((await visitor.requestJson("/api/videos?cursor=next%20page", undefined, backendA)).backend, backendA);
   assert.equal(await visitor.selectBackend(), backendB);
   assert.equal((await visitor.requestJson("/api/search?q=new")).backend, backendB);
-  assert.equal((await visitor.requestJson("/api/videos/video-1/like", { method: "POST" }, backendA)).backend, backendA);
+  // Likes now require Firebase auth; the public client cannot send them.
+  await assert.rejects(visitor.requestJson("/api/videos/video-1/like", { method: "POST" }, backendA), { message: "Content is temporarily unavailable" });
   assert.equal((await visitor.requestJson("/api/videos/video-1/share", { method: "POST" }, backendA)).backend, backendA);
-  const like = calls.find((call) => call.url === `${backendA}/api/videos/video-1/like`);
-  assert.equal(like.method, "POST");
-  assert.equal(like.body, "{}");
-  assert.equal(like.headers["Content-Type"], "application/json");
+  const share = calls.find((call) => call.url === `${backendA}/api/videos/video-1/share`);
+  assert.equal(share.method, "POST");
+  assert.equal(share.body, "{}");
+  assert.equal(share.headers["Content-Type"], "application/json");
   assert.ok(calls.some((call) => call.url === `${backendA}/api/videos?cursor=next%20page`));
 });
 

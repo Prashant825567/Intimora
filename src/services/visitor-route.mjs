@@ -4,7 +4,7 @@ const STORAGE_KEY = "intimora_direct_backend_v1";
 const MAX_TTL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const UNAVAILABLE = "Content is temporarily unavailable";
-const ROUTE = /^\/api\/(?:search|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/(?:like|share))?)?)$/;
+const ROUTE = /^\/api\/(?:search|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/share)?)?)$/;
 
 function isReloadOrHistoryNavigation() {
   try {
@@ -20,7 +20,7 @@ function apiUrl(base, path, method) {
   try {
     const route = new URL(path, "https://route.invalid");
     if (route.origin !== "https://route.invalid" || route.hash || !ROUTE.test(route.pathname)) return null;
-    const action = /\/(?:like|share)$/.test(route.pathname);
+    const action = /\/share$/.test(route.pathname);
     if ((action && method !== "POST") || (!action && method !== "GET")) return null;
     const allowedParams = route.pathname === "/api/videos" ? ["cursor", "limit"]
       : route.pathname === "/api/search" ? ["q"] : [];

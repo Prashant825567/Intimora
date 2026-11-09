@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://intimora.new.tg/sitemap.xml

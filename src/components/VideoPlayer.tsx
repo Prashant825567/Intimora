@@ -1,55 +1,76 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useLayoutEffect } from "react";
 import {
   Play, Pause, Volume2, VolumeX, Maximize, Minimize,
-  SkipBack, SkipForward, Settings, Share2, Heart,
+  SkipBack, SkipForward, Share2, Heart,
   ThumbsUp, Flag, X
 } from "lucide-react";
 import type { Video } from "../data/mockVideos";
-import { likeVideo } from "../services/api";
 import { isPremiumLabel } from "../utils/video-labels";
 
 interface VideoPlayerProps {
   video: Video;
+  startOnOpen: boolean;
   onClose: () => void;
   onShare: (video: Video) => void;
+  liked: boolean;
+  saved: boolean;
+  likePending: boolean;
+  savePending: boolean;
+  onLike: (video: Video) => void;
+  onSave: (video: Video) => void;
+  actionError: string;
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) => {
+type BufferedRange = { start: number; end: number };
+
+// Only the selected player is preloaded, after the age gate. This is a browser
+// hint rather than a byte limit; honor data-saver and very slow connections.
+function preloadHint(): "auto" | "metadata" {
+  const connection = typeof navigator === "undefined" ? undefined
+    : (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  return connection?.saveData || connection?.effectiveType === "slow-2g" || connection?.effectiveType === "2g"
+    ? "metadata" : "auto";
+}
+
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
+  const playAttempt = useRef(0);
+  const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [preload] = useState(preloadHint);
   const [playing, setPlaying] = useState(false);
+  const [buffering, setBuffering] = useState(false);
+  const [playbackError, setPlaybackError] = useState("");
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [liked, setLiked] = useState(false);
-  const [likeCount, setLikeCount] = useState(video.likes);
-  const [quality, setQuality] = useState("1080p");
-  const [showSettings, setShowSettings] = useState(false);
-  const [buffered, setBuffered] = useState(0);
-  const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [buffered, setBuffered] = useState<BufferedRange[]>([]);
 
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onTimeUpdate = () => setCurrentTime(v.currentTime);
-    const onDuration = () => setDuration(v.duration);
-    const onProgress = () => {
-      if (v.buffered.length > 0) {
-        setBuffered((v.buffered.end(v.buffered.length - 1) / v.duration) * 100);
-      }
-    };
-    v.addEventListener("timeupdate", onTimeUpdate);
-    v.addEventListener("loadedmetadata", onDuration);
-    v.addEventListener("progress", onProgress);
-    return () => {
-      v.removeEventListener("timeupdate", onTimeUpdate);
-      v.removeEventListener("loadedmetadata", onDuration);
-      v.removeEventListener("progress", onProgress);
-    };
+  useEffect(() => () => {
+    playAttempt.current += 1;
+    if (controlsTimer.current) clearTimeout(controlsTimer.current);
   }, []);
+
+  const updateBuffered = (v: HTMLVideoElement) => {
+    const total = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+    const ranges: BufferedRange[] = [];
+    if (total) {
+      for (let i = 0; i < v.buffered.length; i += 1) {
+        const start = Math.max(0, Math.min(100, v.buffered.start(i) / total * 100));
+        const end = Math.max(start, Math.min(100, v.buffered.end(i) / total * 100));
+        ranges.push({ start, end });
+      }
+    }
+    setBuffered(ranges);
+  };
+
+  const updateDuration = (v: HTMLVideoElement) => {
+    setDuration(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0);
+    updateBuffered(v);
+  };
 
   const resetControlsTimer = () => {
     setShowControls(true);
@@ -57,11 +78,58 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
     controlsTimer.current = setTimeout(() => setShowControls(false), 3000);
   };
 
+  const startPlayback = (v: HTMLVideoElement, automatic = false) => {
+    const attempt = ++playAttempt.current;
+    setPlaybackError("");
+    setBuffering(v.readyState < HTMLMediaElement.HAVE_FUTURE_DATA);
+    const failed = (error: unknown) => {
+      if (attempt !== playAttempt.current || videoRef.current !== v) return;
+      setPlaying(false);
+      setBuffering(false);
+      setShowControls(true);
+      const blocked = error instanceof DOMException && error.name === "NotAllowedError";
+      // If an automatic start is blocked, leave the large play button visible
+      // so the user can explicitly start it with a gesture.
+      if (blocked && automatic) return;
+      setPlaybackError(blocked ? "Playback was blocked. Please try again." : "This video could not be played. Please try again.");
+    };
+    try {
+      // A rejected play() must not leave the UI stuck in the playing state.
+      const result = v.play();
+      if (result) void result.catch(failed);
+    } catch (error) { failed(error); }
+  };
+
+  useLayoutEffect(() => {
+    // This commit follows the user's play click; shared links skip this step.
+    // A browser may still require a second gesture, handled by startPlayback.
+    if (startOnOpen && videoRef.current) startPlayback(videoRef.current, true);
+  }, [startOnOpen]);
+
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (playing) { v.pause(); setPlaying(false); }
-    else { v.play(); setPlaying(true); }
+    if (!v.paused && !v.ended) {
+      playAttempt.current += 1;
+      v.pause();
+    } else {
+      startPlayback(v);
+    }
+    resetControlsTimer();
+  };
+
+  const retryPlayback = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    // Reload only after a media error. For a blocked play request, retain any
+    // data already buffered instead of starting a second download.
+    if (v.error) {
+      setCurrentTime(0);
+      setDuration(0);
+      setBuffered([]);
+      v.load();
+    }
+    startPlayback(v);
     resetControlsTimer();
   };
 
@@ -75,22 +143,39 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseFloat(e.target.value);
     setVolume(val);
-    if (videoRef.current) videoRef.current.volume = val;
+    if (videoRef.current) {
+      videoRef.current.volume = val;
+      videoRef.current.muted = val === 0;
+    }
     setMuted(val === 0);
+  };
+
+  const seekTo = (seconds: number) => {
+    const v = videoRef.current;
+    if (!v || !duration || !Number.isFinite(seconds)) return;
+    v.currentTime = Math.max(0, Math.min(duration, seconds));
+    setCurrentTime(v.currentTime);
+    resetControlsTimer();
   };
 
   const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = progressRef.current?.getBoundingClientRect();
-    if (!rect || !videoRef.current) return;
-    const pct = (e.clientX - rect.left) / rect.width;
-    videoRef.current.currentTime = pct * duration;
+    if (!rect?.width || !duration) return;
+    seekTo((e.clientX - rect.left) / rect.width * duration);
   };
 
   const skip = (seconds: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = Math.max(0, Math.min(duration, currentTime + seconds));
-    }
-    resetControlsTimer();
+    if (videoRef.current) seekTo(videoRef.current.currentTime + seconds);
+  };
+
+  const handleProgressKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowDown") skip(-10);
+    else if (e.key === "ArrowRight" || e.key === "ArrowUp") skip(10);
+    else if (e.key === "Home") seekTo(0);
+    else if (e.key === "End") seekTo(duration);
+    else return;
+    e.preventDefault();
   };
 
   const toggleFullscreen = () => {
@@ -106,27 +191,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
   };
 
   const formatTime = (t: number) => {
-    if (!t || isNaN(t)) return "0:00";
+    if (!Number.isFinite(t) || t <= 0) return "0:00";
     const m = Math.floor(t / 60);
     const s = Math.floor(t % 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
-  const handleLike = async () => {
-    const newLiked = !liked;
-    setLiked(newLiked);
-    setLikeCount((c) => (newLiked ? c + 1 : c - 1));
-    
-    try {
-      await likeVideo(video.id, video.backendBase);
-    } catch {
-      // Revert on failure
-      setLiked(!newLiked);
-      setLikeCount((c) => (newLiked ? c - 1 : c + 1));
-    }
-  };
-
-  const progress = duration ? (currentTime / duration) * 100 : 0;
+  const progress = duration ? Math.max(0, Math.min(100, (currentTime / duration) * 100)) : 0;
 
   return (
     <div className="mobile-overlay fixed inset-0 z-[200] flex items-center justify-center bg-black/95" style={{ backdropFilter: "blur(10px)" }}>
@@ -142,20 +213,57 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
           <video
             ref={videoRef}
             src={video.videoUrl}
+            poster={video.thumbnail}
             crossOrigin="anonymous"
+            preload={preload}
+            playsInline
             className="w-full h-full object-contain"
             onClick={togglePlay}
-            onEnded={() => setPlaying(false)}
+            onPlay={() => { setPlaying(true); setPlaybackError(""); }}
+            onPlaying={() => { setPlaying(true); setBuffering(false); setPlaybackError(""); }}
+            onCanPlay={(e) => { if (!e.currentTarget.paused) setBuffering(false); }}
+            onWaiting={(e) => { if (!e.currentTarget.paused && !e.currentTarget.ended) setBuffering(true); }}
+            onStalled={(e) => { if (!e.currentTarget.paused && e.currentTarget.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) setBuffering(true); }}
+            onPause={() => { playAttempt.current += 1; setPlaying(false); setBuffering(false); }}
+            onEnded={() => { setPlaying(false); setBuffering(false); setShowControls(true); }}
+            onError={() => {
+              playAttempt.current += 1;
+              setPlaying(false);
+              setBuffering(false);
+              setShowControls(true);
+              setPlaybackError("This video could not be loaded. Please try again.");
+            }}
+            onTimeUpdate={(e) => setCurrentTime(Number.isFinite(e.currentTarget.currentTime) ? e.currentTarget.currentTime : 0)}
+            onLoadedMetadata={(e) => updateDuration(e.currentTarget)}
+            onDurationChange={(e) => updateDuration(e.currentTarget)}
+            onProgress={(e) => updateBuffered(e.currentTarget)}
+            onSeeked={(e) => updateBuffered(e.currentTarget)}
           />
 
-          {/* Play overlay */}
-          {!playing && (
-            <div className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
-              <div
+          {/* The poster and native preload are used only for the selected video. */}
+          {!playing && !playbackError && (
+            <button type="button" aria-label="Play video" className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
+              <span
                 className="video-player__play-button w-20 h-20 rounded-full flex items-center justify-center transition-all hover:scale-110"
                 style={{ background: "rgba(201,168,76,0.9)", boxShadow: "0 0 30px rgba(201,168,76,0.5)" }}
               >
                 <Play className="video-player__play-icon w-10 h-10 text-black ml-1" fill="black" />
+              </span>
+            </button>
+          )}
+          {buffering && playing && (
+            <div role="status" className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span className="flex items-center gap-2 rounded-full bg-black/80 px-4 py-2 text-sm text-white">
+                <span aria-hidden="true" className="h-4 w-4 rounded-full border-2 border-yellow-400/30 border-t-yellow-400 animate-spin" />
+                Buffering…
+              </span>
+            </div>
+          )}
+          {playbackError && (
+            <div role="alert" className="absolute inset-0 flex items-center justify-center px-4 text-center">
+              <div className="rounded-xl bg-black/85 p-3 text-sm text-white">
+                <p>{playbackError}</p>
+                <button type="button" onClick={retryPlayback} className="mt-2 rounded-full bg-yellow-500 px-4 py-1 font-semibold text-black hover:bg-yellow-400">Try again</button>
               </div>
             </div>
           )}
@@ -187,11 +295,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
             {/* Progress bar */}
             <div
               ref={progressRef}
-              className="mx-4 mt-2 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group/progress"
+              role="slider"
+              aria-label="Seek video"
+              aria-valuemin={0}
+              aria-valuemax={duration}
+              aria-valuenow={Math.min(duration, currentTime)}
+              aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+              aria-disabled={!duration}
+              tabIndex={0}
+              className="mx-4 mt-2 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group/progress focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
               onClick={handleProgressClick}
+              onKeyDown={handleProgressKeyDown}
             >
-              {/* Buffered */}
-              <div className="absolute inset-y-0 left-0 bg-gray-500 rounded-full" style={{ width: `${buffered}%` }} />
+              {/* Seeking can create disjoint buffered ranges. */}
+              {buffered.map((range, index) => (
+                <div key={index} className="video-player__buffered-range absolute inset-y-0 bg-gray-500 rounded-full" style={{ left: `${range.start}%`, width: `${range.end - range.start}%` }} />
+              ))}
               {/* Progress */}
               <div
                 className="absolute inset-y-0 left-0 rounded-full transition-all"
@@ -206,13 +325,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
 
             {/* Controls row */}
             <div className="video-player__controls flex items-center px-4 py-3 gap-3">
-              <button onClick={() => skip(-10)} className="text-white hover:text-yellow-400 transition">
+              <button type="button" onClick={() => skip(-10)} aria-label="Back 10 seconds" className="text-white hover:text-yellow-400 transition">
                 <SkipBack className="w-5 h-5" />
               </button>
-              <button onClick={togglePlay} className="text-white hover:text-yellow-400 transition">
+              <button type="button" onClick={playbackError ? retryPlayback : togglePlay} aria-label={playing ? "Pause video" : "Play video"} className="text-white hover:text-yellow-400 transition">
                 {playing ? <Pause className="w-7 h-7" fill="currentColor" /> : <Play className="w-7 h-7" fill="currentColor" />}
               </button>
-              <button onClick={() => skip(10)} className="text-white hover:text-yellow-400 transition">
+              <button type="button" onClick={() => skip(10)} aria-label="Forward 10 seconds" className="text-white hover:text-yellow-400 transition">
                 <SkipForward className="w-5 h-5" />
               </button>
 
@@ -238,29 +357,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
 
               <div className="flex-1" />
 
-              {/* Quality */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowSettings(!showSettings)}
-                  className="text-white hover:text-yellow-400 transition flex items-center gap-1 text-xs"
-                >
-                  <Settings className="w-4 h-4" />
-                  <span className="hidden sm:inline">{quality}</span>
-                </button>
-                {showSettings && (
-                  <div className="absolute bottom-8 right-0 bg-gray-900 border border-gray-700 rounded-lg overflow-hidden text-xs">
-                    {["2160p", "1080p", "720p", "480p", "360p"].map((q) => (
-                      <button
-                        key={q}
-                        onClick={() => { setQuality(q); setShowSettings(false); }}
-                        className={`block w-full px-4 py-2 text-left hover:bg-gray-800 transition ${quality === q ? "text-yellow-400" : "text-white"}`}
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* The backend exposes one source, not selectable quality variants. */}
+              <span className="hidden sm:block text-xs text-gray-400" title="Playback uses the uploaded video">Original</span>
 
               <button onClick={toggleFullscreen} className="text-white hover:text-yellow-400 transition">
                 {fullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
@@ -295,9 +393,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
           {/* Action buttons */}
           <div className="flex items-center gap-2 flex-wrap">
             <button
-              onClick={handleLike}
+              type="button"
+              onClick={() => onLike(video)}
               aria-label={liked ? "Unlike video" : "Like video"}
               aria-pressed={liked}
+              disabled={likePending}
               className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border transition-all ${
                 liked
                   ? "bg-yellow-500/20 border-yellow-500 text-yellow-400"
@@ -305,11 +405,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
               }`}
             >
               <ThumbsUp className={`w-4 h-4 ${liked ? "fill-current" : ""}`} />
-              {likeCount.toLocaleString()}
+              {video.likes.toLocaleString()}
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border border-gray-700 bg-gray-800 text-gray-300 hover:border-yellow-700 hover:text-yellow-400 transition">
-              <Heart className="w-4 h-4" />
-              Save
+            <button type="button" onClick={() => onSave(video)} aria-label={saved ? "Remove saved video" : "Save video"} aria-pressed={saved} disabled={savePending} className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold border transition ${saved ? "bg-yellow-500/20 border-yellow-500 text-yellow-400" : "border-gray-700 bg-gray-800 text-gray-300 hover:border-yellow-700 hover:text-yellow-400"}`}>
+              <Heart className={`w-4 h-4 ${saved ? "fill-current" : ""}`} />
+              {saved ? "Saved" : "Save"}
             </button>
             <button
               onClick={() => onShare(video)}
@@ -324,6 +424,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onClose, onShare }) =>
             </button>
           </div>
         </div>
+        {actionError && <p role="alert" className="account-action-error">{actionError}</p>}
       </div>
     </div>
   );

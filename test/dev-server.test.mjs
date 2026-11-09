@@ -28,7 +28,7 @@ test("development preview blocks private files without disclosing filesystem pat
     await server.listen();
     const address = server.httpServer.address();
     const base = `http://127.0.0.1:${address.port}`;
-    for (const pathname of ["/server/api-proxy.mjs", "/.env", "/@fs/etc/passwd", "/vite.config.ts", "/render.yaml"]) {
+    for (const pathname of ["/server/api-proxy.mjs", "/scripts/sitemap.mjs", "/scripts/request-sitemap-refresh.mjs", "/.env", "/@fs/etc/passwd", "/vite.config.ts", "/render.yaml"]) {
       const response = await fetch(`${base}${pathname}`);
       assert.equal(response.status, 404);
       const body = await response.text();
@@ -37,6 +37,11 @@ test("development preview blocks private files without disclosing filesystem pat
     }
     for (const pathname of ["/", "/src/main.tsx", "/@vite/client", "/@react-refresh", "/node_modules/vite/dist/client/env.mjs"]) {
       assert.equal((await fetch(`${base}${pathname}`)).status, 200, pathname);
+    }
+    for (const pathname of ["/login", "/profile", "/referral", "/dashboard", "/login/", "/profile/", "/referral/", "/dashboard/"]) {
+      const response = await fetch(`${base}${pathname}`, { headers: { Accept: "text/html" } });
+      assert.equal(response.status, 200, pathname);
+      assert.match(await response.text(), /<div id="root"><\/div>/);
     }
   } finally {
     await server.close();

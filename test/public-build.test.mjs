@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -23,9 +24,14 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     const html = await readFile(path.join(output, "index.html"), "utf8");
     assert.match(html, /"@type":\s*"WebSite"/);
     assert.match(html, /"name":\s*"Intimora"/);
-    for (const file of ["favicon-16.png", "favicon-32.png", "favicon-192.png", "favicon.ico", "apple-touch-icon.png", "logo.svg", "robots.txt"]) {
+    for (const file of ["favicon-16.png", "favicon-32.png", "favicon-192.png", "favicon.ico", "apple-touch-icon.png", "logo.svg", "robots.txt", "sitemap.xml"]) {
       assert.ok((await readFile(path.join(output, file))).length > 0, `${file} is published`);
     }
+    assert.match(await readFile(path.join(output, "sitemap.xml"), "utf8"), /<loc>https:\/\/intimora\.new\.tg\/<\/loc>/);
+    const verification = await readFile(path.join(output, "f4423f712c6f1c15fb7fc4c833c8c020.html"));
+    assert.equal(createHash("sha256").update(verification).digest("hex"), "338cf2a6211bfad50c5b806bc3b8a2df53f0549e593a6d2ae9279cb4708ae985");
+    assert.deepEqual(verification, await readFile(path.join(root, "public/f4423f712c6f1c15fb7fc4c833c8c020.html")));
+    assert.ok(js.some((content) => content.includes("intimora-app.firebaseapp.com")), "the public Firebase web app is bundled");
 
     const secret = "secret-query-marker-0123456789";
     let error;
@@ -38,17 +44,33 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     assert.ok(error, "credential-bearing discovery URLs must be rejected at build time");
     assert.match(`${error.stdout}\n${error.stderr}`, /Invalid public discovery URL/);
     assert.ok(!`${error.stdout}\n${error.stderr}`.includes(secret), "build errors must not print the invalid value");
+
+    error = undefined;
+    try {
+      await run("npm", ["run", "build", "--", "--outDir", output], {
+        cwd: root, timeout: 120_000,
+        env: { ...process.env, INTIMORA_PUBLIC_API_DISCOVERY_URL: publicUrl, INTIMORA_PUBLIC_AUTH_BACKENDS: `https://api.example/?token=${secret}` },
+      });
+    } catch (caught) { error = caught; }
+    assert.ok(error, "credential-bearing token destinations must be rejected at build time");
+    assert.match(`${error.stdout}\n${error.stderr}`, /Invalid trusted auth backend configuration/);
+    assert.ok(!`${error.stdout}\n${error.stderr}`.includes(secret), "auth configuration errors must not print the invalid value");
   } finally {
     await rm(output, { recursive: true, force: true });
   }
 });
 
-test("Render Blueprint describes a static site with a watch rewrite and direct-access CSP", async () => {
+test("Render Blueprint describes a static site with watch/account rewrites and a scoped Firebase CSP", async () => {
   const yaml = await readFile(path.join(root, "render.yaml"), "utf8");
   assert.match(yaml, /runtime:\s*static/);
   assert.match(yaml, /staticPublishPath:\s*\.\/dist/);
   assert.match(yaml, /source:\s*\/watch\/\*/);
-  assert.match(yaml, /destination:\s*\/index\.html/);
+  for (const route of ["login", "profile", "referral", "dashboard"]) {
+    assert.match(yaml, new RegExp(`source:\\s*\\/${route}\\n\\s*destination:\\s*\\/index\\.html`));
+    assert.match(yaml, new RegExp(`source:\\s*\\/${route}\\/\\n\\s*destination:\\s*\\/index\\.html`));
+  }
+  assert.match(yaml, /script-src 'self' https:\/\/apis\.google\.com;/);
+  assert.match(yaml, /frame-src 'self' https:\/\/intimora-app\.firebaseapp\.com https:\/\/accounts\.google\.com;/);
   assert.match(yaml, /connect-src 'self' https:/);
   assert.match(yaml, /media-src 'self' blob: https:/);
   assert.doesNotMatch(yaml, /startCommand:/);

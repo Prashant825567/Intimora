@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { applySecurityHeaders } from "./server/security.mjs";
 import { DEFAULT_DISCOVERY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
+import { sitemapPlugin } from "./scripts/sitemap-plugin.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -14,6 +15,17 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, "");
   const discoveryUrl = publicHttpsUrl(env.INTIMORA_PUBLIC_API_DISCOVERY_URL || DEFAULT_DISCOVERY_URL);
   if (!discoveryUrl) throw new Error("Invalid public discovery URL: use HTTPS without credentials, a query, or a fragment.");
+  // Firebase tokens go only to explicitly trusted backend origins, never to an
+  // arbitrary host that a compromised discovery response might return.
+  const authBackends = (env.INTIMORA_PUBLIC_AUTH_BACKENDS || "https://api-intimora.vercel.app,https://intimora-api1.vercel.app")
+    .split(",").map((value) => value.trim()).map((value) => {
+      const validated = publicHttpsUrl(value);
+      if (!validated) throw new Error("Invalid trusted auth backend configuration.");
+      const url = new URL(validated);
+      if (url.pathname !== "/" || url.port) throw new Error("Invalid trusted auth backend configuration.");
+      return url.origin;
+    });
+  if (!authBackends.length || new Set(authBackends).size !== authBackends.length) throw new Error("Invalid trusted auth backend configuration.");
   const developmentSecurity: Plugin = {
     name: "development-security",
     configureServer(server) {
@@ -33,7 +45,7 @@ export default defineConfig(({ mode }) => {
         }
         const parts = pathname.split("/").filter(Boolean);
         const privateFile = pathname.startsWith("/@fs/")
-          || /^\/(?:server|test)(?:\/|$)/i.test(pathname)
+          || /^\/(?:server|scripts|test)(?:\/|$)/i.test(pathname)
           || parts.some((part) => /^(?:\.env(?:\..*)?|\.git)$/i.test(part))
           || /\.(?:pem|key|p12|pfx)$/i.test(pathname)
           || /^\/(?:vite\.config\.ts|render\.yaml|package(?:-lock)?\.json|tsconfig\.json)$/i.test(pathname);
@@ -46,7 +58,12 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: "/",
-    define: { __INTIMORA_DISCOVERY_URL__: JSON.stringify(discoveryUrl) },
+    define: {
+      __INTIMORA_DISCOVERY_URL__: JSON.stringify(discoveryUrl),
+      __INTIMORA_AUTH_BACKENDS__: JSON.stringify(authBackends),
+      // Enable only after the backend returns privacy-filtered referral users.
+      __INTIMORA_SAFE_REFERRALS__: JSON.stringify(env.INTIMORA_PUBLIC_SAFE_REFERRALS === "1"),
+    },
     // Vite's default VITE_ prefix can accidentally expose secrets at build time.
     // Only explicitly public variables may be referenced by client code.
     envPrefix: "INTIMORA_PUBLIC_",
@@ -55,10 +72,13 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       allowedHosts: [".e2b.app"],
-      fs: { deny: [".env", ".env.*", "*.{crt,pem,key,p12,pfx}", "**/.git/**", "**/server/**"] },
+      fs: { deny: [".env", ".env.*", "*.{crt,pem,key,p12,pfx}", "**/.git/**", "**/server/**", "**/scripts/**"] },
     },
+    // Prebundle the auth SDK so a first login visit doesn't trigger a Vite
+    // dependency-optimization reload in the middle of the age gate.
+    optimizeDeps: { include: ["@firebase/app", "@firebase/auth"] },
     build: { sourcemap: false },
-    plugins: [developmentSecurity, react(), tailwindcss()],
+    plugins: [developmentSecurity, react(), tailwindcss(), sitemapPlugin({ discoveryUrl })],
     resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   };
 });

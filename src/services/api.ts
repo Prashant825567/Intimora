@@ -195,11 +195,6 @@ export async function fetchVideoDetail(id: string, backend?: string) {
   return { ok: true as const, video: publicVideo(result.body?.data), backend: result.backend };
 }
 
-export async function likeVideo(id: string, backend?: string) {
-  await visitor.requestJson(`${videoPath(id)}/like`, { method: "POST" }, backend);
-  return { ok: true as const };
-}
-
 export async function shareVideo(id: string, backend?: string) {
   await visitor.requestJson(`${videoPath(id)}/share`, { method: "POST" }, backend);
   return { ok: true as const };

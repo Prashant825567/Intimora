@@ -8,9 +8,12 @@ interface NavbarProps {
   onSearchSubmit: (q: string) => void;
   activeView: BrowseView;
   onNavigate: (view: BrowseView) => void;
+  accountLabel: string;
+  accountInitial?: string;
+  onAccountClick: () => void;
 }
 
-const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSubmit, activeView, onNavigate }) => {
+const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSubmit, activeView, onNavigate, accountLabel, accountInitial, onAccountClick }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
 
@@ -93,8 +96,8 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
               <Bell className="w-5 h-5" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
             </button>
-            <button aria-label="Account" className="site-nav__desktop-action p-2 rounded-full text-gray-400 hover:text-yellow-400 transition">
-              <User className="w-5 h-5" />
+            <button type="button" aria-label={accountLabel} onClick={() => { setMobileMenuOpen(false); onAccountClick(); }} className="site-nav__account rounded-full text-gray-400 hover:text-yellow-400 transition">
+              {accountInitial ? <span aria-hidden="true">{accountInitial}</span> : <User className="w-5 h-5" />}
             </button>
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -149,7 +152,7 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
             </div>
             <div className="site-nav__mobile-actions">
               <button type="button" className="site-nav__mobile-action"><Bell className="w-4 h-4" /> Notifications</button>
-              <button type="button" className="site-nav__mobile-action"><User className="w-4 h-4" /> Account</button>
+              <button type="button" className="site-nav__mobile-action" onClick={() => { setMobileMenuOpen(false); onAccountClick(); }}><User className="w-4 h-4" /> Account</button>
             </div>
           </div>
         )}

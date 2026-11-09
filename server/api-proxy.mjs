@@ -52,7 +52,7 @@ function isAllowedAddress(address, allowLoopback) {
   return !blockedAddresses.check(address, family === 4 ? "ipv4" : "ipv6");
 }
 
-function validateNetworkUrl(value, { allowLoopback = false, allowQuery = true } = {}) {
+export function validateNetworkUrl(value, { allowLoopback = false, allowQuery = true } = {}) {
   if (typeof value !== "string" || value.length > MAX_URL_LENGTH) throw new Error("Invalid network target");
   const url = new URL(value);
   const host = unbracket(url.hostname);
@@ -133,7 +133,7 @@ function createTokenCodec(secret, now) {
   };
 }
 
-function requestUpstream(url, { method = "GET", headers = {}, allowLoopback = false, allowRedirect, redirects = 3 } = {}) {
+export function requestUpstream(url, { method = "GET", headers = {}, allowLoopback = false, allowRedirect, redirects = 3, timeoutMs = 15_000 } = {}) {
   return new Promise((resolve, reject) => {
     const local = allowLoopback && isLoopbackHost(url.hostname);
     const requester = url.protocol === "https:" ? httpsRequest : httpRequest;
@@ -154,7 +154,7 @@ function requestUpstream(url, { method = "GET", headers = {}, allowLoopback = fa
         try {
           const next = validateNetworkUrl(new URL(location, url).href, { allowLoopback });
           if (!allowRedirect?.(next, url)) throw new Error("Redirect is not permitted");
-          resolve(requestUpstream(next, { method, headers, allowLoopback, allowRedirect, redirects: redirects - 1 }));
+          resolve(requestUpstream(next, { method, headers, allowLoopback, allowRedirect, redirects: redirects - 1, timeoutMs }));
         } catch (error) {
           reject(error);
         }
@@ -163,16 +163,16 @@ function requestUpstream(url, { method = "GET", headers = {}, allowLoopback = fa
       resolve(incoming);
     });
     // Limit DNS/connect/header time as well as inactivity after a response starts.
-    const headerTimer = setTimeout(() => outgoing.destroy(new Error("Upstream timeout")), 15_000);
+    const headerTimer = setTimeout(() => outgoing.destroy(new Error("Upstream timeout")), timeoutMs);
     outgoing.once("response", () => clearTimeout(headerTimer));
     outgoing.once("error", () => clearTimeout(headerTimer));
-    outgoing.setTimeout(15_000, () => outgoing.destroy(new Error("Upstream timeout")));
+    outgoing.setTimeout(timeoutMs, () => outgoing.destroy(new Error("Upstream timeout")));
     outgoing.on("error", reject);
     outgoing.end();
   });
 }
 
-async function readJson(incoming, maxBytes = MAX_JSON_BYTES) {
+export async function readJson(incoming, maxBytes = MAX_JSON_BYTES) {
   const chunks = [];
   let bytes = 0;
   for await (const chunk of incoming) {
