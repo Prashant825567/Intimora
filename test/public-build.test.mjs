@@ -30,6 +30,8 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     assert.equal((html.match(/name="6a97888e-site-verification"/g) || []).length, 1);
     assert.match(head, /<meta\s+name="juicyads-site-verification"\s+content="c7a81b4796e08427b06a280d95a76a9a"\s*\/?\s*>/i);
     assert.equal((html.match(/name="juicyads-site-verification"/g) || []).length, 1);
+    assert.match(head, /<meta\s+name="clckd"\s+content="2190228d4faa7aa0369cc8d0b93efeff"\s*\/?\s*>/i);
+    assert.equal((html.match(/name="clckd"/g) || []).length, 1);
     for (const file of ["favicon-16.png", "favicon-32.png", "favicon-192.png", "favicon.ico", "apple-touch-icon.png", "logo.svg", "robots.txt", "sitemap.xml"]) {
       assert.ok((await readFile(path.join(output, file))).length > 0, `${file} is published`);
     }
