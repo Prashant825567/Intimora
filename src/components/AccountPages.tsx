@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Bookmark, Check, Copy, Heart, Loader2, LogOut, ShieldCheck, Users } from "lucide-react";
 import type { Video } from "../data/mockVideos";
@@ -43,6 +43,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
   const [referral, setReferral] = useState("");
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
+  const finishInFlight = useRef(false);
   const [copied, setCopied] = useState(false);
   const [tree, setTree] = useState<ReferralTree | null>(null);
   const [treeError, setTreeError] = useState(false);
@@ -83,12 +84,13 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
   };
 
   const finishProfile = async (code: string) => {
-    if (busy) return;
+    if (finishInFlight.current) return;
     if (!validName(name) || !validUsername(username)) {
       setFormError("Please complete your name and username first.");
       onPage("profile");
       return;
     }
+    finishInFlight.current = true;
     setBusy(true);
     setFormError("");
     try {
@@ -99,10 +101,15 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
         onPage("profile");
       } else if (error instanceof AccountRequestError && error.code === "invalid_referral") {
         setFormError("That referral code is invalid. Check it or skip this step.");
+      } else if (error instanceof AccountRequestError && error.code === "unconfirmed") {
+        setFormError("We couldn’t confirm your account was saved. Please try again. A referral code is not required.");
       } else {
         setFormError("Could not complete your profile right now. Please try again.");
       }
-    } finally { setBusy(false); }
+    } finally {
+      finishInFlight.current = false;
+      setBusy(false);
+    }
   };
 
   const signIn = async () => {

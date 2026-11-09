@@ -80,7 +80,13 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
   await vite.listen();
   const browser = await chromium.launch({ executablePath: browserPath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const state = { exists, profile: ownProfile, selected, calls: [], failNext: "", failCatalog: false, delayMutation: 0, activeMutations: 0, maxMutations: 0, tree: null };
+  const state = {
+    exists, profile: ownProfile, selected, calls: [], failNext: "", failCatalog: false,
+    delayMutation: 0, activeMutations: 0, maxMutations: 0, tree: null,
+    created: false, registeredBackend: exists ? selected : null, partitionAccounts: false,
+    persistOnCreate: true, staleVerifications: 0, switchAfterCreate: false, switchAfterVerify: false,
+    alreadyExistsOnCreate: false, registrationDelay: 0,
+  };
   await context.addInitScript((delay) => {
     const originalNow = Date.now;
     window.__fixtureAuthDelay = delay;
@@ -113,14 +119,38 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
     if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/user/") || /\/(like|save)$/.test(url.pathname)) {
       if (req.headers().authorization !== `Bearer ${fakeToken}`) return route.fulfill({ status: 401, headers: cors, json: { ok: false, error: "No auth token" } });
     }
-    if (url.pathname === "/api/auth/verify") return route.fulfill({ headers: cors, json: { ok: true, data: { exists: state.exists } } });
-    if (url.pathname === "/api/auth/me") return route.fulfill({ headers: cors, json: { ok: true, data: { user: state.profile } } });
+    const accountExistsHere = () => state.exists && (!state.partitionAccounts || state.registeredBackend === url.origin);
+    if (url.pathname === "/api/auth/verify") {
+      let found = accountExistsHere();
+      if (found && state.created && state.staleVerifications > 0) {
+        state.staleVerifications -= 1;
+        found = false;
+      }
+      if (found && state.switchAfterVerify) {
+        state.switchAfterVerify = false;
+        state.selected = backendB;
+        await page.evaluate(() => { window.__timeOffset = 61_000; });
+      }
+      return route.fulfill({ headers: cors, json: { ok: true, data: { exists: found } } });
+    }
+    if (url.pathname === "/api/auth/me") {
+      if (!accountExistsHere()) return route.fulfill({ status: 404, headers: cors, json: { ok: false, error: "User not found" } });
+      return route.fulfill({ headers: cors, json: { ok: true, data: { user: state.profile } } });
+    }
     if (url.pathname === "/api/auth/profile") {
       const input = req.postDataJSON();
       if (input.username === "taken") return route.fulfill({ status: 400, headers: cors, json: { ok: false, error: "Username already exists" } });
       if (input.referralCode && input.referralCode !== "INVITE-1") return route.fulfill({ status: 400, headers: cors, json: { ok: false, error: "Invalid referral code" } });
-      state.exists = true;
+      if (state.registrationDelay) await new Promise((resolve) => setTimeout(resolve, state.registrationDelay));
+      state.created = true;
+      state.exists = state.persistOnCreate;
+      state.registeredBackend = url.origin;
       state.profile = profile({ name: input.name, username: input.username });
+      if (state.switchAfterCreate) {
+        state.selected = backendB;
+        await page.evaluate(() => { window.__timeOffset = 61_000; });
+      }
+      if (state.alreadyExistsOnCreate) return route.fulfill({ status: 400, headers: cors, json: { ok: false, error: "User already exists" } });
       return route.fulfill({ headers: cors, json: { ok: true, data: { user: state.profile } } });
     }
     const mutation = /^\/api\/videos\/(video-one|video-two)\/(like|save)$/.exec(url.pathname);
@@ -316,9 +346,134 @@ test("new account can skip the referral step", browserOptions, async () => {
     await page.getByRole("button", { name: "Sign in with Google" }).click();
     await page.getByLabel("Username").fill("skip_user");
     await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByLabel("Referral code").fill("IGNORED-IF-SKIPPED");
     await page.getByRole("button", { name: "Skip for now" }).click();
     await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
     assert.equal(JSON.parse(state.calls.find((call) => call.path === "/api/auth/profile").body).referralCode, "");
+    await page.reload();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+  } finally { await fixture.close(); }
+});
+
+async function openNewReferral(fixture, username = "new_user") {
+  const { page, base } = fixture;
+  await page.goto(`${base}/login`);
+  await page.getByRole("button", { name: /I AM 18/i }).click();
+  await page.getByRole("button", { name: "Sign in with Google" }).click();
+  await page.getByLabel("Username").fill(username);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("heading", { name: "Have a referral code?" }).waitFor();
+}
+
+test("finishing with an empty or whitespace referral creates an account just like Skip", browserOptions, async () => {
+  const fixture = await createFixture();
+  const { page, state } = fixture;
+  try {
+    await openNewReferral(fixture);
+    await page.getByLabel("Referral code").fill("   ");
+    await page.getByRole("button", { name: "Finish profile" }).click();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+    const submissions = state.calls.filter((call) => call.path === "/api/auth/profile");
+    assert.equal(submissions.length, 1);
+    assert.equal(JSON.parse(submissions[0].body).referralCode, "");
+    await page.reload();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+  } finally { await fixture.close(); }
+});
+
+test("an invalid referral can be skipped without sending it again", browserOptions, async () => {
+  const fixture = await createFixture();
+  const { page, state } = fixture;
+  try {
+    await openNewReferral(fixture);
+    await page.getByLabel("Referral code").fill("NOT-VALID");
+    await page.getByRole("button", { name: "Finish profile" }).click();
+    await page.getByRole("alert").getByText(/referral code is invalid/i).waitFor();
+    await page.getByRole("button", { name: "Skip for now" }).click();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+    const attempts = state.calls.filter((call) => call.path === "/api/auth/profile");
+    assert.deepEqual(attempts.map((call) => JSON.parse(call.body).referralCode), ["NOT-VALID", ""]);
+  } finally { await fixture.close(); }
+});
+
+test("registration waits for a temporarily stale account lookup instead of returning to referral", browserOptions, async () => {
+  const fixture = await createFixture();
+  const { page, state } = fixture;
+  state.staleVerifications = 2;
+  try {
+    await openNewReferral(fixture);
+    await page.getByRole("button", { name: "Skip for now" }).click();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor({ timeout: 8_000 });
+    assert.equal(state.calls.filter((call) => call.path === "/api/auth/profile").length, 1);
+    assert.equal(state.calls.filter((call) => call.path === "/api/auth/verify").length, 4);
+  } finally { await fixture.close(); }
+});
+
+test("an unpersisted account reports a confirmation error instead of silently looping or faking login", browserOptions, async () => {
+  const fixture = await createFixture();
+  const { page, state } = fixture;
+  state.persistOnCreate = false;
+  try {
+    await openNewReferral(fixture);
+    await page.getByRole("button", { name: "Skip for now" }).click();
+    await page.getByRole("alert").getByText(/couldn.t confirm.*account/i).waitFor({ timeout: 8_000 });
+    assert.equal(await page.getByRole("heading", { name: "Have a referral code?" }).count(), 1);
+    assert.equal(await page.getByRole("heading", { name: "Viewer Name" }).count(), 0);
+    assert.equal(state.calls.filter((call) => call.path === "/api/auth/profile").length, 1);
+    assert.equal(JSON.parse(state.calls.find((call) => call.path === "/api/auth/profile").body).referralCode, "");
+    // Once storage is fixed, the same form can be retried without retyping a code.
+    state.persistOnCreate = true;
+    await page.getByRole("button", { name: "Finish profile" }).click();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+    assert.equal(state.calls.filter((call) => call.path === "/api/auth/profile").length, 2);
+  } finally { await fixture.close(); }
+});
+
+test("returning users load the profile from the backend that verified them", browserOptions, async () => {
+  const fixture = await createFixture({ exists: true });
+  const { page, state, base } = fixture;
+  state.partitionAccounts = true;
+  state.switchAfterVerify = true;
+  try {
+    await page.goto(`${base}/login`);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.getByRole("button", { name: "Sign in with Google" }).click();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor({ timeout: 8_000 });
+    assert.equal(state.calls.find((call) => call.path === "/api/auth/verify").origin, backendA);
+    assert.equal(state.calls.find((call) => call.path === "/api/auth/me").origin, backendA);
+  } finally { await fixture.close(); }
+});
+
+for (const alreadyExists of [false, true]) {
+  test(`registration ${alreadyExists ? "recovers an existing account" : "confirms its write"} on the original backend after discovery changes`, browserOptions, async () => {
+    const fixture = await createFixture();
+    const { page, state } = fixture;
+    state.partitionAccounts = true;
+    state.switchAfterCreate = true;
+    state.alreadyExistsOnCreate = alreadyExists;
+    try {
+      await openNewReferral(fixture);
+      await page.getByRole("button", { name: "Skip for now" }).click();
+      await page.getByRole("heading", { name: "Viewer Name" }).waitFor({ timeout: 8_000 });
+      const createIndex = state.calls.findIndex((call) => call.path === "/api/auth/profile");
+      assert.equal(state.calls[createIndex].origin, backendA);
+      const confirmation = state.calls.slice(createIndex + 1).filter((call) => ["/api/auth/verify", "/api/auth/me"].includes(call.path));
+      assert.ok(confirmation.some((call) => call.path === "/api/auth/verify"));
+      assert.ok(confirmation.some((call) => call.path === "/api/auth/me"));
+      assert.ok(confirmation.every((call) => call.origin === backendA));
+    } finally { await fixture.close(); }
+  });
+}
+
+test("two immediate Skip clicks submit only one registration", browserOptions, async () => {
+  const fixture = await createFixture();
+  const { page, state } = fixture;
+  state.registrationDelay = 200;
+  try {
+    await openNewReferral(fixture);
+    await page.getByRole("button", { name: "Skip for now" }).evaluate((button) => { button.click(); button.click(); });
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+    assert.equal(state.calls.filter((call) => call.path === "/api/auth/profile").length, 1);
   } finally { await fixture.close(); }
 });
 

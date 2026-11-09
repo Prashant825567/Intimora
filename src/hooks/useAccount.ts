@@ -22,13 +22,13 @@ export function useAccount(enabled: boolean) {
   const hydrate = useCallback(async (user: FirebaseUser, sequence: number) => {
     const current = () => mounted.current && generation.current === sequence && currentUser.current?.uid === user.uid;
     try {
-      const exists = await verifyAccount(user);
+      const { exists, backend } = await verifyAccount(user);
       if (!current()) return;
       if (!exists) {
         setState({ status: "needs-profile", identity: user, profile: null });
         return;
       }
-      const profile = await getMyAccount(user);
+      const profile = await getMyAccount(user, backend);
       if (current()) setState({ status: "ready", identity: user, profile });
     } catch {
       if (current()) setState({ status: "error", identity: user, profile: null });
@@ -80,16 +80,37 @@ export function useAccount(enabled: boolean) {
     const user = currentUser.current;
     const sequence = generation.current;
     if (!user || state.status !== "needs-profile") throw new AccountRequestError();
-    try {
-      await createAccount(user, input);
-    } catch (error) {
-      // A previous registration may have succeeded despite a lost response.
-      if (!(error instanceof AccountRequestError) || error.code !== "already_exists") throw error;
-    }
-    if (!mounted.current || currentUser.current?.uid !== user.uid || generation.current !== sequence) return;
+    const current = () => mounted.current && generation.current === sequence && currentUser.current?.uid === user.uid;
+    const backend = await createAccount(user, input);
+    if (!current()) return;
     setState({ status: "checking", identity: user, profile: null });
-    await hydrate(user, sequence);
-  }, [hydrate, state.status]);
+    try {
+      // Account storage may take a moment to become readable. Retry only a
+      // missing record, on the same backend, without submitting another write.
+      const delays = [250, 750];
+      for (let attempt = 0; attempt <= delays.length; attempt++) {
+        const { exists } = await verifyAccount(user, backend);
+        if (!current()) return;
+        if (exists) {
+          const profile = await getMyAccount(user, backend);
+          if (current()) setState({ status: "ready", identity: user, profile });
+          return;
+        }
+        if (attempt < delays.length) {
+          await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+          if (!current()) return;
+        }
+      }
+      throw new AccountRequestError("unconfirmed");
+    } catch {
+      if (!current()) return;
+      // Do not pretend a successful POST means the account was persisted.
+      // Preserve the onboarding form and show an actionable error instead of
+      // silently returning to the referral step.
+      setState({ status: "needs-profile", identity: user, profile: null });
+      throw new AccountRequestError("unconfirmed");
+    }
+  }, [state.status]);
 
   const toggle = useCallback(async (action: "like" | "save", video: Video) => {
     const user = currentUser.current;

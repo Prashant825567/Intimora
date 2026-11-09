@@ -57,22 +57,32 @@ function profileFrom(input: unknown, user: FirebaseUser): AccountProfile {
   };
 }
 
-export async function verifyAccount(user: FirebaseUser) {
-  const { data } = await request("/api/auth/verify", { method: "POST", token: await token(user) });
-  if (typeof data.exists !== "boolean") throw new AccountRequestError();
-  return data.exists as boolean;
+export async function verifyAccount(user: FirebaseUser, backend?: string) {
+  const result = await request("/api/auth/verify", { method: "POST", token: await token(user), backend });
+  if (typeof result.data.exists !== "boolean") throw new AccountRequestError();
+  return { exists: result.data.exists, backend: result.backend };
 }
 
-export async function getMyAccount(user: FirebaseUser) {
-  const { data } = await request("/api/auth/me", { token: await token(user) });
+export async function getMyAccount(user: FirebaseUser, backend?: string) {
+  const { data } = await request("/api/auth/me", { token: await token(user), backend });
   return profileFrom(data.user, user);
 }
 
 export async function createAccount(user: FirebaseUser, input: { name: string; username: string; referralCode?: string }) {
-  await request("/api/auth/profile", {
-    method: "POST", token: await token(user),
-    body: { name: input.name, username: input.username, referralCode: input.referralCode || "" },
-  });
+  // Keep the write and its confirmation on the same selected backend, even if
+  // discovery expires while the user is filling in the form. The request
+  // helper still validates this origin against the trusted allowlist.
+  const backend = await primeBackendSelection();
+  try {
+    await request("/api/auth/profile", {
+      method: "POST", token: await token(user), backend,
+      body: { name: input.name, username: input.username, referralCode: input.referralCode?.trim() || "" },
+    });
+  } catch (error) {
+    // A previous registration may have succeeded despite a lost response.
+    if (!(error instanceof AccountRequestError) || error.code !== "already_exists") throw error;
+  }
+  return backend;
 }
 
 export async function toggleAccountVideo(user: FirebaseUser, action: "like" | "save", id: string, backend?: string) {
