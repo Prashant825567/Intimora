@@ -9,7 +9,7 @@ export interface VisitorRequestOptions {
 
 export interface VisitorRequest {
   selectBackend(): Promise<string>;
-  requestJson(path: string, init?: Pick<RequestInit, "method">, pinnedBackend?: string): Promise<{ body: any; backend: string; invalidate(): void }>;
+  requestJson(path: string, init?: Pick<RequestInit, "method" | "signal">, pinnedBackend?: string): Promise<{ body: any; backend: string; invalidate(): void }>;
 }
 
 export function createVisitorRequest(options: VisitorRequestOptions): VisitorRequest;

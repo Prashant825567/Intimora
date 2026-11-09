@@ -11,6 +11,8 @@ import AccountPages from "./components/AccountPages";
 import type { AccountPage } from "./components/AccountPages";
 import { useAccount } from "./hooks/useAccount";
 import type { AccountController } from "./hooks/useAccount";
+import { useLiveLikes } from "./hooks/useLiveLikes";
+import type { LiveLikes } from "./hooks/useLiveLikes";
 import type { Video } from "./data/mockVideos";
 import type { BrowseView } from "./types/navigation";
 import { TrendingUp, Flame, Sparkles, ChevronRight, Loader2, Upload, Wifi, WifiOff, Grid2X2 } from "lucide-react";
@@ -30,24 +32,25 @@ function accountPageForPath(path: string): AccountPage | null {
   return match ? match[1] as AccountPage : null;
 }
 
-function VideoGrid({ videos, onPlay, onShare, onSave, account, compact = false }: {
+function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, compact = false }: {
   videos: Video[];
   onPlay: (video: Video) => void;
   onShare: (video: Video) => void;
   onSave: (video: Video) => void;
   account: AccountController;
+  liveLikes: LiveLikes;
   compact?: boolean;
 }) {
   return (
     <div className={compact
       ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4"
       : "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4"}>
-      {videos.map((video) => <VideoCard key={video.id} video={video} onPlay={onPlay} onShare={onShare} onSave={onSave} saved={account.profile?.savedIds.includes(video.id) ?? false} savePending={account.pending.has(`save:${video.id}`)} />)}
+      {videos.map((video) => <VideoCard key={video.id} video={liveLikes.withCount(video)} onPlay={onPlay} onShare={onShare} onSave={onSave} saved={account.isSaved(video.id)} savePending={account.pending.has(`save:${video.id}`)} observeLikes={liveLikes.observe} />)}
     </div>
   );
 }
 
-function FeedSection({ title, icon, videos, emptyMessage, onSeeAll, onPlay, onShare, onSave, account }: {
+function FeedSection({ title, icon, videos, emptyMessage, onSeeAll, onPlay, onShare, onSave, account, liveLikes }: {
   title: string;
   icon: ReactNode;
   videos: Video[];
@@ -57,6 +60,7 @@ function FeedSection({ title, icon, videos, emptyMessage, onSeeAll, onPlay, onSh
   onShare: (video: Video) => void;
   onSave: (video: Video) => void;
   account: AccountController;
+  liveLikes: LiveLikes;
 }) {
   return (
     <section className="mb-10" aria-label={title}>
@@ -69,7 +73,7 @@ function FeedSection({ title, icon, videos, emptyMessage, onSeeAll, onPlay, onSh
           See all <ChevronRight className="w-3 h-3" />
         </button>
       </div>
-      {videos.length ? <VideoGrid videos={videos.slice(0, 6)} onPlay={onPlay} onShare={onShare} onSave={onSave} account={account} compact />
+      {videos.length ? <VideoGrid videos={videos.slice(0, 6)} onPlay={onPlay} onShare={onShare} onSave={onSave} account={account} liveLikes={liveLikes} compact />
         : <p className="text-gray-500 text-sm">{emptyMessage}</p>}
     </section>
   );
@@ -112,6 +116,7 @@ function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const [activeVideo, setActiveVideo] = useState<Video | null>(null);
+  const liveLikes = useLiveLikes(__INTIMORA_LIVE_LIKES__, activeVideo);
   const [startVideoOnOpen, setStartVideoOnOpen] = useState(false);
   const [shareVideo, setShareVideo] = useState<Video | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -356,7 +361,9 @@ function App() {
       openAccount();
       return;
     }
-    void account.toggle(action, video).catch(() => setActionError(`Could not ${action} this video right now. Please try again.`));
+    void account.toggle(action, video).then((result) => {
+      if (result?.count) liveLikes.record(video, result.count);
+    }).catch(() => setActionError(`Could not confirm ${action}. Please refresh and check before trying again.`));
   };
   const handleSave = (video: Video) => handleAccountAction("save", video);
   const handleLike = (video: Video) => handleAccountAction("like", video);
@@ -384,13 +391,13 @@ function App() {
     <div className="min-h-screen" style={{ background: "#080808", color: "#fff" }}>
       <Navbar searchQuery={searchQuery} onSearchChange={handleSearchChange} onSearchSubmit={handleSearch} activeView={activeView} onNavigate={navigate} accountLabel={account.status === "ready" ? "Account dashboard" : "Sign in"} accountInitial={account.profile?.name.charAt(0).toUpperCase()} onAccountClick={openAccount} />
       <main className="site-main max-w-[1600px] mx-auto px-4 pt-24 pb-10">
-        {actionError && !activeVideo && <p role="alert" className="account-action-error">{actionError}</p>}
+        {actionError && !activeVideo && <p role="alert" className="account-action-error sticky top-20 z-40">{actionError}</p>}
         {sharedVideoUnavailable && !accountPage && !initialLoading && !apiError && (
           <p role="status" className="mb-4 text-center text-sm text-gray-400">This video is currently unavailable.</p>
         )}
 
         {accountPage ? (
-          <AccountPages page={accountPage} account={account} videos={videos} catalogLoading={!apiError && (initialLoading || catalogStatus === "loading")} catalogUnavailable={apiError || catalogStatus === "partial"} onRetryCatalog={retryCatalog} renderVideos={(items) => <VideoGrid videos={items} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} />} onPage={(page) => goTo(`/${page}`)} onBack={() => goTo("/")} />
+          <AccountPages page={accountPage} account={account} videos={videos} catalogLoading={!apiError && (initialLoading || catalogStatus === "loading")} catalogUnavailable={apiError || catalogStatus === "partial"} onRetryCatalog={retryCatalog} renderVideos={(items) => <VideoGrid videos={items} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />} onPage={(page) => goTo(`/${page}`)} onBack={() => goTo("/")} />
         ) : submittedQuery !== null ? (
           <section aria-label="Search results">
             <div className="mb-6">
@@ -399,7 +406,7 @@ function App() {
             </div>
             {searchLoading ? <div className="catalog-status" role="status"><Loader2 className="w-4 h-4 animate-spin" /> Searching…</div>
               : searchError ? <p role="alert" className="text-gray-400 text-sm">Search is temporarily unavailable. Please try again.</p>
-                : searchResults?.length ? <VideoGrid videos={searchResults} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} />
+                : searchResults?.length ? <VideoGrid videos={searchResults} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
                   : <div className="text-center py-20"><h3 className="text-white text-xl font-bold mb-2">No results found</h3><p className="text-gray-500">Try searching for something else</p></div>}
           </section>
         ) : activeView === "Categories" ? (
@@ -447,15 +454,15 @@ function App() {
             {catalogMessage}
             {catalogStatus === "complete" && videos.length > 0 && (
               <>
-                <FeedSection title="Trending Now" icon={<Flame className="w-4 h-4" />} videos={trending} emptyMessage={feedLabels.Trending.empty} onSeeAll={() => navigate("Trending")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} />
-                <FeedSection title="New Releases" icon={<Sparkles className="w-4 h-4" />} videos={newReleases} emptyMessage={feedLabels.New.empty} onSeeAll={() => navigate("New")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} />
-                <FeedSection title="Exclusive" icon={<Sparkles className="w-4 h-4" />} videos={exclusive} emptyMessage={feedLabels.Exclusive.empty} onSeeAll={() => navigate("Exclusive")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} />
+                <FeedSection title="Trending Now" icon={<Flame className="w-4 h-4" />} videos={trending} emptyMessage={feedLabels.Trending.empty} onSeeAll={() => navigate("Trending")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                <FeedSection title="New Releases" icon={<Sparkles className="w-4 h-4" />} videos={newReleases} emptyMessage={feedLabels.New.empty} onSeeAll={() => navigate("New")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                <FeedSection title="Exclusive" icon={<Sparkles className="w-4 h-4" />} videos={exclusive} emptyMessage={feedLabels.Exclusive.empty} onSeeAll={() => navigate("Exclusive")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
               </>
             )}
             {videos.length > 0 && (
               <section aria-label="All Videos">
                 <div className="flex items-center gap-2 mb-5" style={{ color: "#c9a84c" }}><TrendingUp className="w-5 h-5" /><h2 className="text-white font-bold text-xl">All Videos</h2><span className="text-gray-600 text-sm ml-1">({videos.length})</span></div>
-                <VideoGrid videos={videos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} />
+                <VideoGrid videos={videos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
                 {listFooter(videos.length)}
               </section>
             )}
@@ -465,13 +472,13 @@ function App() {
             <div className="mb-6"><h1 className="text-white text-2xl font-bold">{feedLabels[activeView].title}</h1><p className="text-gray-500 text-sm mt-1">{feedLabels[activeView].subtitle}</p></div>
             {catalogMessage}
             {catalogStatus === "complete" && (currentFeed.length
-              ? <><VideoGrid videos={currentFeed.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} />{listFooter(currentFeed.length)}</>
+              ? <><VideoGrid videos={currentFeed.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />{listFooter(currentFeed.length)}</>
               : <p className="text-gray-500 text-sm py-8">{feedLabels[activeView].empty}</p>)}
           </section>
         )}
       </main>
       <Footer />
-      {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={activeVideo} startOnOpen={startVideoOnOpen} onClose={() => { setActiveVideo(null); setActionError(""); }} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.profile?.likedIds.includes(activeVideo.id) ?? false} saved={account.profile?.savedIds.includes(activeVideo.id) ?? false} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
+      {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={() => { setActiveVideo(null); setActionError(""); }} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
       {shareVideo && <ShareModal video={shareVideo} onClose={() => setShareVideo(null)} />}
     </div>
   );

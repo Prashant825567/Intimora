@@ -13,10 +13,14 @@ export function useAccount(enabled: boolean) {
   const [state, setState] = useState<AccountState>({ status: "checking", identity: null, profile: null });
   const [signingIn, setSigningIn] = useState(false);
   const [pending, setPending] = useState<Set<string>>(() => new Set());
+  // Pending intent is visual feedback only; the stored profile stays confirmed
+  // until the server responds and is restored automatically on failure.
+  const [optimistic, setOptimistic] = useState<Map<string, boolean>>(() => new Map());
   const currentUser = useRef<FirebaseUser | null>(null);
   const generation = useRef(0);
   const mounted = useRef(false);
   const pendingRef = useRef(new Set<string>());
+  const optimisticRef = useRef(new Map<string, boolean>());
   const mutationQueue = useRef<Promise<void>>(Promise.resolve());
 
   const hydrate = useCallback(async (user: FirebaseUser, sequence: number) => {
@@ -42,7 +46,9 @@ export function useAccount(enabled: boolean) {
       const sequence = ++generation.current;
       currentUser.current = user;
       pendingRef.current.clear();
+      optimisticRef.current.clear();
       setPending(new Set());
+      setOptimistic(new Map());
       if (!user) {
         setState({ status: "guest", identity: null, profile: null });
       } else {
@@ -118,34 +124,46 @@ export function useAccount(enabled: boolean) {
     if (!user || state.status !== "ready" || !state.profile) throw new AccountRequestError();
     const key = `${action}:${video.id}`;
     if (pendingRef.current.has(key)) return;
+    const field = action === "like" ? "likedIds" : "savedIds";
+    const desired = !state.profile[field].includes(video.id);
     pendingRef.current.add(key);
+    optimisticRef.current.set(key, desired);
     setPending(new Set(pendingRef.current));
+    setOptimistic(new Map(optimisticRef.current));
     const stillCurrent = () => mounted.current && generation.current === sequence && currentUser.current?.uid === user.uid;
+    // The legacy backend rewrites one whole user record. Keep this tab's writes
+    // serialized until the backend has atomic per-user/video operations.
     const operation = mutationQueue.current.then(async () => {
-      if (!stillCurrent()) throw new AccountRequestError();
-      const result = await toggleAccountVideo(user, action, video.id, video.backendBase);
+      if (!stillCurrent()) return;
+      const result = await toggleAccountVideo(user, action, video.id, desired, video.backendBase);
       if (!stillCurrent()) return;
       setState((previous) => {
         if (previous.status !== "ready" || previous.profile?.uid !== user.uid) return previous;
-        const field = action === "like" ? "likedIds" : "savedIds";
-        // Use the server's latest list, while keeping the toggled ID accurate
-        // even when an unusually large response had to be capped locally.
-        const next = new Set(result.ids);
+        // A newer backend can return just the changed state; older backends
+        // return the complete list. Keep this ID correct in either format.
+        const next = new Set(result.ids ?? previous.profile[field]);
         if (result.active) next.add(video.id); else next.delete(video.id);
         return { ...previous, profile: { ...previous.profile, [field]: [...next] } };
       });
+      return result;
     });
-    mutationQueue.current = operation.catch(() => {});
-    try { await operation; }
-    finally {
+    mutationQueue.current = operation.then(() => {}, () => {});
+    try { return await operation; }
+    catch (error) {
+      if (stillCurrent()) throw error;
+    } finally {
       if (stillCurrent()) {
         pendingRef.current.delete(key);
+        optimisticRef.current.delete(key);
         setPending(new Set(pendingRef.current));
+        setOptimistic(new Map(optimisticRef.current));
       }
     }
   }, [state.profile, state.status]);
 
-  return { ...state, signingIn, pending, login, logout, retry, complete, toggle };
+  const isLiked = (id: string) => optimistic.get(`like:${id}`) ?? (state.profile?.likedIds.includes(id) ?? false);
+  const isSaved = (id: string) => optimistic.get(`save:${id}`) ?? (state.profile?.savedIds.includes(id) ?? false);
+  return { ...state, signingIn, pending, isLiked, isSaved, login, logout, retry, complete, toggle };
 }
 
 export type AccountController = ReturnType<typeof useAccount>;

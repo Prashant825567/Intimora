@@ -4,7 +4,9 @@ const STORAGE_KEY = "intimora_direct_backend_v1";
 const MAX_TTL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const UNAVAILABLE = "Content is temporarily unavailable";
-const ROUTE = /^\/api\/(?:search|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/share)?)?)$/;
+const ROUTE = /^\/api\/(?:search|likes\/counts|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/share)?)?)$/;
+const VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const MAX_LIKE_COUNTS_BYTES = 32_768;
 
 function isReloadOrHistoryNavigation() {
   try {
@@ -23,11 +25,16 @@ function apiUrl(base, path, method) {
     const action = /\/share$/.test(route.pathname);
     if ((action && method !== "POST") || (!action && method !== "GET")) return null;
     const allowedParams = route.pathname === "/api/videos" ? ["cursor", "limit"]
-      : route.pathname === "/api/search" ? ["q"] : [];
+      : route.pathname === "/api/search" ? ["q"]
+        : route.pathname === "/api/likes/counts" ? ["ids"] : [];
     for (const key of route.searchParams.keys()) {
       if (!allowedParams.includes(key) || route.searchParams.getAll(key).length !== 1) return null;
     }
     if (route.pathname === "/api/search" && (route.searchParams.get("q") || "").length > 200) return null;
+    if (route.pathname === "/api/likes/counts") {
+      const ids = (route.searchParams.get("ids") || "").split(",");
+      if (ids.length > 20 || ids.some((id) => !VIDEO_ID.test(id)) || new Set(ids).size !== ids.length) return null;
+    }
     if (route.pathname === "/api/videos") {
       if ((route.searchParams.get("cursor") || "").length > 1024) return null;
       const limit = route.searchParams.get("limit");
@@ -98,9 +105,12 @@ export function createVisitorRequest(options = {}) {
     try { getStorage()?.setItem(STORAGE_KEY, JSON.stringify(cached)); } catch { /* In-memory selection still works. */ }
   }
 
-  async function readJson(url, method) {
+  async function readJson(url, method, { signal, counts = false } = {}) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const abort = () => controller.abort();
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const timer = setTimeout(abort, counts ? 8_000 : REQUEST_TIMEOUT_MS);
     try {
       const response = await fetcher(url, {
         method,
@@ -113,13 +123,41 @@ export function createVisitorRequest(options = {}) {
         signal: controller.signal,
       });
       if (!response.ok) return { failed: true, invalidate: response.status >= 500 };
-      const body = await response.json();
+      let body;
+      if (counts) {
+        const length = Number(response.headers.get("content-length"));
+        if (Number.isFinite(length) && length > MAX_LIKE_COUNTS_BYTES) throw new Error(UNAVAILABLE);
+        const reader = response.body?.getReader();
+        if (!reader) {
+          const text = await response.text();
+          if (text.length > MAX_LIKE_COUNTS_BYTES) throw new Error(UNAVAILABLE);
+          body = JSON.parse(text);
+        } else {
+          const decoder = new TextDecoder();
+          let text = "";
+          let bytes = 0;
+          try {
+            while (true) {
+              const part = await reader.read();
+              if (part.done) break;
+              bytes += part.value.byteLength;
+              if (bytes > MAX_LIKE_COUNTS_BYTES) throw new Error(UNAVAILABLE);
+              text += decoder.decode(part.value, { stream: true });
+            }
+            body = JSON.parse(text + decoder.decode());
+          } finally {
+            reader.releaseLock();
+          }
+        }
+      } else body = await response.json();
       if (!body || body.ok !== true) return { failed: true, invalidate: true };
       return { body };
     } catch {
+      controller.abort();
       return { failed: true, invalidate: true };
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
     }
   }
 
@@ -163,10 +201,12 @@ export function createVisitorRequest(options = {}) {
     const url = apiUrl(backend, path, method);
     if (!url) throw new Error(UNAVAILABLE);
     const requestGeneration = generation;
-    const result = await readJson(url, method);
+    const counts = new URL(path, "https://route.invalid").pathname === "/api/likes/counts";
+    const result = await readJson(url, method, { signal: init.signal, counts });
     if (result.failed) {
-      // A stale response for an older backend must not erase a newer selection.
-      if (result.invalidate && generation === requestGeneration && cached?.backend === backend) clear();
+      // Optional count polling must not disrupt catalog routing. A stale
+      // response for an older backend must not erase a newer selection either.
+      if (!counts && result.invalidate && generation === requestGeneration && cached?.backend === backend) clear();
       throw new Error(UNAVAILABLE);
     }
     return {

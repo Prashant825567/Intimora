@@ -1,6 +1,7 @@
 import type { FirebaseUser } from "./firebase";
 import { primeBackendSelection } from "./api";
 import { AccountRequestError, createAuthenticatedRequest } from "./auth-request.mjs";
+import { readLikeCount } from "./like-counts.mjs";
 
 const request = createAuthenticatedRequest({ selectBackend: primeBackendSelection, allowedBackends: __INTIMORA_AUTH_BACKENDS__ });
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -15,6 +16,8 @@ export interface AccountProfile {
   referralCode: string;
   likedIds: string[];
   savedIds: string[];
+  // The trusted backend that verified and returned this account.
+  backendBase?: string;
 }
 
 export interface ReferralPerson {
@@ -64,8 +67,8 @@ export async function verifyAccount(user: FirebaseUser, backend?: string) {
 }
 
 export async function getMyAccount(user: FirebaseUser, backend?: string) {
-  const { data } = await request("/api/auth/me", { token: await token(user), backend });
-  return profileFrom(data.user, user);
+  const result = await request("/api/auth/me", { token: await token(user), backend });
+  return { ...profileFrom(result.data.user, user), backendBase: result.backend };
 }
 
 export async function createAccount(user: FirebaseUser, input: { name: string; username: string; referralCode?: string }) {
@@ -85,13 +88,19 @@ export async function createAccount(user: FirebaseUser, input: { name: string; u
   return backend;
 }
 
-export async function toggleAccountVideo(user: FirebaseUser, action: "like" | "save", id: string, backend?: string) {
+export async function toggleAccountVideo(user: FirebaseUser, action: "like" | "save", id: string, active: boolean, backend?: string) {
   if (!ID.test(id)) throw new AccountRequestError();
-  const { data } = await request(`/api/videos/${id}/${action}`, { method: "POST", token: await token(user), backend });
+  // Current backends ignore the body and toggle. Upgraded backends should set
+  // this desired state idempotently, so a repeated request cannot undo a like.
+  const { data } = await request(`/api/videos/${id}/${action}`, { method: "POST", token: await token(user), backend, body: { active } });
   const key = action === "like" ? "liked" : "saved";
   const listKey = action === "like" ? "likedVideos" : "savedVideos";
-  if (typeof data[key] !== "boolean" || !Array.isArray(data[listKey])) throw new AccountRequestError();
-  return { active: data[key] as boolean, ids: ids(data[listKey]) };
+  if (typeof data[key] !== "boolean" || (data[listKey] !== undefined && !Array.isArray(data[listKey]))) throw new AccountRequestError();
+  return {
+    active: data[key] as boolean,
+    ids: data[listKey] === undefined ? undefined : ids(data[listKey]),
+    count: action === "like" ? readLikeCount(id, data) : null,
+  };
 }
 
 function person(value: unknown): ReferralPerson | null {
@@ -130,10 +139,10 @@ export function sanitizeReferralTree(raw: unknown, ownCode: string): ReferralTre
   return { direct, level2 };
 }
 
-export async function getReferralTree(user: FirebaseUser, ownCode: string): Promise<ReferralTree> {
+export async function getReferralTree(user: FirebaseUser, ownCode: string, backend?: string): Promise<ReferralTree> {
   // The current backend returns other users' private histories here. Do not
   // make the request unless its response has been fixed server-side.
   if (!referralsEnabled) throw new AccountRequestError();
-  const { data } = await request("/api/user/referrals", { token: await token(user) });
+  const { data } = await request("/api/user/referrals", { token: await token(user), backend });
   return sanitizeReferralTree(data.tree, ownCode);
 }

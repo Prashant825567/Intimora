@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Play, Clock, Eye, Share2, Heart, ThumbsUp } from "lucide-react";
 import type { Video } from "../data/mockVideos";
+import type { LiveLikes } from "../hooks/useLiveLikes";
 import { isPremiumLabel } from "../utils/video-labels";
 
 interface VideoCardProps {
@@ -10,13 +11,20 @@ interface VideoCardProps {
   onSave: (video: Video) => void;
   saved: boolean;
   savePending: boolean;
+  observeLikes: LiveLikes["observe"];
 }
 
-const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, saved, savePending }) => {
+const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, saved, savePending, observeLikes }) => {
   const [hovered, setHovered] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!cardRef.current) return;
+    return observeLikes(cardRef.current, video);
+  }, [observeLikes, video.id, video.backendBase]);
 
   return (
     <div
+      ref={cardRef}
       className="video-card group rounded-xl overflow-hidden border border-gray-800/50 hover:border-yellow-800/50 transition-all duration-300 cursor-pointer"
       style={{
         background: "#0d0d0d",
@@ -72,11 +80,14 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
             onClick={(e) => { e.stopPropagation(); onSave(video); }}
             aria-label={saved ? "Remove saved video" : "Save video"}
             aria-pressed={saved}
+            aria-busy={savePending || undefined}
+            title={savePending ? "Saving…" : undefined}
             disabled={savePending}
             className={`p-1.5 rounded-full transition-all ${saved ? "bg-yellow-500 text-black" : "bg-black/70 text-white hover:bg-yellow-500 hover:text-black"}`}
           >
-            <Heart className="w-3.5 h-3.5" fill={saved ? "currentColor" : "none"} />
+            <Heart className={`w-3.5 h-3.5 ${savePending ? "animate-pulse" : ""}`} fill={saved ? "currentColor" : "none"} />
           </button>
+          {savePending && <span role="status" className="absolute right-full top-0 mr-1 whitespace-nowrap rounded bg-black/85 px-2 py-1 text-xs text-white">Saving…</span>}
           <button
             onClick={(e) => { e.stopPropagation(); onShare(video); }}
             aria-label="Share video"
@@ -104,9 +115,9 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
               <Eye className="w-3 h-3" />
               {video.views}
             </span>
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" aria-label={video.likes === null ? "Like count unavailable" : `${video.likes.toLocaleString()} likes`}>
               <ThumbsUp className="w-3 h-3" />
-              {video.likes.toLocaleString()}
+              {video.likes === null ? "—" : video.likes.toLocaleString()}
             </span>
           </div>
           <span className="video-card__date text-gray-700 text-xs">{video.uploadedAt}</span>

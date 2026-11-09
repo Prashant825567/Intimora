@@ -1,5 +1,6 @@
 import type { Video } from "../data/mockVideos";
 import { createVisitorRequest } from "./visitor-route.mjs";
+import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
 const visitor = createVisitorRequest({ discoveryUrl: __INTIMORA_DISCOVERY_URL__ });
 const unavailable = () => new Error("Content is temporarily unavailable");
@@ -96,13 +97,14 @@ function publicVideo(input: unknown): ApiVideo | null {
   if (!input || typeof input !== "object") return null;
   const video = input as Record<string, unknown>;
   if (typeof video.id !== "string" || !ID_PATTERN.test(video.id)) return null;
+  const likes = nonnegativeNumber(video.likes);
   return {
     id: video.id,
     title: safeText(video.title, 300) || "Untitled Video",
     description: safeText(video.description, 4000),
     duration: nonnegativeNumber(video.duration),
     views: nonnegativeNumber(video.views),
-    likes: nonnegativeNumber(video.likes),
+    likes: Number.isSafeInteger(likes) ? likes : undefined,
     shares: nonnegativeNumber(video.shares),
     category: safeText(video.category, 100),
     exclusive: hasExclusiveMetadata(video),
@@ -190,6 +192,16 @@ export const fetchVideos = (cursor?: BackendCursor | null, limit?: number) => {
 
 export const searchVideos = (query: string) => catalog(`/api/search?${new URLSearchParams({ q: query })}`);
 
+// This optional endpoint is read-only: unlike the detail route, it must never
+// count a view. Do not poll it until the backend contract is deployed.
+export async function fetchLikeCounts(ids: string[], backend: string, signal?: AbortSignal) {
+  if (!ids.length || ids.length > LIKE_COUNT_BATCH_SIZE || ids.some((id) => !ID_PATTERN.test(id))
+    || new Set(ids).size !== ids.length) throw unavailable();
+  const query = new URLSearchParams({ ids: ids.join(",") });
+  const { body } = await visitor.requestJson(`/api/likes/counts?${query}`, { signal }, backend);
+  return parseLikeCounts(body?.data, ids);
+}
+
 export async function fetchVideoDetail(id: string, backend?: string) {
   const result = await visitor.requestJson(videoPath(id), undefined, backend);
   return { ok: true as const, video: publicVideo(result.body?.data), backend: result.backend };
@@ -212,7 +224,7 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
   viewCount: apiVideo.views ?? 0,
   createdAt: apiVideo.createdAt ?? null,
   isExclusive: apiVideo.exclusive === true,
-  likes: apiVideo.likes || 0,
+  likes: apiVideo.likes ?? null,
   category: apiVideo.category || (apiVideo.exclusive ? "Exclusive" : ""),
   tags: apiVideo.tags || [],
   videoUrl: safeMediaUrl(apiVideo.streamUrl, apiVideo.id, "stream", backend),

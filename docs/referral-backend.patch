@@ -1,0 +1,79 @@
+--- a/backend/users.js
++++ b/backend/users.js
+@@ -185,29 +185,44 @@
+
+ // ---- Get referral tree ----
+ async function getReferralTree(uid) {
+-  const user = await findByUid(uid);
+-  if (!user) return null;
+-
+-  const allReferrals = await readReferrals();
+-  const myCode = user.referralCode;
+-
+-  // Direct referrals (used my code)
+-  const direct = allReferrals.filter((r) => r.ownerCode === myCode);
+-
+-  // Level 2: referrals of my referrals
+-  const directCodes = direct.map((r) => r.referredCode);
+-  const level2 = allReferrals.filter((r) => directCodes.includes(r.ownerCode));
+-
+-  // Get user details for each referral
+-  const users = await readUsers();
+-  const userMap = {};
+-  users.forEach((u) => { userMap[u.referralCode] = u; });
+-
+-  return {
+-    code: myCode,
+-    direct: direct.map((r) => userMap[r.referredCode]).filter(Boolean),
+-    level2: level2.map((r) => userMap[r.referredCode]).filter(Boolean),
++  const validCode = (value) => typeof value === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(value);
++  const owner = await findByUid(uid);
++  if (!owner || !validCode(owner.referralCode)) return null;
++
++  const myCode = owner.referralCode;
++  const [referrals, users] = await Promise.all([readReferrals(), readUsers()]);
++  const userMap = new Map();
++  for (const user of users) {
++    if (!user || !validCode(user.referralCode)) continue;
++    // A colliding code is ambiguous; never expose either record by accident.
++    if (userMap.has(user.referralCode)) userMap.set(user.referralCode, null);
++    else userMap.set(user.referralCode, user);
++  }
++  // If the owner's code collides, a link cannot be attributed safely.
++  if (!userMap.get(myCode) || userMap.get(myCode).uid !== uid) return null;
++
++  const seen = new Set([myCode]);
++  const select = (parentCodes) => {
++    const people = [];
++    for (const link of referrals) {
++      if (!link || !parentCodes.has(link.ownerCode) || !validCode(link.referredCode)) continue;
++      const user = userMap.get(link.referredCode);
++      if (!user || user.referredBy !== link.ownerCode || seen.has(user.referralCode)) continue;
++      if (typeof user.username !== "string" || !user.username.trim()) continue;
++      seen.add(user.referralCode);
++      people.push({
++        name: typeof user.name === "string" ? user.name.trim().slice(0, 100) : "",
++        username: user.username.trim().slice(0, 80),
++        referralCode: user.referralCode,
++        referredBy: user.referredBy,
++      });
++    }
++    return people;
+   };
++
++  const direct = select(new Set([myCode]));
++  const level2 = select(new Set(direct.map((person) => person.referralCode)));
++  return { code: myCode, direct, level2 };
+ }
+
+ // ---- Get user's liked videos ----
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -391,6 +391,7 @@
+
+ // Get referral tree
+ app.get("/api/user/referrals", auth, async (req, res) => {
++  res.set("Cache-Control", "private, no-store");
+   try {
+     const tree = await users.getReferralTree(req.userId);
+     if (!tree) return fail(res, "User not found", 404);
