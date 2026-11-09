@@ -45,6 +45,14 @@ test("the static home page provides a consistent Google site name and crawlable 
   assert.doesNotMatch(robots, /Disallow:\s*\//i);
 });
 
+test("the requested site verification tag is present exactly once in the static head", async () => {
+  const html = await readFile(path.join(root, "index.html"), "utf8");
+  const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1];
+  assert.ok(head, "the page has a static head");
+  assert.match(head, /<meta\s+name="6a97888e-site-verification"\s+content="f4423f712c6f1c15fb7fc4c833c8c020"\s*\/?\s*>/i);
+  assert.equal((html.match(/name="6a97888e-site-verification"/g) || []).length, 1);
+});
+
 test("favicons have the expected square dimensions and a safe vector master", async () => {
   const smallFavicon = await readFile(path.join(root, "public/favicon-16.png"));
   const mediumFavicon = await readFile(path.join(root, "public/favicon-32.png"));

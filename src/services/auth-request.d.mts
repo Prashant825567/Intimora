@@ -1,4 +1,4 @@
-type AccountErrorCode = "unavailable" | "unauthorized" | "username_taken" | "invalid_referral" | "already_exists" | "invalid_profile";
+type AccountErrorCode = "unavailable" | "unauthorized" | "username_taken" | "invalid_referral" | "already_exists" | "invalid_profile" | "unconfirmed";
 export class AccountRequestError extends Error {
   constructor(code?: AccountErrorCode);
   code: AccountErrorCode;

@@ -24,6 +24,10 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     const html = await readFile(path.join(output, "index.html"), "utf8");
     assert.match(html, /"@type":\s*"WebSite"/);
     assert.match(html, /"name":\s*"Intimora"/);
+    const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1];
+    assert.ok(head, "the built HTML has a head");
+    assert.match(head, /<meta\s+name="6a97888e-site-verification"\s+content="f4423f712c6f1c15fb7fc4c833c8c020"\s*\/?\s*>/i);
+    assert.equal((html.match(/name="6a97888e-site-verification"/g) || []).length, 1);
     for (const file of ["favicon-16.png", "favicon-32.png", "favicon-192.png", "favicon.ico", "apple-touch-icon.png", "logo.svg", "robots.txt", "sitemap.xml"]) {
       assert.ok((await readFile(path.join(output, file))).length > 0, `${file} is published`);
     }
