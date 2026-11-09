@@ -61,6 +61,14 @@ test("the JuicyAds verification tag is present exactly once in the static head",
   assert.equal((html.match(/name="juicyads-site-verification"/g) || []).length, 1);
 });
 
+test("the clckd verification tag is present exactly once in the static head", async () => {
+  const html = await readFile(path.join(root, "index.html"), "utf8");
+  const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1];
+  assert.ok(head, "the page has a static head");
+  assert.match(head, /<meta\s+name="clckd"\s+content="2190228d4faa7aa0369cc8d0b93efeff"\s*\/?\s*>/i);
+  assert.equal((html.match(/name="clckd"/g) || []).length, 1);
+});
+
 test("favicons have the expected square dimensions and a safe vector master", async () => {
   const smallFavicon = await readFile(path.join(root, "public/favicon-16.png"));
   const mediumFavicon = await readFile(path.join(root, "public/favicon-32.png"));
