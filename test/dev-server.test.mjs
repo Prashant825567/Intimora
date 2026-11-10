@@ -38,7 +38,7 @@ test("development preview blocks private files without disclosing filesystem pat
     for (const pathname of ["/", "/src/main.tsx", "/@vite/client", "/@react-refresh", "/node_modules/vite/dist/client/env.mjs"]) {
       assert.equal((await fetch(`${base}${pathname}`)).status, 200, pathname);
     }
-    for (const pathname of ["/login", "/profile", "/referral", "/dashboard", "/login/", "/profile/", "/referral/", "/dashboard/"]) {
+    for (const pathname of ["/login", "/profile", "/referral", "/dashboard", "/login/", "/profile/", "/referral/", "/dashboard/", "/trending", "/new/", "/exclusive", "/categories/", "/search?q=hello", "/watch/video-1"]) {
       const response = await fetch(`${base}${pathname}`, { headers: { Accept: "text/html" } });
       assert.equal(response.status, 200, pathname);
       assert.match(await response.text(), /<div id="root"><\/div>/);

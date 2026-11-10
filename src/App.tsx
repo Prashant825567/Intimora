@@ -20,17 +20,13 @@ import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoTo
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
 import { selectExclusive, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
+import { accountPageFromPath, BROWSE_PATHS, browseViewFromPath, isSearchPath, searchPathFor, searchTermFromLocation, watchIdFromPath, watchPathFor } from "./services/page-routes.mjs";
 
 const AGE_VERIFIED_KEY = "intimora_age_verified";
 const CATALOG_PAGE_SIZE = 50;
 const DISPLAY_PAGE_SIZE = 12;
 type CatalogStatus = "loading" | "complete" | "partial";
 type FeedView = Exclude<BrowseView, "Home" | "Categories">;
-
-function accountPageForPath(path: string): AccountPage | null {
-  const match = /^\/(login|profile|referral|dashboard)\/?$/.exec(path);
-  return match ? match[1] as AccountPage : null;
-}
 
 function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, compact = false }: {
   videos: Video[];
@@ -104,14 +100,18 @@ function App() {
     catch { return false; }
   });
   const account = useAccount(ageVerified);
-  const [pathname, setPathname] = useState(() => window.location.pathname);
-  const accountPage = accountPageForPath(pathname);
+  const [location, setLocation] = useState(() => ({ pathname: window.location.pathname, search: window.location.search }));
+  const { pathname } = location;
+  const accountPage = accountPageFromPath(pathname);
+  const activeBrowseView = browseViewFromPath(pathname);
+  const activeView = activeBrowseView ?? "Home";
+  const submittedQuery = searchTermFromLocation(pathname, location.search);
   const [actionError, setActionError] = useState("");
   const [videos, setVideos] = useState<Video[]>([]);
-  const [activeView, setActiveView] = useState<BrowseView>("Home");
   const [visibleCount, setVisibleCount] = useState(DISPLAY_PAGE_SIZE);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState(() => submittedQuery ?? "");
+  const [searchRevision, setSearchRevision] = useState(0);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [searchResults, setSearchResults] = useState<Video[] | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(false);
@@ -127,28 +127,53 @@ function App() {
   const firstPageRequest = useRef<{ revision: number; promise: Promise<CatalogResponse> } | null>(null);
   const catalogFinishedAt = useRef(0);
   const sharedVideoRequest = useRef<{ id: string; promise: ReturnType<typeof fetchVideoDetail> } | null>(null);
+  const locallyOpenedVideo = useRef<string | null>(null);
+  const returnFromWatch = useRef("/");
   const searchRequest = useRef(0);
   const loaderRef = useRef<HTMLDivElement>(null);
   const now = useLocalDayClock();
 
   const goTo = (path: string, replace = false) => {
-    if (window.location.pathname !== path) {
-      if (replace) window.history.replaceState(null, "", path);
-      else window.history.pushState(null, "", path);
+    // All navigation remains on this origin, even when returning from a watch URL.
+    const destination = path.startsWith("/") && !path.startsWith("//") ? path : "/";
+    let target = new URL(destination, window.location.origin);
+    if (target.origin !== window.location.origin) target = new URL("/", window.location.origin);
+    const href = `${target.pathname}${target.search}`;
+    if (`${window.location.pathname}${window.location.search}` !== href) {
+      if (replace) window.history.replaceState(null, "", href);
+      else window.history.pushState(null, "", href);
     }
-    setPathname(path);
+    searchRequest.current += 1;
+    locallyOpenedVideo.current = null;
+    setLocation({ pathname: target.pathname, search: target.search });
+    setVisibleCount(DISPLAY_PAGE_SIZE);
+    setSearchQuery("");
+    setSearchResults(null);
+    setSearchLoading(false);
+    setSearchError(false);
     setActiveVideo(null);
     setShareVideo(null);
     setActionError("");
+    setSharedVideoUnavailable(false);
     window.scrollTo({ top: 0, behavior: "instant" });
   };
 
   useEffect(() => {
     const onPopState = () => {
-      setPathname(window.location.pathname);
+      searchRequest.current += 1;
+      locallyOpenedVideo.current = null;
+      setLocation({ pathname: window.location.pathname, search: window.location.search });
+      // A history entry can have the same URL as its neighbor. Its state still
+      // needs to be restored after a back/forward navigation.
+      setHistoryRevision((revision) => revision + 1);
+      setVisibleCount(DISPLAY_PAGE_SIZE);
+      setSearchResults(null);
+      setSearchLoading(false);
+      setSearchError(false);
       setActiveVideo(null);
       setShareVideo(null);
       setActionError("");
+      setSharedVideoUnavailable(false);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -222,14 +247,39 @@ function App() {
     return () => { cancelled = true; };
   }, [ageVerified, catalogRevision]);
 
+  // Search results are driven by the URL so a copied link, refresh, and browser
+  // history restore the same query. Never query the catalog before the age gate.
+  useEffect(() => {
+    const request = ++searchRequest.current;
+    setSearchQuery(submittedQuery ?? "");
+    setSearchResults(null);
+    setSearchError(false);
+    if (!ageVerified || !submittedQuery) {
+      setSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchLoading(true);
+    searchVideos(submittedQuery).then((response) => {
+      if (!cancelled && request === searchRequest.current) {
+        setSearchResults(response.data.videos.map((video) => mapApiVideoToVideo(video, response.data.backend)));
+      }
+    }).catch(() => {
+      if (!cancelled && request === searchRequest.current) setSearchError(true);
+    }).finally(() => {
+      if (!cancelled && request === searchRequest.current) setSearchLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [ageVerified, pathname, location.search, submittedQuery, searchRevision, historyRevision]);
+
   // Shared links resolve through the recipient's independently selected backend.
   useEffect(() => {
-    if (!ageVerified) return;
-    const match = /^\/watch\/([A-Za-z0-9_-]{1,128})\/?$/.exec(pathname);
-    if (!match) return;
+    const id = watchIdFromPath(pathname);
+    setSharedVideoUnavailable(false);
+    if (!ageVerified || !id || locallyOpenedVideo.current === id) return;
     let cancelled = false;
-    if (!sharedVideoRequest.current || sharedVideoRequest.current.id !== match[1]) {
-      sharedVideoRequest.current = { id: match[1], promise: fetchVideoDetail(match[1]) };
+    if (!sharedVideoRequest.current || sharedVideoRequest.current.id !== id) {
+      sharedVideoRequest.current = { id, promise: fetchVideoDetail(id) };
     }
     sharedVideoRequest.current.promise.then(({ video, backend }) => {
       if (cancelled) return;
@@ -240,7 +290,7 @@ function App() {
       } else setSharedVideoUnavailable(true);
     }).catch(() => { if (!cancelled) setSharedVideoUnavailable(true); });
     return () => { cancelled = true; };
-  }, [ageVerified, pathname]);
+  }, [ageVerified, pathname, historyRevision]);
 
   const trending = useMemo(() => selectTrending(videos), [videos]);
   const newReleases = useMemo(() => selectNewReleases(videos, Date.now()), [videos, now]);
@@ -277,63 +327,53 @@ function App() {
   };
 
   const navigate = (view: BrowseView) => {
-    if (accountPage) goTo("/");
     const elapsed = Date.now() - catalogFinishedAt.current;
     if (view !== "Home" && view !== "Categories" && catalogStatus === "complete" && (elapsed < 0 || elapsed >= 60_000)) retryCatalog();
-    searchRequest.current += 1;
-    setActiveView(view);
-    setVisibleCount(DISPLAY_PAGE_SIZE);
-    setSearchQuery("");
-    setSubmittedQuery(null);
-    setSearchResults(null);
-    setSearchLoading(false);
-    setSearchError(false);
-    window.scrollTo({ top: 0, behavior: "instant" });
+    goTo(BROWSE_PATHS[view]);
   };
 
   const handleSearchChange = (query: string) => {
     setSearchQuery(query);
-    if (!query) {
-      searchRequest.current += 1;
-      setSubmittedQuery(null);
-      setSearchResults(null);
-      setSearchLoading(false);
-      setSearchError(false);
-    }
+    if (!query && isSearchPath(pathname)) goTo("/", true);
   };
 
-  const handleSearch = async (query: string) => {
-    if (accountPage) goTo("/");
-    const trimmed = query.trim();
-    if (!trimmed) {
+  const handleSearch = (query: string) => {
+    const target = searchPathFor(query);
+    if (target === "/search") {
       handleSearchChange("");
       return;
     }
-    const request = ++searchRequest.current;
-    setActiveView("Home");
-    setSubmittedQuery(trimmed);
-    setSearchResults(null);
-    setSearchLoading(true);
-    setSearchError(false);
-    try {
-      const response = await searchVideos(trimmed);
-      if (request === searchRequest.current) {
-        setSearchResults(response.data.videos.map((video) => mapApiVideoToVideo(video, response.data.backend)));
-      }
-    } catch {
-      if (request === searchRequest.current) setSearchError(true);
-    } finally {
-      if (request === searchRequest.current) setSearchLoading(false);
-    }
+    if (`${window.location.pathname}${window.location.search}` === target) {
+      // Allow the user to retry the same query without adding a history entry.
+      searchRequest.current += 1;
+      setSearchRevision((revision) => revision + 1);
+    } else goTo(target);
   };
 
   const handlePlayVideo = async (video: Video) => {
+    const path = watchPathFor(video.id);
+    if (path) {
+      if (!watchIdFromPath(window.location.pathname)) {
+        returnFromWatch.current = `${window.location.pathname}${window.location.search}`;
+      }
+      locallyOpenedVideo.current = video.id;
+      if (`${window.location.pathname}${window.location.search}` !== path) window.history.pushState(null, "", path);
+      searchRequest.current += 1;
+      setLocation({ pathname: path, search: "" });
+      setShareVideo(null);
+      setActionError("");
+      setSharedVideoUnavailable(false);
+    }
     // "Watch now" and card play are explicit user actions. Try to start on
     // that first click; if the browser blocks it, the play button remains.
     setStartVideoOnOpen(true);
     setActiveVideo(video);
     try {
-      const detail = await fetchVideoDetail(video.id, video.backendBase);
+      // The route effect must not make a second detail request: this endpoint
+      // also counts a view. Back/forward may reuse this same promise.
+      const promise = fetchVideoDetail(video.id, video.backendBase);
+      if (path) sharedVideoRequest.current = { id: video.id, promise };
+      const detail = await promise;
       if (detail.video?.views === undefined) return;
       const viewCount = detail.video.views;
       const update = (item: Video) => item.id === video.id && item.backendBase === video.backendBase
@@ -344,6 +384,15 @@ function App() {
     } catch {
       // Playback can continue even if the view count cannot be updated.
     }
+  };
+
+  const closeVideo = () => {
+    if (watchIdFromPath(pathname)) goTo(returnFromWatch.current, true);
+    else { setActiveVideo(null); setActionError(""); }
+  };
+  const closeShare = () => {
+    if (watchIdFromPath(pathname) && !activeVideo) goTo(returnFromWatch.current, true);
+    else setShareVideo(null);
   };
 
   const openAccount = () => {
@@ -370,6 +419,7 @@ function App() {
 
   if (!ageVerified) return <AgeGate onConfirm={handleAgeConfirm} />;
 
+  const searchInProgress = searchLoading || (submittedQuery !== null && searchResults === null && !searchError);
   const catalogMessage = catalogStatus === "loading" ? (
     <div className="catalog-status" role="status"><Loader2 className="w-4 h-4 animate-spin" /> Checking the full catalog…</div>
   ) : catalogStatus === "partial" ? (
@@ -389,7 +439,7 @@ function App() {
 
   return (
     <div className="min-h-screen" style={{ background: "#080808", color: "#fff" }}>
-      <Navbar searchQuery={searchQuery} onSearchChange={handleSearchChange} onSearchSubmit={handleSearch} activeView={activeView} onNavigate={navigate} accountLabel={account.status === "ready" ? "Account dashboard" : "Sign in"} accountInitial={account.profile?.name.charAt(0).toUpperCase()} onAccountClick={openAccount} />
+      <Navbar searchQuery={searchQuery} onSearchChange={handleSearchChange} onSearchSubmit={handleSearch} activeView={activeBrowseView} onNavigate={navigate} accountLabel={account.status === "ready" ? "Account dashboard" : "Sign in"} accountInitial={account.profile?.name.charAt(0).toUpperCase()} onAccountClick={openAccount} />
       <main className="site-main max-w-[1600px] mx-auto px-4 pt-24 pb-10">
         {actionError && !activeVideo && <p role="alert" className="account-action-error sticky top-20 z-40">{actionError}</p>}
         {sharedVideoUnavailable && !accountPage && !initialLoading && !apiError && (
@@ -402,12 +452,17 @@ function App() {
           <section aria-label="Search results">
             <div className="mb-6">
               <h2 className="mobile-break-words text-white text-2xl font-bold">Search results for <span style={{ color: "#c9a84c" }}>"{submittedQuery}"</span></h2>
-              {!searchLoading && !searchError && <p className="text-gray-500 text-sm mt-1">{searchResults?.length ?? 0} videos found</p>}
+              {!searchInProgress && !searchError && <p className="text-gray-500 text-sm mt-1">{searchResults?.length ?? 0} videos found</p>}
             </div>
-            {searchLoading ? <div className="catalog-status" role="status"><Loader2 className="w-4 h-4 animate-spin" /> Searching…</div>
+            {searchInProgress ? <div className="catalog-status" role="status"><Loader2 className="w-4 h-4 animate-spin" /> Searching…</div>
               : searchError ? <p role="alert" className="text-gray-400 text-sm">Search is temporarily unavailable. Please try again.</p>
                 : searchResults?.length ? <VideoGrid videos={searchResults} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
                   : <div className="text-center py-20"><h3 className="text-white text-xl font-bold mb-2">No results found</h3><p className="text-gray-500">Try searching for something else</p></div>}
+          </section>
+        ) : isSearchPath(pathname) ? (
+          <section aria-label="Search videos" className="py-12">
+            <h1 className="text-white text-2xl font-bold">Search videos</h1>
+            <p className="mt-2 text-sm text-gray-500">Enter a search in the bar above.</p>
           </section>
         ) : activeView === "Categories" ? (
           <section className="coming-soon" aria-label="Categories">
@@ -478,8 +533,8 @@ function App() {
         )}
       </main>
       <Footer />
-      {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={() => { setActiveVideo(null); setActionError(""); }} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
-      {shareVideo && <ShareModal video={shareVideo} onClose={() => setShareVideo(null)} />}
+      {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={closeVideo} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
+      {shareVideo && <ShareModal video={shareVideo} onClose={closeShare} />}
     </div>
   );
 }

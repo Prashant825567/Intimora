@@ -238,6 +238,9 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       await search.press("Enter");
       await page.getByText("Search results for").waitFor();
       await assertPageFits(page, `${label} long search`);
+      const trafficPeak = page.locator("footer").getByRole("link", { name: "Boost Your Website Traffic with TrafficPeak" });
+      assert.equal(await trafficPeak.getAttribute("href"), "https://trafficpeak.io");
+      await assertInViewport(trafficPeak, width, height, `${label} footer link`);
     }
     assert.deepEqual(errors, [], "no uncaught browser errors");
 

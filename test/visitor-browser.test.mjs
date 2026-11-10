@@ -192,7 +192,6 @@ test("browser calls public discovery and backends directly, with per-tab routing
     assert.equal(new URL(pageA.url()).pathname, "/login");
     assert.ok(!state.calls.some((call) => call.path?.endsWith("/like")));
     await pageA.goBack();
-    await pageA.getByRole("button", { name: /WATCH NOW/i }).click();
     await pageA.locator("#player-container").waitFor();
 
     await pageA.evaluate(() => {

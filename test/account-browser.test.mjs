@@ -296,8 +296,9 @@ test("guest deep link, Google login, returning account, libraries and logout", b
       await page.setViewportSize({ width, height: 844 });
       await assertFits(page);
     }
-    await page.reload();
+    assert.equal((await page.reload()).status(), 200);
     await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+    assert.equal(new URL(page.url()).pathname, "/dashboard", "refresh keeps a signed-in user on the dashboard");
     assert.equal(await page.evaluate(() => window.__fixtureSignInCalls || 0), 0, "Firebase state restores without another popup");
     assert.equal(await page.getByText("REF-OWN001").count(), 1);
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -343,7 +344,7 @@ test("new users complete name, unique username and optional referral; actions us
     const registration = state.calls.filter((call) => call.path === "/api/auth/profile").at(-1);
     assert.deepEqual(JSON.parse(registration.body), { name: "Ava", username: "ava_123", referralCode: "INVITE-1" });
     await page.getByRole("button", { name: "Open navigation menu" }).click();
-    await page.getByRole("button", { name: "Home", exact: true }).click();
+    await page.getByRole("link", { name: "Home", exact: true }).click();
     await page.getByRole("button", { name: /WATCH NOW/i }).waitFor();
     state.selected = backendB;
     await page.evaluate(() => { window.__timeOffset = 61_000; });
@@ -599,7 +600,7 @@ async function openFirstVideoSignedIn(fixture) {
   await page.getByRole("button", { name: "Sign in with Google" }).click();
   await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
   await page.getByRole("button", { name: "Open navigation menu" }).click();
-  await page.getByRole("button", { name: "Home", exact: true }).click();
+  await page.getByRole("link", { name: "Home", exact: true }).click();
   const first = page.getByRole("region", { name: "All Videos" }).getByRole("button", { name: "Play First video" });
   await first.click();
   return page.locator(".video-player__content");
