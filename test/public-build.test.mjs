@@ -32,6 +32,9 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     assert.equal((html.match(/name="juicyads-site-verification"/g) || []).length, 1);
     assert.match(head, /<meta\s+name="clckd"\s+content="2190228d4faa7aa0369cc8d0b93efeff"\s*\/?\s*>/i);
     assert.equal((html.match(/name="clckd"/g) || []).length, 1);
+    const noScript = html.match(/<noscript>([\s\S]*?)<\/noscript>/i)?.[1];
+    assert.ok(noScript, "the static HTML includes a no-JavaScript fallback");
+    assert.match(noScript, /<a\s+href="https:\/\/trafficpeak\.io"[^>]*>Boost Your Website Traffic with TrafficPeak<\/a>/);
     for (const file of ["favicon-16.png", "favicon-32.png", "favicon-192.png", "favicon.ico", "apple-touch-icon.png", "logo.svg", "robots.txt", "sitemap.xml"]) {
       assert.ok((await readFile(path.join(output, file))).length > 0, `${file} is published`);
     }
@@ -73,6 +76,7 @@ test("Render Blueprint describes a static site with watch/account rewrites and a
   assert.match(yaml, /runtime:\s*static/);
   assert.match(yaml, /staticPublishPath:\s*\.\/dist/);
   assert.match(yaml, /source:\s*\/watch\/\*/);
+  assert.match(yaml, /type:\s*rewrite\s*\n\s*source:\s*\/\*\s*\n\s*destination:\s*\/index\.html/);
   for (const route of ["login", "profile", "referral", "dashboard"]) {
     assert.match(yaml, new RegExp(`source:\\s*\\/${route}\\n\\s*destination:\\s*\\/index\\.html`));
     assert.match(yaml, new RegExp(`source:\\s*\\/${route}\\/\\n\\s*destination:\\s*\\/index\\.html`));

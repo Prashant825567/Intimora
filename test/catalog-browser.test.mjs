@@ -95,19 +95,19 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     assert.deepEqual(calls.filter((call) => call.path === "/api/videos").map((call) => [call.cursor, call.limit]), [[null, "50"], ["next-1", "50"], ["next-2", "50"]]);
     const nav = page.locator(".site-nav__desktop-links");
 
-    await nav.getByRole("button", { name: "Trending", exact: true }).click();
+    await nav.getByRole("link", { name: "Trending", exact: true }).click();
     await page.getByRole("heading", { name: "Trending Now" }).waitFor();
     assert.deepEqual(await titleList(page), ["Older most viewed", "Yesterday", "Today late", "Regular video", "Today early", "Unknown date"]);
 
-    await nav.getByRole("button", { name: "New", exact: true }).click();
+    await nav.getByRole("link", { name: "New", exact: true }).click();
     await page.getByRole("heading", { name: "New Releases" }).waitFor();
     assert.deepEqual(await titleList(page), ["Today late", "Today early"]);
 
-    await nav.getByRole("button", { name: "Exclusive", exact: true }).click();
+    await nav.getByRole("link", { name: "Exclusive", exact: true }).click();
     await page.getByRole("heading", { name: "Exclusive" }).waitFor();
     assert.deepEqual(await titleList(page), ["Today late", "Yesterday", "Older most viewed", "Unknown date"]);
 
-    await nav.getByRole("button", { name: "Categories", exact: true }).click();
+    await nav.getByRole("link", { name: "Categories", exact: true }).click();
     await page.getByRole("heading", { name: "Coming Soon" }).waitFor();
     assert.equal(await page.locator("main .video-card, main .hero-banner").count(), 0);
     await page.getByRole("button", { name: "Back to Home" }).click();
@@ -117,7 +117,7 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     assert.deepEqual(await titleList(page), ["Today late", "Today early"]);
 
     await page.evaluate(() => { window.catalogTestNow += 61_000; });
-    await nav.getByRole("button", { name: "Trending", exact: true }).click();
+    await nav.getByRole("link", { name: "Trending", exact: true }).click();
     await page.locator("main .video-card__title").filter({ hasText: "Older most viewed" }).waitFor();
     assert.equal(calls.filter((call) => call.path === "/api/videos").length, 6, "revisiting a feed refreshes catalog data after a minute");
 
@@ -130,7 +130,7 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     await search.fill("slow query");
     await search.press("Enter");
     await searchStarted;
-    await nav.getByRole("button", { name: "Categories", exact: true }).click();
+    await nav.getByRole("link", { name: "Categories", exact: true }).click();
     const delayedResponse = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/search");
     releaseSearch();
     await delayedResponse;
@@ -157,10 +157,10 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
       ["Latest exclusive one", "Latest exclusive two"]);
     assert.equal(await liveShape.page.locator(".hero-banner__title").textContent(), "Latest exclusive one");
     const liveNav = liveShape.page.locator(".site-nav__desktop-links");
-    await liveNav.getByRole("button", { name: "Exclusive", exact: true }).click();
+    await liveNav.getByRole("link", { name: "Exclusive", exact: true }).click();
     await liveShape.page.getByRole("heading", { name: "Exclusive", exact: true }).waitFor();
     assert.deepEqual(await titleList(liveShape.page), ["Latest exclusive one", "Latest exclusive two"]);
-    await liveNav.getByRole("button", { name: "New", exact: true }).click();
+    await liveNav.getByRole("link", { name: "New", exact: true }).click();
     await liveShape.page.getByRole("heading", { name: "New Releases" }).waitFor();
     assert.deepEqual(await titleList(liveShape.page), ["Latest exclusive one", "Latest exclusive two"]);
     await liveShape.context.close();
@@ -168,18 +168,18 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     const yesterdayScenario = { pages: { first: { videos: [yesterday, yesterdayTwo, older], nextCursor: null } } };
     const mobile = await makePage(browser, base, yesterdayScenario, true);
     await mobile.page.getByRole("button", { name: "Open navigation menu" }).click();
-    await mobile.page.locator("#mobile-navigation").getByRole("button", { name: "New", exact: true }).click();
+    await mobile.page.locator("#mobile-navigation").getByRole("link", { name: "New", exact: true }).click();
     await mobile.page.getByRole("heading", { name: "New Releases" }).waitFor();
     assert.deepEqual(await titleList(mobile.page), ["Yesterday", "Yesterday early"]);
     await mobile.page.getByRole("button", { name: "Open navigation menu" }).click();
-    await mobile.page.locator("#mobile-navigation").getByRole("button", { name: "Categories", exact: true }).click();
+    await mobile.page.locator("#mobile-navigation").getByRole("link", { name: "Categories", exact: true }).click();
     await mobile.page.getByRole("heading", { name: "Coming Soon" }).waitFor();
     assert.equal(await mobile.page.locator("main .video-card, main .hero-banner").count(), 0);
     assert.equal(await mobile.page.getByRole("button", { name: "Open navigation menu" }).getAttribute("aria-expanded"), "false");
     await mobile.context.close();
 
     const none = await makePage(browser, base, { pages: { first: { videos: [older, unknown], nextCursor: null } } });
-    await none.page.locator(".site-nav__desktop-links").getByRole("button", { name: "New", exact: true }).click();
+    await none.page.locator(".site-nav__desktop-links").getByRole("link", { name: "New", exact: true }).click();
     await none.page.getByText("No videos were uploaded today or yesterday.").waitFor();
     assert.equal(await none.page.locator("main .video-card").count(), 0);
     await none.context.close();
@@ -194,7 +194,7 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     assert.equal(await allSection.locator(".video-card").count(), 12, "the full catalog is not rendered all at once");
     await allSection.locator('[aria-live="polite"]').scrollIntoViewIfNeeded();
     await paged.page.waitForFunction(() => document.querySelectorAll('section[aria-label="All Videos"] .video-card').length === 16);
-    await paged.page.locator(".site-nav__desktop-links").getByRole("button", { name: "Trending", exact: true }).click();
+    await paged.page.locator(".site-nav__desktop-links").getByRole("link", { name: "Trending", exact: true }).click();
     await paged.page.getByRole("heading", { name: "Trending Now" }).waitFor();
     assert.ok(await paged.page.locator("main .video-card").count() >= 12);
     await paged.page.locator('main [aria-live="polite"]').scrollIntoViewIfNeeded();
@@ -204,7 +204,7 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     const failureScenario = { ...scenario, waitForSearch: null, failCursor: "next-1" };
     const failure = await makePage(browser, base, failureScenario);
     await failure.page.getByRole("alert").waitFor();
-    await failure.page.locator(".site-nav__desktop-links").getByRole("button", { name: "Trending", exact: true }).click();
+    await failure.page.locator(".site-nav__desktop-links").getByRole("link", { name: "Trending", exact: true }).click();
     assert.equal(await failure.page.locator("main .video-card").count(), 0, "incomplete results are not presented as a full ranking");
     assert.doesNotMatch(await failure.page.locator("body").innerText(), /secret-marker|catalog-backend\.example/i);
     failureScenario.failCursor = null;

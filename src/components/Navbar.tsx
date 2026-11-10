@@ -1,12 +1,13 @@
 import React, { useState } from "react";
 import { Search, X, Menu, Bell, User, ChevronDown } from "lucide-react";
 import type { BrowseView } from "../types/navigation";
+import { BROWSE_PATHS } from "../services/page-routes.mjs";
 
 interface NavbarProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onSearchSubmit: (q: string) => void;
-  activeView: BrowseView;
+  activeView: BrowseView | null;
   onNavigate: (view: BrowseView) => void;
   accountLabel: string;
   accountInitial?: string;
@@ -21,6 +22,12 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
   const navigate = (view: BrowseView) => {
     onNavigate(view);
     setMobileMenuOpen(false);
+  };
+  const follow = (event: React.MouseEvent<HTMLAnchorElement>, view: BrowseView) => {
+    // Keep links usable with a middle click, modifiers, or "open in new tab".
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    navigate(view);
   };
 
   const handleSearch = (e: React.FormEvent) => {
@@ -61,6 +68,7 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
               <input
                 type="text"
                 value={searchQuery}
+                maxLength={200}
                 onChange={(e) => onSearchChange(e.target.value)}
                 onFocus={() => setSearchFocused(true)}
                 onBlur={() => setSearchFocused(false)}
@@ -114,10 +122,10 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
         {/* Category bar */}
         <div className="site-nav__desktop-links hidden sm:flex items-center gap-1 pb-2 overflow-x-auto scrollbar-hide">
           {categories.map((cat) => (
-            <button
+            <a
               key={cat}
-              type="button"
-              onClick={() => navigate(cat)}
+              href={BROWSE_PATHS[cat]}
+              onClick={(event) => follow(event, cat)}
               aria-current={activeView === cat ? "page" : undefined}
               className="px-4 py-1.5 rounded-full text-xs font-semibold tracking-wider whitespace-nowrap transition-all hover:text-yellow-400"
               style={{ color: activeView === cat ? "#c9a84c" : "#666" }}
@@ -129,7 +137,7 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
               ) : (
                 cat
               )}
-            </button>
+            </a>
           ))}
         </div>
 
@@ -138,16 +146,16 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
           <div id="mobile-navigation" className="site-nav__mobile-menu sm:hidden pb-3 border-t border-gray-800 pt-3">
             <div className="flex flex-wrap gap-2">
               {categories.map((cat) => (
-                <button
+                <a
                   key={cat}
-                  type="button"
-                  onClick={() => navigate(cat)}
+                  href={BROWSE_PATHS[cat]}
+                  onClick={(event) => follow(event, cat)}
                   aria-current={activeView === cat ? "page" : undefined}
                   className="px-3 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-yellow-400 border border-gray-800 hover:border-yellow-800 transition"
                   style={activeView === cat ? { color: "#f3d58a", borderColor: "#8c6c32" } : undefined}
                 >
                   {cat}
-                </button>
+                </a>
               ))}
             </div>
             <div className="site-nav__mobile-actions">

@@ -34,6 +34,11 @@ services:
       - type: rewrite
         source: /dashboard/
         destination: /index.html
+      # SPA fallback for all current and future client-side pages. Render
+      # serves existing static files before evaluating rewrite rules.
+      - type: rewrite
+        source: /*
+        destination: /index.html
     headers:
       - path: /*
         name: Content-Security-Policy

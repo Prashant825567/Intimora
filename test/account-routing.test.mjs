@@ -20,7 +20,7 @@ test("local production server serves account deep links and the unchanged root v
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const base = `http://127.0.0.1:${server.address().port}`;
-    for (const pathname of ["/login", "/profile", "/referral", "/dashboard", "/login/", "/profile/", "/referral/", "/dashboard/"]) {
+    for (const pathname of ["/login", "/profile", "/referral", "/dashboard", "/login/", "/profile/", "/referral/", "/dashboard/", "/trending", "/new/", "/exclusive", "/categories/", "/search?q=cats%20%26%20dogs", "/watch/video-1", "/watch/video-1/"]) {
       const response = await fetch(`${base}${pathname}`);
       assert.equal(response.status, 200, pathname);
       assert.match(await response.text(), /<div id="root"><\/div>/);
@@ -33,7 +33,13 @@ test("local production server serves account deep links and the unchanged root v
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type"), /^text\/html/);
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(path.join(root, "public", verification)));
-    assert.equal((await fetch(`${base}/dashboard/private`)).status, 404);
+    const head = await fetch(`${base}/trending`, { method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.match(head.headers.get("content-type"), /^text\/html/);
+    assert.equal(await head.text(), "");
+    for (const pathname of ["/dashboard/private", "/assets/missing.js", "/.env", "/watch/invalid%2Fid"]) {
+      assert.equal((await fetch(`${base}${pathname}`)).status, 404, pathname);
+    }
   } finally {
     if (server) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
     await rm(directory, { recursive: true, force: true });

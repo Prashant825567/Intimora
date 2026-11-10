@@ -69,6 +69,11 @@ const Footer: React.FC = () => {
           <p className="text-gray-800 text-xs mt-3">
             Unauthorized reproduction or distribution of any content on this website is strictly prohibited.
           </p>
+          <p className="mt-4 text-xs">
+            <a href="https://trafficpeak.io" className="text-gray-400 underline underline-offset-4 transition hover:text-yellow-400">
+              Boost Your Website Traffic with TrafficPeak
+            </a>
+          </p>
         </div>
       </div>
     </footer>
