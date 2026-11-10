@@ -6,7 +6,8 @@ export function applySecurityHeaders(res, { development = false, allowPreviewEmb
     `script-src 'self' https://apis.google.com${development ? " 'unsafe-inline'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     // Firebase's Google sign-in uses its hosted auth iframe and Google APIs.
-    "frame-src 'self' https://intimora-app.firebaseapp.com https://accounts.google.com",
+    // The sponsored TubeCorporate campaign iframe is the only partner frame.
+    "frame-src 'self' https://intimora-app.firebaseapp.com https://accounts.google.com https://hdzog.com",
     // The static client contacts the public discovery service and its selected
     // HTTPS backend directly; the rest of the policy remains restrictive.
     "img-src 'self' data: https:",
