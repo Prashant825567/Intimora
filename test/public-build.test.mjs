@@ -7,9 +7,21 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { ROUTE_SHELL_PATHS, watchIdsFromSitemap } from "../scripts/route-shells-plugin.mjs";
+import { createStaticHost } from "./fixtures/static-host.mjs";
 
 const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+async function withStaticSite(directory, runTest) {
+  const server = createStaticHost(directory);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    return await runTest(`http://127.0.0.1:${server.address().port}`);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
 
 test("public discovery configuration is bundled, while unsafe URLs fail without leaking their value", async () => {
   const output = await mkdtemp(path.join(os.tmpdir(), "intimora-public-build-"));
@@ -44,8 +56,43 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     assert.deepEqual(verification, await readFile(path.join(root, "public/f4423f712c6f1c15fb7fc4c833c8c020.html")));
     assert.ok(js.some((content) => content.includes("intimora-app.firebaseapp.com")), "the public Firebase web app is bundled");
 
-    const secret = "secret-query-marker-0123456789";
-    let error;
+    // Every page is published as a real file, so direct links and refreshes
+    // work on a static host without any rewrite rule.
+    for (const route of ROUTE_SHELL_PATHS) {
+      const name = route.slice(1);
+      assert.deepEqual(await readFile(path.join(output, `${name}.html`)), Buffer.from(html), `${route} has a page file`);
+      assert.deepEqual(await readFile(path.join(output, name, "index.html")), Buffer.from(html), `${route} has a directory index`);
+    }
+    assert.deepEqual(await readFile(path.join(output, "404.html")), Buffer.from(html), "unknown paths get the app shell");
+    const sitemap = await readFile(path.join(output, "sitemap.xml"), "utf8");
+    const videoIds = watchIdsFromSitemap(sitemap);
+    assert.ok(videoIds.length > 0, "the published sitemap lists video pages");
+    for (const id of videoIds) {
+      assert.deepEqual(await readFile(path.join(output, "watch", id, "index.html")), Buffer.from(html), `/watch/${id} has a directory index`);
+      assert.deepEqual(await readFile(path.join(output, "watch", `${id}.html`)), Buffer.from(html), `/watch/${id} has a page file`);
+    }
+
+    await withStaticSite(output, async (origin) => {
+      const fetchPage = async (target) => {
+        const response = await fetch(`${origin}${target}`);
+        return { status: response.status, type: response.headers.get("content-type"), body: await response.text() };
+      };
+      for (const target of ["/", "/trending", "/trending/", "/new", "/exclusive", "/categories", "/search?q=test", "/login", "/profile", "/referral", "/dashboard", `/watch/${videoIds[0]}`]) {
+        const page = await fetchPage(target);
+        assert.equal(page.status, 200, `${target} is served without a rewrite rule`);
+        assert.match(page.type, /text\/html/, `${target} is HTML`);
+        assert.match(page.body, /<div id="root"><\/div>/, `${target} boots the app`);
+        assert.match(page.body, /name="clckd"/, `${target} keeps the verification tag`);
+      }
+      const unknown = await fetchPage("/not-a-real-page");
+      assert.equal(unknown.status, 404, "unknown paths are still a 404 status");
+      assert.match(unknown.body, /<div id="root"><\/div>/, "unknown paths still load the app through the 404 page");
+      const asset = await fetchPage(`/assets/${assets.find((name) => name.endsWith(".js"))}`);
+      assert.equal(asset.status, 200, "the bundle is still served");
+      assert.match(asset.type, /javascript/, "the bundle keeps its content type");
+    });
+
+    const secret = "secret-query-marker-0123456789";    let error;
     try {
       await run("npm", ["run", "build", "--", "--outDir", output], {
         cwd: root, timeout: 120_000,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createStaticHost } from "./fixtures/static-host.mjs";
 import { createServer as createNetServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -272,6 +273,56 @@ test("production bundle serves each real route on direct entry and refresh", {
       assert.equal(await link.getAttribute("href"), "https://trafficpeak.io");
     }
     await noScriptContext.close();
+
+    // The deployed host currently has no rewrite configuration. Every page is
+    // still reachable directly because the build publishes a real HTML file for
+    // it, so this serves `dist` with no rewrite rules at all.
+    const staticHost = createStaticHost(output);
+    await new Promise((resolve) => staticHost.listen(0, "127.0.0.1", resolve));
+    try {
+      const staticBase = `http://127.0.0.1:${staticHost.address().port}`;
+      const staticContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      await staticContext.route("**/*", async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range" };
+        if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
+        if (url.origin !== backend) return route.continue();
+        if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+        if (url.pathname === "/api/videos" || url.pathname === "/api/search") return route.fulfill({ headers, json: { ok: true, data: { videos: [video], nextCursor: null } } });
+        if (url.pathname === "/api/videos/video-1") return route.fulfill({ headers, json: { ok: true, data: video } });
+        if (url.pathname.endsWith("/thumbnail")) return route.fulfill({ headers, contentType: "image/png", body: image });
+        if (url.pathname.endsWith("/stream")) return route.fulfill({ headers, contentType: "video/mp4", body: "" });
+        return route.fulfill({ status: 404, headers, json: { ok: false } });
+      });
+      const staticPage = await staticContext.newPage();
+      const staticErrors = [];
+      staticPage.on("pageerror", (error) => staticErrors.push(error.message));
+      assert.equal((await staticPage.goto(`${staticBase}/`)).status(), 200);
+      await staticPage.getByRole("button", { name: /I AM 18/i }).click();
+      await staticPage.getByRole("heading", { name: "All Videos" }).waitFor();
+      for (const [pathname, heading] of [["/trending", "Trending Now"], ["/new/", "New Releases"], ["/exclusive", "Exclusive"], ["/categories/", "Coming Soon"]]) {
+        assert.equal((await staticPage.goto(`${staticBase}${pathname}`)).status(), 200, `${pathname} needs no rewrite rule`);
+        await staticPage.getByRole("heading", { name: heading, exact: true }).waitFor();
+        assert.equal(new URL(staticPage.url()).pathname, pathname, `${pathname} keeps its URL`);
+      }
+      assert.equal((await staticPage.goto(`${staticBase}/search?q=direct%20test`)).status(), 200);
+      await staticPage.getByRole("button", { name: "Play Direct video" }).waitFor();
+      assert.equal(await staticPage.getByRole("textbox", { name: "Search videos" }).inputValue(), "direct test");
+      assert.equal((await staticPage.goto(`${staticBase}/dashboard`)).status(), 200);
+      await staticPage.getByRole("heading", { name: "Sign in to your account" }).waitFor();
+      assert.equal(new URL(staticPage.url()).pathname, "/login");
+      // Video pages that exist only in the sitemap still load through the
+      // published 404 page, so an un-rebuilt watch link is not a dead end.
+      const watchResponse = await staticPage.goto(`${staticBase}/watch/video-1`);
+      assert.equal(watchResponse.status(), 404, "an unlisted video ID uses the custom 404 page");
+      await staticPage.locator("#player-container video").waitFor();
+      assert.equal(new URL(staticPage.url()).pathname, "/watch/video-1");
+      assert.deepEqual(staticErrors, []);
+      await staticContext.close();
+    } finally {
+      await new Promise((resolve) => staticHost.close(resolve));
+    }
   } finally {
     await browser?.close();
     if (server) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }

@@ -6,6 +6,7 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import { applySecurityHeaders } from "./server/security.mjs";
 import { DEFAULT_DISCOVERY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
 import { sitemapPlugin } from "./scripts/sitemap-plugin.mjs";
+import { routeShellsPlugin } from "./scripts/route-shells-plugin.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +82,15 @@ export default defineConfig(({ mode }) => {
     // dependency-optimization reload in the middle of the age gate.
     optimizeDeps: { include: ["@firebase/app", "@firebase/auth"] },
     build: { sourcemap: false },
-    plugins: [developmentSecurity, react(), tailwindcss(), sitemapPlugin({ discoveryUrl })],
+    plugins: [
+      developmentSecurity,
+      react(),
+      tailwindcss(),
+      sitemapPlugin({ discoveryUrl }),
+      // Direct links must work on a static host that has no SPA rewrite, so
+      // publish a real HTML file for every page the app can serve.
+      routeShellsPlugin({ snapshotSitemap: path.join(__dirname, "public", "sitemap.xml") }),
+    ],
     resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   };
 });
