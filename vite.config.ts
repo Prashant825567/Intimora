@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { applySecurityHeaders } from "./server/security.mjs";
 import { DEFAULT_DISCOVERY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
+import { PARTNER_EMBED_URL as configuredPartnerEmbed } from "./src/config/partner-embed";
 import { DEFAULT_PARTNER_EMBED_URL, partnerEmbedUrl } from "./src/services/partner-embed.mjs";
 import { sitemapPlugin } from "./scripts/sitemap-plugin.mjs";
 import { routeShellsPlugin } from "./scripts/route-shells-plugin.mjs";
@@ -19,8 +20,8 @@ export default defineConfig(({ mode }) => {
   if (!discoveryUrl) throw new Error("Invalid public discovery URL: use HTTPS without credentials, a query, or a fragment.");
   // The sponsored TubeCorporate iframe keeps its campaign `source` parameter and
   // may only point at the documented partner host.
-  const partnerEmbed = partnerEmbedUrl(env.INTIMORA_PUBLIC_PARTNER_EMBED_URL || DEFAULT_PARTNER_EMBED_URL);
-  if (!partnerEmbed) throw new Error("Invalid partner embed URL: use the documented HTTPS campaign embed with its source parameter.");
+  const partnerEmbed = partnerEmbedUrl(env.INTIMORA_PUBLIC_PARTNER_EMBED_URL || configuredPartnerEmbed || DEFAULT_PARTNER_EMBED_URL);
+  if (!partnerEmbed) throw new Error("Invalid partner embed URL: use an https hdzog.com or tubecorporate.com embed/feed URL, or leave src/config/partner-embed.ts empty.");
   // Firebase tokens go only to explicitly trusted backend origins, never to an
   // arbitrary host that a compromised discovery response might return.
   const authBackends = (env.INTIMORA_PUBLIC_AUTH_BACKENDS || "https://api-intimora.vercel.app,https://intimora-api1.vercel.app")

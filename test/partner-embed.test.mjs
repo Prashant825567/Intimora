@@ -27,26 +27,61 @@ function identityPlugin() {
   };
 }
 
-const { DEFAULT_PARTNER_EMBED_URL, partnerEmbedUrl } = await import("../src/services/partner-embed.mjs");
+const { DEFAULT_PARTNER_EMBED_URL, PARTNER_EMBED_HOSTS, partnerEmbedUrl } = await import("../src/services/partner-embed.mjs");
 
-test("only the documented TubeCorporate campaign embed URL is accepted", () => {
+test("only documented TubeCorporate hosts are accepted and the campaign source is mandatory", () => {
   assert.equal(DEFAULT_PARTNER_EMBED_URL, campaign);
   assert.equal(partnerEmbedUrl(campaign), campaign);
-  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011?source=1849513610&utm_x=1"), "https://hdzog.com/embed/71011?source=1849513610&utm_x=1");
+  assert.equal(
+    partnerEmbedUrl("https://hdzog.com/embed/71011?source=1849513610&utm_x=1"),
+    "https://hdzog.com/embed/71011?source=1849513610&utm_x=1",
+  );
+  // A campaign feed URL may use any safe path; the mandatory source is added.
+  assert.equal(partnerEmbedUrl("https://hdzog.com/feed/12345"), "https://hdzog.com/feed/12345?source=1849513610");
+  assert.equal(partnerEmbedUrl("https://tubecorporate.com/feed/9?source=555"), "https://tubecorporate.com/feed/9?source=555");
+  assert.equal(partnerEmbedUrl("https://www.hdzog.com/embed/71011"), "https://www.hdzog.com/embed/71011?source=1849513610");
   assert.equal(partnerEmbedUrl(" https://hdzog.com/embed/71011?source=1849513610"), null, "no surrounding whitespace");
   assert.equal(partnerEmbedUrl("http://hdzog.com/embed/71011?source=1849513610"), null, "HTTPS only");
   assert.equal(partnerEmbedUrl("https://user:pass@hdzog.com/embed/71011?source=1849513610"), null, "no credentials");
   assert.equal(partnerEmbedUrl("https://evil.example/embed/71011?source=1849513610"), null, "unknown host");
   assert.equal(partnerEmbedUrl("https://hdzog.com.evil.example/embed/71011?source=1849513610"), null, "suffix look-alike host");
-  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011"), null, "the campaign source is required");
   assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011?source=abc"), null, "numeric source only");
-  assert.equal(partnerEmbedUrl("https://hdzog.com/player/71011?source=1849513610"), null, "embed path only");
   assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011?source=1849513610#fragment"), null, "no fragment");
   assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011?source=1849513610&next=javascript:alert(1)"), null, "unsafe parameter value");
-  assert.equal(partnerEmbedUrl(`https://hdzog.com/embed/${"a".repeat(65)}?source=1849513610`), null, "bounded video id");
   assert.equal(partnerEmbedUrl(`https://hdzog.com/embed/71011?source=${"9".repeat(21)}`), null, "bounded source");
+  assert.equal(partnerEmbedUrl(`https://hdzog.com/${"a".repeat(220)}`), null, "bounded feed path");
+  assert.equal(partnerEmbedUrl(`https://hdzog.com/feed/1?source=${"9".repeat(21)}`), null, "bounded source on a feed");
   assert.equal(partnerEmbedUrl(""), null);
   assert.equal(partnerEmbedUrl(undefined), null);
+});
+
+test("the pasted campaign URL in src/config/partner-embed.ts is valid whenever it is set", async () => {
+  const configFile = await readFile(path.join(root, "src/config/partner-embed.ts"), "utf8");
+  const pasted = configFile.match(/export const PARTNER_EMBED_URL\s*=\s*"([^"]*)"/)?.[1];
+  assert.equal(typeof pasted, "string", "the config file keeps a single editable URL string");
+  if (pasted) {
+    assert.ok(partnerEmbedUrl(pasted), `the pasted partner URL is accepted: ${pasted}`);
+  }
+  assert.match(configFile, /hdzog\.com/, "the file names the accepted partner host");
+  assert.equal(DEFAULT_PARTNER_EMBED_URL, campaign, "the built-in campaign remains the fallback");
+});
+
+test("a feed URL pasted through the build variable also receives the campaign source", async () => {
+  const output = await mkdtemp(path.join(os.tmpdir(), "intimora-partner-feed-"));
+  try {
+    process.env.INTIMORA_PUBLIC_PARTNER_EMBED_URL = "https://hdzog.com/feed/12345";
+    await build({
+      configFile: path.join(root, "vite.config.ts"), logLevel: "silent",
+      build: { outDir: output, emptyOutDir: true }, plugins: [identityPlugin()],
+    });
+    const html = await readFile(path.join(output, "index.html"), "utf8");
+    const bundled = html.match(/assets\/(index-[^"]+\.js)/)?.[1];
+    const asset = await readFile(path.join(output, "assets", bundled), "utf8");
+    assert.ok(asset.includes(campaign.replace("/embed/71011", "/feed/12345")), "the feed URL keeps the campaign source");
+  } finally {
+    delete process.env.INTIMORA_PUBLIC_PARTNER_EMBED_URL;
+    await rm(output, { recursive: true, force: true });
+  }
 });
 
 test("the build embeds the validated campaign URL and rejects an invalid override", async () => {
