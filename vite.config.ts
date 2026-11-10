@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { applySecurityHeaders } from "./server/security.mjs";
 import { DEFAULT_DISCOVERY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
+import { DEFAULT_PARTNER_EMBED_URL, partnerEmbedUrl } from "./src/services/partner-embed.mjs";
 import { sitemapPlugin } from "./scripts/sitemap-plugin.mjs";
 import { routeShellsPlugin } from "./scripts/route-shells-plugin.mjs";
 
@@ -16,6 +17,10 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, "");
   const discoveryUrl = publicHttpsUrl(env.INTIMORA_PUBLIC_API_DISCOVERY_URL || DEFAULT_DISCOVERY_URL);
   if (!discoveryUrl) throw new Error("Invalid public discovery URL: use HTTPS without credentials, a query, or a fragment.");
+  // The sponsored TubeCorporate iframe keeps its campaign `source` parameter and
+  // may only point at the documented partner host.
+  const partnerEmbed = partnerEmbedUrl(env.INTIMORA_PUBLIC_PARTNER_EMBED_URL || DEFAULT_PARTNER_EMBED_URL);
+  if (!partnerEmbed) throw new Error("Invalid partner embed URL: use the documented HTTPS campaign embed with its source parameter.");
   // Firebase tokens go only to explicitly trusted backend origins, never to an
   // arbitrary host that a compromised discovery response might return.
   const authBackends = (env.INTIMORA_PUBLIC_AUTH_BACKENDS || "https://api-intimora.vercel.app,https://intimora-api1.vercel.app")
@@ -67,6 +72,8 @@ export default defineConfig(({ mode }) => {
       // Poll public counts only after every selected backend implements the
       // versioned, privacy-safe contract documented in the README.
       __INTIMORA_LIVE_LIKES__: JSON.stringify(env.INTIMORA_PUBLIC_LIVE_LIKES === "1"),
+      // Validated partner campaign iframe, loaded lazily after the age gate.
+      __INTIMORA_PARTNER_EMBED__: JSON.stringify(partnerEmbed),
     },
     // Vite's default VITE_ prefix can accidentally expose secrets at build time.
     // Only explicitly public variables may be referenced by client code.

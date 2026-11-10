@@ -26,7 +26,7 @@ test("local production server serves account deep links and the unchanged root v
       assert.match(await response.text(), /<div id="root"><\/div>/);
       const csp = response.headers.get("content-security-policy");
       assert.match(csp, /script-src 'self' https:\/\/apis\.google\.com;/);
-      assert.match(csp, /frame-src 'self' https:\/\/intimora-app\.firebaseapp\.com https:\/\/accounts\.google\.com;/);
+      assert.match(csp, /frame-src 'self' https:\/\/intimora-app\.firebaseapp\.com https:\/\/accounts\.google\.com https:\/\/hdzog\.com;/);
       assert.match(csp, /frame-ancestors 'none'/);
     }
     const response = await fetch(`${base}/${verification}`);

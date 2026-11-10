@@ -44,6 +44,8 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     assert.equal((html.match(/name="juicyads-site-verification"/g) || []).length, 1);
     assert.match(head, /<meta\s+name="clckd"\s+content="2190228d4faa7aa0369cc8d0b93efeff"\s*\/?\s*>/i);
     assert.equal((html.match(/name="clckd"/g) || []).length, 1);
+    assert.match(head, /<meta\s+name="67c50a5b22eae3d0d911662d4560abe589cdf595"\s+content="67c50a5b22eae3d0d911662d4560abe589cdf595"\s*\/?\s*>/i);
+    assert.equal((html.match(/name="67c50a5b22eae3d0d911662d4560abe589cdf595"/g) || []).length, 1);
     const noScript = html.match(/<noscript>([\s\S]*?)<\/noscript>/i)?.[1];
     assert.ok(noScript, "the static HTML includes a no-JavaScript fallback");
     assert.match(noScript, /<a\s+href="https:\/\/trafficpeak\.io"[^>]*>Boost Your Website Traffic with TrafficPeak<\/a>/);
@@ -129,7 +131,7 @@ test("Render Blueprint describes a static site with watch/account rewrites and a
     assert.match(yaml, new RegExp(`source:\\s*\\/${route}\\/\\n\\s*destination:\\s*\\/index\\.html`));
   }
   assert.match(yaml, /script-src 'self' https:\/\/apis\.google\.com;/);
-  assert.match(yaml, /frame-src 'self' https:\/\/intimora-app\.firebaseapp\.com https:\/\/accounts\.google\.com;/);
+  assert.match(yaml, /frame-src 'self' https:\/\/intimora-app\.firebaseapp\.com https:\/\/accounts\.google\.com https:\/\/hdzog\.com;/);
   assert.match(yaml, /connect-src 'self' https:/);
   assert.match(yaml, /media-src 'self' blob: https:/);
   assert.doesNotMatch(yaml, /startCommand:/);

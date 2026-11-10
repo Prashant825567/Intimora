@@ -53,6 +53,17 @@ test("the requested site verification tag is present exactly once in the static 
   assert.equal((html.match(/name="6a97888e-site-verification"/g) || []).length, 1);
 });
 
+test("the requested TubeCorporate verification tag is present exactly once beside the existing tags", async () => {
+  const html = await readFile(path.join(root, "index.html"), "utf8");
+  const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1];
+  assert.ok(head, "the page has a static head");
+  assert.match(head, /<meta\s+name="67c50a5b22eae3d0d911662d4560abe589cdf595"\s+content="67c50a5b22eae3d0d911662d4560abe589cdf595"\s*\/?\s*>/i);
+  assert.equal((html.match(/name="67c50a5b22eae3d0d911662d4560abe589cdf595"/g) || []).length, 1);
+  for (const previous of ["6a97888e-site-verification", "juicyads-site-verification", "clckd"]) {
+    assert.equal((html.match(new RegExp(`name="${previous}"`, "g")) || []).length, 1, `${previous} is still present once`);
+  }
+});
+
 test("the JuicyAds verification tag is present exactly once in the static head", async () => {
   const html = await readFile(path.join(root, "index.html"), "utf8");
   const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1];
