@@ -42,7 +42,7 @@ services:
     headers:
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline'; frame-src 'self' https://intimora-app.firebaseapp.com https://accounts.google.com https://hdzog.com; img-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        value: "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline'; frame-src 'self' https://intimora-app.firebaseapp.com https://accounts.google.com https://hdzog.com https://desi-porntube.com; img-src 'self' data: https:; media-src 'self' blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
       - path: /*
         name: X-Content-Type-Options
         value: nosniff

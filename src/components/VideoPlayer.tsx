@@ -6,6 +6,13 @@ import {
 } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import { isPremiumLabel } from "../utils/video-labels";
+import VideoAdOverlay from "./VideoAdOverlay";
+import type { VastAd } from "./VideoAdOverlay";
+import { loadVastAd } from "../services/vast-loader.mjs";
+import { VAST_DECISION_GRACE_MS, VAST_SKIP_FALLBACK_SECONDS, VAST_TIMEOUT_MS } from "../config/vast";
+
+// The ad tag is a public build constant. An empty value disables pre-roll.
+const VAST_TAG = __INTIMORA_VAST_TAG_URL__;
 
 interface VideoPlayerProps {
   video: Video;
@@ -48,11 +55,26 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [buffered, setBuffered] = useState<BufferedRange[]>([]);
+  const [adPlaying, setAdPlaying] = useState<VastAd | null>(null);
+  const adState = useRef<{ status: "idle" | "loading" | "deciding" | "done"; promise: Promise<VastAd | null> | null }>({ status: "idle", promise: null });
 
   useEffect(() => () => {
     playAttempt.current += 1;
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
   }, []);
+
+  // The tag is requested once per player, while it opens. It resolves to null on
+  // any failure, so a play request can always continue without an ad.
+  const ensureAdRequest = () => {
+    if (!VAST_TAG || adState.current.status !== "idle") return;
+    adState.current.status = "loading";
+    adState.current.promise = loadVastAd(VAST_TAG, {
+      timeoutMs: VAST_TIMEOUT_MS,
+      skipFallbackSeconds: VAST_SKIP_FALLBACK_SECONDS,
+    }).then((ad: VastAd | null) => ad, () => null);
+  };
+
+  useEffect(() => { ensureAdRequest(); }, []);
 
   const updateBuffered = (v: HTMLVideoElement) => {
     const total = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
@@ -78,8 +100,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     controlsTimer.current = setTimeout(() => setShowControls(false), 3000);
   };
 
-  const startPlayback = (v: HTMLVideoElement, automatic = false) => {
-    const attempt = ++playAttempt.current;
+  const playContent = (v: HTMLVideoElement, automatic: boolean, attempt: number) => {
     setPlaybackError("");
     setBuffering(v.readyState < HTMLMediaElement.HAVE_FUTURE_DATA);
     const failed = (error: unknown) => {
@@ -100,6 +121,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     } catch (error) { failed(error); }
   };
 
+  // A pre-roll only ever plays before the content has started. If the ad tag has
+  // not answered within the short grace window, playback begins instead, so an
+  // ad server can never block the video.
+  const startPlayback = (v: HTMLVideoElement, automatic = false) => {
+    const attempt = ++playAttempt.current;
+    ensureAdRequest();
+    if (!VAST_TAG || adState.current.status === "done") {
+      playContent(v, automatic, attempt);
+      return;
+    }
+    adState.current.status = "deciding";
+    const pending = adState.current.promise ?? Promise.resolve(null);
+    const decision = Promise.race<VastAd | null>([
+      pending,
+      new Promise<null>((resolve) => { setTimeout(() => resolve(null), VAST_DECISION_GRACE_MS); }),
+    ]);
+    void decision.then((ad) => {
+      if (attempt !== playAttempt.current) return;
+      adState.current.status = "done";
+      if (ad) {
+        setAdPlaying(ad);
+        setPlaying(false);
+        setBuffering(false);
+        setPlaybackError("");
+        return;
+      }
+      playContent(v, automatic, attempt);
+    });
+  };
+
+  const finishAd = () => {
+    setAdPlaying(null);
+    adState.current.status = "done";
+    const v = videoRef.current;
+    if (v) playContent(v, false, ++playAttempt.current);
+  };
+
   useLayoutEffect(() => {
     // This commit follows the user's play click; shared links skip this step.
     // A browser may still require a second gesture, handled by startPlayback.
@@ -108,7 +166,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
 
   const togglePlay = () => {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v || adPlaying) return;
     if (!v.paused && !v.ended) {
       playAttempt.current += 1;
       v.pause();
@@ -240,8 +298,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             onSeeked={(e) => updateBuffered(e.currentTarget)}
           />
 
+          {adPlaying && <VideoAdOverlay ad={adPlaying} onFinish={finishAd} onClose={onClose} />}
+
           {/* The poster and native preload are used only for the selected video. */}
-          {!playing && !playbackError && (
+          {!adPlaying && !playing && !playbackError && (
             <button type="button" aria-label="Play video" className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
               <span
                 className="video-player__play-button w-20 h-20 rounded-full flex items-center justify-center transition-all hover:scale-110"
@@ -270,7 +330,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
 
           {/* Top controls */}
           <div
-            className={`video-player__top absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${showControls || !playing ? "opacity-100" : "opacity-0"}`}
+            className={`video-player__top absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${adPlaying ? "opacity-0 pointer-events-none" : showControls || !playing ? "opacity-100" : "opacity-0"}`}
             style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)" }}
           >
             <div className="flex-1 min-w-0">
@@ -289,7 +349,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
 
           {/* Bottom controls */}
           <div
-            className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${showControls || !playing ? "opacity-100" : "opacity-0"}`}
+            className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${adPlaying ? "opacity-0 pointer-events-none" : showControls || !playing ? "opacity-100" : "opacity-0"}`}
             style={{ background: "linear-gradient(to top, rgba(0,0,0,0.9), transparent)" }}
           >
             {/* Progress bar */}
