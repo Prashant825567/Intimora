@@ -1,11 +1,10 @@
 import React, { useState } from "react";
-import { Play, Clock } from "lucide-react";
+import { Play, Eye } from "lucide-react";
 import type { SponsoredCard as SponsoredCardData } from "../services/partner-cards.mjs";
 
-// A sponsored partner video rendered with the same card markup, outline and
-// typography as the site's own cards, so it reads as part of the catalogue. The
-// only difference is the badge: the slot that shows EXCLUSIVE on our videos
-// shows SPONSORED here.
+// A sponsored partner video in the site's own card design: same thumbnail
+// treatment, same title block, same metadata line. The only difference is the
+// badge, which occupies the slot that shows EXCLUSIVE on our own videos.
 interface SponsoredCardProps {
   card: SponsoredCardData;
   onPlay: (card: SponsoredCardData) => void;
@@ -16,16 +15,15 @@ const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
   const title = card.title || "Sponsored video";
   return (
     <div
-      className="video-card video-card--sponsored group rounded-xl overflow-hidden border border-gray-800/50 hover:border-yellow-800/50 transition-all duration-300 cursor-pointer"
+      className="video-card video-card--sponsored group cursor-pointer"
       style={{
-        background: "#0d0d0d",
-        boxShadow: hovered ? "0 8px 30px rgba(201,168,76,0.12), 0 2px 8px rgba(0,0,0,0.5)" : "0 2px 8px rgba(0,0,0,0.3)",
-        transform: hovered ? "translateY(-3px)" : "translateY(0)",
+        transform: hovered ? "translateY(-2px)" : "translateY(0)",
+        transition: "transform 200ms ease",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div className="video-card__media relative overflow-hidden" style={{ aspectRatio: "16/9" }}>
+      <div className="video-card__media relative overflow-hidden rounded-lg" style={{ aspectRatio: "16/9" }}>
         {card.thumbnail ? (
           <img
             src={card.thumbnail}
@@ -35,21 +33,20 @@ const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
             loading="lazy"
           />
         ) : (
-          <div className="video-card__image w-full h-full flex items-center justify-center" style={{ background: "linear-gradient(135deg, #141414, #0a0a0a)" }}>
+          <div className="video-card__image w-full h-full flex items-center justify-center">
             <Play className="w-10 h-10" style={{ color: "#3a3a3a" }} />
           </div>
         )}
 
         {/* Same badge slot as the EXCLUSIVE badge on our own videos. */}
         <div
-          className="video-card__badge absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold tracking-wider"
+          className="video-card__badge absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider"
           style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
         >
           SPONSORED
         </div>
 
-        <div className="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded bg-black/80 text-white text-xs font-mono">
-          <Clock className="w-3 h-3" />
+        <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/85 text-white text-[11px] font-semibold">
           AD
         </div>
 
@@ -65,19 +62,23 @@ const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
         </button>
       </div>
 
-      <div className="p-3" onClick={() => onPlay(card)}>
+      <div className="pt-2" onClick={() => onPlay(card)}>
         <h3 className="video-card__title text-white text-sm font-semibold line-clamp-2 leading-snug group-hover:text-yellow-300 transition-colors">
           {title}
         </h3>
-        <div className="video-card__creator flex items-center gap-2 mt-2">
-          <img src="/logo.png" alt="Intimora" className="video-card__avatar w-5 h-5 rounded-full border border-yellow-800/50 object-contain" />
-          <span className="video-card__creator-name text-gray-500 text-xs">Sponsored</span>
-        </div>
-        <div className="video-card__metadata flex items-center justify-between mt-2">
-          <div className="video-card__counts flex items-center gap-3 text-xs text-gray-600">
-            <span className="flex items-center gap-1">Promoted</span>
-          </div>
-          <span className="video-card__date text-gray-700 text-xs">Ad</span>
+
+        <div className="video-card__metadata flex items-center flex-wrap gap-x-2 gap-y-1 mt-1.5 text-xs text-gray-500">
+          <span className="video-card__creator flex items-center gap-1.5 min-w-0">
+            <img src="/logo.png" alt="Intimora" className="video-card__avatar w-4 h-4 rounded-full border border-yellow-800/50 object-contain" />
+            <span className="video-card__creator-name break-words">Sponsored</span>
+          </span>
+          <span className="flex items-center gap-2 whitespace-nowrap">
+            <span aria-hidden="true" className="hidden sm:inline text-gray-700">·</span>
+            <span className="video-card__views flex items-center gap-1">
+              <Eye className="w-3 h-3" />
+              Promoted
+            </span>
+          </span>
         </div>
       </div>
     </div>

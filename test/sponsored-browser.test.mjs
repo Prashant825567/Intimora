@@ -104,13 +104,19 @@ test("sponsored partner videos sit between ours and open in our own player", {
     assert.equal(order[4].title, "Partner one");
     assert.equal(order[4].title, (await sponsored.first().locator(".video-card__title").textContent()), "the partner title is used");
     assert.equal(await sponsored.first().locator(".video-card__badge").textContent(), "SPONSORED", "the badge sits where EXCLUSIVE does on our cards");
+    assert.equal(await page.locator("section[aria-label='All Videos'] .video-card:not(.video-card--sponsored) .video-card__badge").count(), 0, "ordinary categories stay off the artwork");
     assert.match(await sponsored.first().locator(".video-card__image").getAttribute("src"), /cdn\.partner\.example\/one\.jpg/);
+    // Same card anatomy as ours: bare thumbnail (no box/frame), then title and
+    // one metadata line underneath.
     const firstCardClasses = await page.locator("section[aria-label='All Videos'] .video-card").first().getAttribute("class");
     const sponsoredClasses = await sponsored.first().getAttribute("class");
-    for (const token of ["rounded-xl", "overflow-hidden", "border-gray-800/50", "hover:border-yellow-800/50"]) {
+    for (const token of ["video-card", "group"]) {
       assert.ok(firstCardClasses.includes(token), `our card keeps ${token}`);
-      assert.ok(sponsoredClasses.includes(token), `the sponsored card keeps our outline (${token})`);
+      assert.ok(sponsoredClasses.includes(token), `the sponsored card keeps our structure (${token})`);
     }
+    assert.equal(await sponsored.first().locator(".video-card__media").evaluate((node) => getComputedStyle(node).borderTopWidth), "0px", "the sponsored thumbnail is not boxed");
+    assert.equal(await sponsored.first().locator(".video-card__image").evaluate((node) => getComputedStyle(node).objectFit), "contain", "the sponsored thumbnail is never cropped");
+    assert.equal(await page.locator("section[aria-label='All Videos'] .video-card__media").first().evaluate((node) => getComputedStyle(node).borderTopWidth), "0px", "our cards are unboxed too");
 
     // Clicking it opens the site's own player, not the partner's page.
     await sponsored.first().getByRole("button", { name: /Play Partner one/ }).click();
@@ -120,6 +126,9 @@ test("sponsored partner videos sit between ours and open in our own player", {
     const frame = player.locator("iframe");
     assert.equal(await frame.getAttribute("src"), embed(764349));
     assert.equal(await frame.getAttribute("referrerpolicy"), "no-referrer");
+    const sandbox = await frame.getAttribute("sandbox");
+    assert.ok(sandbox && sandbox.includes("allow-scripts"), "the partner player still runs its scripts");
+    assert.ok(!sandbox.includes("allow-modals"), "partner alert()/confirm() pop-ups (the Telegram dialog) are suppressed");
     assert.equal(await page.getByRole("button", { name: "Close video player" }).count(), 1);
     await page.getByRole("button", { name: "Close video player" }).click();
     await player.waitFor({ state: "detached" });

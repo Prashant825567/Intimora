@@ -88,8 +88,9 @@ export default defineConfig(({ mode }) => {
     define: {
       __INTIMORA_DISCOVERY_URL__: JSON.stringify(discoveryUrl),
       __INTIMORA_AUTH_BACKENDS__: JSON.stringify(authBackends),
-      // Enable only after the backend returns privacy-filtered referral users.
-      __INTIMORA_SAFE_REFERRALS__: JSON.stringify(env.INTIMORA_PUBLIC_SAFE_REFERRALS === "1"),
+      // The backend now returns privacy-filtered referral users, so the tree is
+      // shown by default; INTIMORA_PUBLIC_SAFE_REFERRALS=0 remains as a switch.
+      __INTIMORA_SAFE_REFERRALS__: JSON.stringify(env.INTIMORA_PUBLIC_SAFE_REFERRALS !== "0"),
       // Poll public counts only after every selected backend implements the
       // versioned, privacy-safe contract documented in the README.
       __INTIMORA_LIVE_LIKES__: JSON.stringify(env.INTIMORA_PUBLIC_LIVE_LIKES === "1"),

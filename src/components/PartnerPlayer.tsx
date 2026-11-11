@@ -35,11 +35,19 @@ const PartnerPlayer: React.FC<PartnerPlayerProps> = ({ card, onClose }) => {
           className="relative bg-black rounded-xl overflow-hidden"
           style={{ aspectRatio: "16/9", boxShadow: "0 0 60px rgba(0,0,0,0.9), 0 0 0 1px rgba(201,168,76,0.2)" }}
         >
+          {/*
+            The partner page runs sandboxed without `allow-modals`, so the
+            window.confirm()/alert() pop-ups its player fires (the Telegram
+            promo dialog) are silently blocked instead of interrupting the
+            viewer. `allow-popups` is kept for its "watch full video" links,
+            while top navigation stays impossible.
+          */}
           <iframe
             src={card.embedUrl}
             title={title}
             className="w-full h-full block"
             referrerPolicy="no-referrer"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
             allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
             allowFullScreen
           />
