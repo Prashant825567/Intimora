@@ -496,17 +496,6 @@ function App() {
         ) : activeView === "Home" ? (
           <>
             {videos.length > 0 && <div className="mb-10"><HeroBanner videos={videos} onPlay={handlePlayVideo} /></div>}
-            <div className="flex items-center gap-3 mb-8 overflow-x-auto pb-2 scrollbar-hide" aria-label="Explore videos">
-              {["All", "Free", "Trending", "New", "Exclusive", "HD", "4K", "Solo", "Couple"].map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => navigate(tag === "All" ? "Home" : tag === "Trending" || tag === "New" || tag === "Exclusive" ? tag : "Categories")}
-                  className="flex-shrink-0 px-4 py-2 rounded-full text-xs font-bold tracking-wider border transition-all hover:scale-105"
-                  style={tag === "All" ? { background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000", border: "none" } : { background: "transparent", color: "#666", borderColor: "#2a2a2a" }}
-                >{tag}</button>
-              ))}
-            </div>
             {catalogMessage}
             {catalogStatus === "complete" && videos.length > 0 && (
               <>
