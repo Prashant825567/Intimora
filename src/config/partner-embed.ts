@@ -3,7 +3,7 @@
 // on the site, so it is public information, not a secret.
 //
 // Examples of the shape that is accepted:
-//   https://hdzog.com/embed/71011?source=1849513610
+//   https://hdzog.com/embed/2168747?source=1849513610
 //   https://hdzog.com/feed/12345?source=1849513610
 //   https://tubecorporate.com/...
 //
@@ -14,4 +14,4 @@
 // Only https URLs on hdzog.com / tubecorporate.com (or their subdomains) are
 // accepted. The build fails with a clear message for any other host, so a
 // mistyped value can never ship.
-export const PARTNER_EMBED_URL = "";
+export const PARTNER_EMBED_URL = "https://hdzog.com/embed/2168747?source=1849513610";

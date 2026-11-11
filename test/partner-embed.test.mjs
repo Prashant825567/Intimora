@@ -13,7 +13,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const browserPath = process.env.CHROMIUM_PATH || chromium.executablePath();
 const discovery = "https://intimora.tmc78lxnu.workers.dev/api/get-server";
 const backend = "https://api-intimora.vercel.app";
-const campaign = "https://hdzog.com/embed/71011?source=1849513610";
+const campaign = "https://hdzog.com/embed/2168747?source=1849513610";
 const guestIdentity = `
 export function watchFirebaseUser(listener) { queueMicrotask(() => listener(null)); return () => {}; }
 export async function signInWithGoogle() {}
@@ -34,22 +34,22 @@ test("only documented TubeCorporate hosts are accepted and the campaign source i
   assert.equal(DEFAULT_PARTNER_EMBED_URL, campaign);
   assert.equal(partnerEmbedUrl(campaign), campaign);
   assert.equal(
-    partnerEmbedUrl("https://hdzog.com/embed/71011?source=1849513610&utm_x=1"),
-    "https://hdzog.com/embed/71011?source=1849513610&utm_x=1",
+    partnerEmbedUrl("https://hdzog.com/embed/2168747?source=1849513610&utm_x=1"),
+    "https://hdzog.com/embed/2168747?source=1849513610&utm_x=1",
   );
   // A campaign feed URL may use any safe path; the mandatory source is added.
   assert.equal(partnerEmbedUrl("https://hdzog.com/feed/12345"), "https://hdzog.com/feed/12345?source=1849513610");
   assert.equal(partnerEmbedUrl("https://tubecorporate.com/feed/9?source=555"), "https://tubecorporate.com/feed/9?source=555");
-  assert.equal(partnerEmbedUrl("https://www.hdzog.com/embed/71011"), "https://www.hdzog.com/embed/71011?source=1849513610");
-  assert.equal(partnerEmbedUrl(" https://hdzog.com/embed/71011?source=1849513610"), null, "no surrounding whitespace");
-  assert.equal(partnerEmbedUrl("http://hdzog.com/embed/71011?source=1849513610"), null, "HTTPS only");
-  assert.equal(partnerEmbedUrl("https://user:pass@hdzog.com/embed/71011?source=1849513610"), null, "no credentials");
-  assert.equal(partnerEmbedUrl("https://evil.example/embed/71011?source=1849513610"), null, "unknown host");
-  assert.equal(partnerEmbedUrl("https://hdzog.com.evil.example/embed/71011?source=1849513610"), null, "suffix look-alike host");
-  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011?source=abc"), null, "numeric source only");
-  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011?source=1849513610#fragment"), null, "no fragment");
-  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/71011?source=1849513610&next=javascript:alert(1)"), null, "unsafe parameter value");
-  assert.equal(partnerEmbedUrl(`https://hdzog.com/embed/71011?source=${"9".repeat(21)}`), null, "bounded source");
+  assert.equal(partnerEmbedUrl("https://www.hdzog.com/embed/2168747"), "https://www.hdzog.com/embed/2168747?source=1849513610");
+  assert.equal(partnerEmbedUrl(" https://hdzog.com/embed/2168747?source=1849513610"), null, "no surrounding whitespace");
+  assert.equal(partnerEmbedUrl("http://hdzog.com/embed/2168747?source=1849513610"), null, "HTTPS only");
+  assert.equal(partnerEmbedUrl("https://user:pass@hdzog.com/embed/2168747?source=1849513610"), null, "no credentials");
+  assert.equal(partnerEmbedUrl("https://evil.example/embed/2168747?source=1849513610"), null, "unknown host");
+  assert.equal(partnerEmbedUrl("https://hdzog.com.evil.example/embed/2168747?source=1849513610"), null, "suffix look-alike host");
+  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/2168747?source=abc"), null, "numeric source only");
+  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/2168747?source=1849513610#fragment"), null, "no fragment");
+  assert.equal(partnerEmbedUrl("https://hdzog.com/embed/2168747?source=1849513610&next=javascript:alert(1)"), null, "unsafe parameter value");
+  assert.equal(partnerEmbedUrl(`https://hdzog.com/embed/2168747?source=${"9".repeat(21)}`), null, "bounded source");
   assert.equal(partnerEmbedUrl(`https://hdzog.com/${"a".repeat(220)}`), null, "bounded feed path");
   assert.equal(partnerEmbedUrl(`https://hdzog.com/feed/1?source=${"9".repeat(21)}`), null, "bounded source on a feed");
   assert.equal(partnerEmbedUrl(""), null);
@@ -65,6 +65,7 @@ test("the pasted campaign URL in src/config/partner-embed.ts is valid whenever i
   }
   assert.match(configFile, /hdzog\.com/, "the file names the accepted partner host");
   assert.equal(DEFAULT_PARTNER_EMBED_URL, campaign, "the built-in campaign remains the fallback");
+  assert.equal(pasted, campaign, "the working campaign embed is set in the config file");
 });
 
 test("a feed URL pasted through the build variable also receives the campaign source", async () => {
@@ -78,7 +79,7 @@ test("a feed URL pasted through the build variable also receives the campaign so
     const html = await readFile(path.join(output, "index.html"), "utf8");
     const bundled = html.match(/assets\/(index-[^"]+\.js)/)?.[1];
     const asset = await readFile(path.join(output, "assets", bundled), "utf8");
-    assert.ok(asset.includes(campaign.replace("/embed/71011", "/feed/12345")), "the feed URL keeps the campaign source");
+    assert.ok(asset.includes(campaign.replace("/embed/2168747", "/feed/12345")), "the feed URL keeps the campaign source");
   } finally {
     delete process.env.INTIMORA_PUBLIC_PARTNER_EMBED_URL;
     await rm(output, { recursive: true, force: true });
@@ -98,7 +99,7 @@ test("the build embeds the validated campaign URL and rejects an invalid overrid
     const assets = await readFile(path.join(output, "assets", bundled), "utf8");
     assert.ok(assets.includes(campaign), "the campaign iframe URL is bundled");
 
-    process.env.INTIMORA_PUBLIC_PARTNER_EMBED_URL = "https://evil.example/embed/71011?source=1849513610";
+    process.env.INTIMORA_PUBLIC_PARTNER_EMBED_URL = "https://evil.example/embed/2168747?source=1849513610";
     let error;
     try {
       await build({

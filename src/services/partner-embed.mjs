@@ -3,7 +3,7 @@
 // mandatory (it is added when the pasted URL omits it), and anything unsafe is
 // rejected before it can reach the bundle.
 export const PARTNER_CAMPAIGN_SOURCE = "1849513610";
-export const DEFAULT_PARTNER_EMBED_URL = `https://hdzog.com/embed/71011?source=${PARTNER_CAMPAIGN_SOURCE}`;
+export const DEFAULT_PARTNER_EMBED_URL = `https://hdzog.com/embed/2168747?source=${PARTNER_CAMPAIGN_SOURCE}`;
 export const PARTNER_EMBED_HOSTS = Object.freeze(["hdzog.com", "tubecorporate.com", "tube-corporate.com"]);
 
 const VIDEO_PATH = /^\/embed\/[A-Za-z0-9_-]{1,64}$/;
