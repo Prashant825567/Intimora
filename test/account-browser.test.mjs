@@ -1,3 +1,4 @@
+import "./fixtures/ads-off.mjs";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";

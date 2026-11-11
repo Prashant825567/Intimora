@@ -1,3 +1,4 @@
+import "./fixtures/ads-off.mjs";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
