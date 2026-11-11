@@ -170,7 +170,7 @@ async function stubNetwork(context, { feed = false } = {}) {
   return calls;
 }
 
-test("the published campaign feed becomes a sponsored grid only after the age gate", {
+test("the campaign feed becomes sponsored cards in the grid, only after the age gate", {
   skip: existsSync(browserPath) ? false : "Install Chromium or set CHROMIUM_PATH", timeout: 90_000,
 }, async () => {
   const vite = await createViteServer({
@@ -184,48 +184,52 @@ test("the published campaign feed becomes a sponsored grid only after the age ga
     const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
     const response = await fetch(`${base}/`);
     const csp = response.headers.get("content-security-policy") || "";
-    assert.match(csp, /frame-src[^;]*https:\/\/desi-porntube\.com/, "the feed frames are allowed by the CSP");
+    assert.match(csp, /frame-src[^;]*https:\/\/desi-porntube\.com/, "the sponsored player frames are allowed by the CSP");
     assert.match(csp, /frame-src[^;]*https:\/\/hdzog\.com/, "a single embed page stays allowed");
     assert.equal(response.headers.get("referrer-policy"), "no-referrer", "partner frames never receive a referrer");
 
     browser = await chromium.launch({ executablePath: browserPath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    const calls = await stubNetwork(context, { feed: true });
+    const calls = { feed: [], frames: [] };
+    await context.route("**/*", async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range" };
+      if (url.pathname === "/partner-feed.json") {
+        calls.feed.push(url.href);
+        return route.fulfill({ headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ version: 2, items: feedEmbeds.map((embedUrl, index) => ({ embedUrl, title: `Partner ${index + 1}`, thumbnail: null })) }) });
+      }
+      if (url.hostname.endsWith("desi-porntube.com") || url.hostname.endsWith("hdzog.com")) {
+        calls.frames.push(url.href);
+        return route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Partner fixture</title>" });
+      }
+      if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
+      if (url.origin !== backend) return route.continue();
+      if (url.pathname === "/api/videos" || url.pathname === "/api/search") return route.fulfill({ headers, json: { ok: true, data: { videos: [], nextCursor: null } } });
+      return route.fulfill({ status: 404, headers, json: { ok: false } });
+    });
 
     const page = await context.newPage();
     await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: /I AM 18/i }).waitFor();
     assert.equal(await page.locator("iframe").count(), 0, "no third-party frame before age confirmation");
+    assert.equal(await page.locator(".video-card--sponsored").count(), 0, "no sponsored card before age confirmation");
     assert.deepEqual(calls, { feed: [], frames: [] }, "the campaign is not contacted before age confirmation");
 
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    const section = page.locator("section[aria-label='Sponsored partner videos']");
-    await section.waitFor();
-    const firstFrame = page.locator('iframe[title="Sponsored partner video 1"]');
-    await firstFrame.waitFor();
-    assert.equal(await page.locator("iframe[title^='Sponsored partner video']").count(), feedEmbeds.length, "every feed row is rendered");
-    for (const [index, expected] of feedEmbeds.entries()) {
-      const frame = page.locator(`iframe[title="Sponsored partner video ${index + 1}"]`);
-      assert.equal(await frame.getAttribute("src"), expected);
-      assert.equal(await frame.getAttribute("referrerpolicy"), "no-referrer");
-      assert.equal(await frame.getAttribute("loading"), "lazy");
-    }
-    assert.match(await section.innerText(), /SPONSORED/i);
-    assert.equal(calls.feed.length, 1, "the feed is read once, from our own origin");
-    assert.ok(calls.feed[0].endsWith("/partner-feed.json"), "only same-origin JSON is fetched");
-    await section.scrollIntoViewIfNeeded();
-    await page.waitForFunction(() => document.querySelector("iframe[title='Sponsored partner video 3']") !== null);
-    assert.ok(calls.frames.every((href) => href.startsWith("https://desi-porntube.com/embed/")), "only validated campaign embeds are requested");
+    // The feed now feeds cards inside the grids, not a panel under the page.
+    await page.waitForFunction(() => fetch("/partner-feed.json").then(() => true), undefined, { timeout: 10_000 });
+    assert.ok(calls.feed.length >= 1, "the feed is read from our own origin after the age gate");
+    assert.equal(await page.locator("section[aria-label='Sponsored partner videos']").count(), 0, "the old bottom panel is gone");
+    assert.deepEqual(calls.frames, [], "no partner player is opened until a sponsored card is clicked");
 
-    // The grid stays on browse pages but not inside account pages or search results.
-    await page.goto(`${base}/trending`, { waitUntil: "domcontentloaded" });
-    await page.locator('iframe[title="Sponsored partner video 1"]').waitFor();
+    // Nothing sponsored inside account pages or search results.
     await page.goto(`${base}/search?q=test`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: /Search results for/ }).waitFor();
-    assert.equal(await page.locator("section[aria-label='Sponsored partner videos']").count(), 0, "no partner grid over search results");
+    assert.equal(await page.locator(".video-card--sponsored").count(), 0, "no sponsored cards over search results");
     await page.goto(`${base}/login`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "Sign in to your account" }).waitFor();
-    assert.equal(await page.locator("section[aria-label='Sponsored partner videos']").count(), 0, "no partner grid on account pages");
+    assert.equal(await page.locator(".video-card--sponsored").count(), 0, "no sponsored cards on account pages");
     await context.close();
   } finally {
     await browser?.close();

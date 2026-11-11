@@ -8,6 +8,8 @@ import VideoPlayer from "./components/VideoPlayer";
 import ShareModal from "./components/ShareModal";
 import Footer from "./components/Footer";
 import PartnerEmbed from "./components/PartnerEmbed";
+import PartnerPlayer from "./components/PartnerPlayer";
+import SponsoredCard from "./components/SponsoredCard";
 import AccountPages from "./components/AccountPages";
 import type { AccountPage } from "./components/AccountPages";
 import { useAccount } from "./hooks/useAccount";
@@ -20,6 +22,8 @@ import { TrendingUp, Flame, Sparkles, ChevronRight, Loader2, Upload, Wifi, WifiO
 import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoToVideo, primeBackendSelection } from "./services/api";
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
+import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
+import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
 import { accountPageFromPath, BROWSE_PATHS, browseViewFromPath, isSearchPath, searchPathFor, searchTermFromLocation, watchIdFromPath, watchPathFor } from "./services/page-routes.mjs";
 
@@ -29,7 +33,7 @@ const DISPLAY_PAGE_SIZE = 12;
 type CatalogStatus = "loading" | "complete" | "partial";
 type FeedView = Exclude<BrowseView, "Home" | "Categories">;
 
-function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, compact = false }: {
+function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, compact = false, sponsored, onPlaySponsored }: {
   videos: Video[];
   onPlay: (video: Video) => void;
   onShare: (video: Video) => void;
@@ -37,12 +41,20 @@ function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, compac
   account: AccountController;
   liveLikes: LiveLikes;
   compact?: boolean;
+  // Sponsored partner videos are mixed in as "four of ours, then one of theirs".
+  sponsored?: SponsoredCardData[];
+  onPlaySponsored?: (card: SponsoredCardData) => void;
 }) {
+  const entries = interleaveSponsored(videos, sponsored ?? []);
   return (
     <div className={compact
       ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4"
       : "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4"}>
-      {videos.map((video) => <VideoCard key={video.id} video={liveLikes.withCount(video)} onPlay={onPlay} onShare={onShare} onSave={onSave} saved={account.isSaved(video.id)} savePending={account.pending.has(`save:${video.id}`)} observeLikes={liveLikes.observe} />)}
+      {entries.map((entry) => entry.kind === "sponsored" ? (
+        <SponsoredCard key={entry.card.id} card={entry.card} onPlay={(card) => onPlaySponsored?.(card)} />
+      ) : (
+        <VideoCard key={entry.video.id} video={liveLikes.withCount(entry.video)} onPlay={onPlay} onShare={onShare} onSave={onSave} saved={account.isSaved(entry.video.id)} savePending={account.pending.has(`save:${entry.video.id}`)} observeLikes={liveLikes.observe} />
+      ))}
     </div>
   );
 }
@@ -120,12 +132,26 @@ function App() {
   const liveLikes = useLiveLikes(__INTIMORA_LIVE_LIKES__, activeVideo);
   const [startVideoOnOpen, setStartVideoOnOpen] = useState(false);
   const [shareVideo, setShareVideo] = useState<Video | null>(null);
+  const [activeSponsored, setActiveSponsored] = useState<SponsoredCardData | null>(null);
+  const [sponsored, setSponsored] = useState<SponsoredCardData[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus>("loading");
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [apiError, setApiError] = useState(false);
   const [sharedVideoUnavailable, setSharedVideoUnavailable] = useState(false);
   const firstPageRequest = useRef<{ revision: number; promise: Promise<CatalogResponse> } | null>(null);
+  // The partner feed is read once, after the age gate, from our own origin. A
+  // single pasted embed page needs no feed.
+  useEffect(() => {
+    if (!ageVerified || __INTIMORA_PARTNER_MODE__ !== "feed") return;
+    let active = true;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    fetch("/partner-feed.json", { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer", signal: controller?.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: unknown) => { if (active) setSponsored(sponsoredCards(payload)); })
+      .catch(() => { if (active) setSponsored([]); });
+    return () => { active = false; controller?.abort(); };
+  }, [ageVerified]);
   const catalogFinishedAt = useRef(0);
   const sharedVideoRequest = useRef<{ id: string; promise: ReturnType<typeof fetchVideoDetail> } | null>(null);
   const locallyOpenedVideo = useRef<string | null>(null);
@@ -507,7 +533,7 @@ function App() {
             {videos.length > 0 && (
               <section aria-label="All Videos">
                 <div className="flex items-center gap-2 mb-5" style={{ color: "#c9a84c" }}><TrendingUp className="w-5 h-5" /><h2 className="text-white font-bold text-xl">All Videos</h2><span className="text-gray-600 text-sm ml-1">({videos.length})</span></div>
-                <VideoGrid videos={videos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                <VideoGrid videos={videos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} sponsored={sponsored} onPlaySponsored={setActiveSponsored} />
                 {listFooter(videos.length)}
               </section>
             )}
@@ -517,14 +543,15 @@ function App() {
             <div className="mb-6"><h1 className="text-white text-2xl font-bold">{feedLabels[activeView].title}</h1><p className="text-gray-500 text-sm mt-1">{feedLabels[activeView].subtitle}</p></div>
             {catalogMessage}
             {catalogStatus === "complete" && (currentFeed.length
-              ? <><VideoGrid videos={currentFeed.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />{listFooter(currentFeed.length)}</>
+              ? <><VideoGrid videos={currentFeed.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} sponsored={sponsored} onPlaySponsored={setActiveSponsored} />{listFooter(currentFeed.length)}</>
               : <p className="text-gray-500 text-sm py-8">{feedLabels[activeView].empty}</p>)}
           </section>
         )}
-        {!accountPage && submittedQuery === null && <PartnerEmbed mode={__INTIMORA_PARTNER_MODE__} url={__INTIMORA_PARTNER_EMBED__} />}
+        {!accountPage && submittedQuery === null && __INTIMORA_PARTNER_MODE__ === "embed" && <PartnerEmbed mode="embed" url={__INTIMORA_PARTNER_EMBED__} />}
       </main>
       <Footer />
       {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={closeVideo} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
+      {activeSponsored && <PartnerPlayer card={activeSponsored} onClose={() => setActiveSponsored(null)} />}
       {shareVideo && <ShareModal video={shareVideo} onClose={closeShare} />}
     </div>
   );

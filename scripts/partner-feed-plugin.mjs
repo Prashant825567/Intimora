@@ -1,6 +1,6 @@
 import { rm, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { parsePartnerFeed, partnerFeedPayload } from "../src/services/partner-feed.mjs";
+import { parseEmbedPreview, parsePartnerFeed, partnerFeedPayload } from "../src/services/partner-feed.mjs";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_FEED_TIMEOUT_MS = 10_000;
@@ -30,14 +30,62 @@ export async function requestPartnerFeed(feedUrl, { fetchImpl = globalThis.fetch
   }
 }
 
+// Each sponsored card should carry the partner video's own title and poster, so a
+// handful of embed pages are read at build time (bounded in count, time and
+// concurrency). A page that fails simply yields a card without a preview.
+export async function enrichPartnerItems(embedUrls, {
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 5000,
+  concurrency = 4,
+  limit = 12,
+} = {}) {
+  const queue = (Array.isArray(embedUrls) ? embedUrls : []).slice(0, Math.max(0, limit));
+  const items = new Array(queue.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < queue.length) {
+      const index = cursor;
+      cursor += 1;
+      const embedUrl = queue[index];
+      let preview = { title: "", thumbnail: null };
+      if (typeof fetchImpl === "function") {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetchImpl(embedUrl, {
+            signal: controller.signal,
+            redirect: "follow",
+            credentials: "omit",
+            headers: { accept: "text/html", "user-agent": "IntimoraFeed/1.0" },
+          });
+          if (response.ok) preview = parseEmbedPreview(await response.text());
+        } catch {
+          // No preview: the card still works with its generic title.
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      items[index] = { embedUrl, ...preview };
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+  return items.filter(Boolean);
+}
+
 export function partnerFeedPlugin({
   feedUrl,
   timeoutMs = DEFAULT_FEED_TIMEOUT_MS,
   generate = requestPartnerFeed,
+  // Swappable so tests never contact the partner host.
+  enrich = enrichPartnerItems,
   // Test and offline builds must never contact the feed host.
   offline = false,
 }) {
-  const read = () => (offline ? Promise.resolve([]) : generate(feedUrl, { timeoutMs }));
+  const read = async () => {
+    if (offline) return [];
+    const urls = await generate(feedUrl, { timeoutMs });
+    return enrich(urls, { timeoutMs: Math.min(timeoutMs, 5000) });
+  };
   return {
     name: "intimora-partner-feed",
     // Dev has no build output, so the same JSON is generated on demand. This
