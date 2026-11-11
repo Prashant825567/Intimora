@@ -113,7 +113,7 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     assert.equal(await page.locator("main .video-card, main .hero-banner").count(), 0);
     await page.getByRole("button", { name: "Back to Home" }).click();
     await page.getByRole("button", { name: /WATCH NOW/i }).waitFor();
-    await page.locator('[aria-label="Explore videos"]').getByRole("button", { name: "New", exact: true }).click();
+    await nav.getByRole("link", { name: "New", exact: true }).click();
     await page.getByRole("heading", { name: "New Releases" }).waitFor();
     assert.deepEqual(await titleList(page), ["Today late", "Today early"]);
 
