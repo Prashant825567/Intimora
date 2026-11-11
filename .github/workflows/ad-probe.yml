@@ -1,0 +1,36 @@
+name: ad-probe
+
+# Temporary diagnostic: checks the HilltopAds VAST tag exactly the way a browser
+# does — with an Origin header — and prints the response headers.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: VAST tag headers (browser-style CORS request)
+        run: |
+          URL='https://surprisedplate.com/d.m/FAzwdZGNN/vvZjGEUf/QeLmc9buAZ/U/lnkfP/TecO2pMtTDcX5iN/DpELt/N-ziYax/N/zbk/0yNbQH'
+          echo "=== GET with Origin (what the site's fetch() sends) ==="
+          curl -sS -D - -o /tmp/tag.xml -H 'Origin: https://intimora.new.tg' "$URL" | head -40
+          echo "=== body size / first bytes ==="
+          wc -c /tmp/tag.xml
+          head -c 300 /tmp/tag.xml
+          echo
+          echo "=== OPTIONS preflight ==="
+          curl -sS -D - -o /dev/null -X OPTIONS -H 'Origin: https://intimora.new.tg' \
+            -H 'Access-Control-Request-Method: GET' "$URL" | head -20
+      - name: creative host headers
+        run: |
+          MEDIA='https://www.dismal-library.pro/152327/199273/530462_76421y.mp4'
+          echo "=== HEAD creative with Referer ==="
+          curl -sS -D - -o /dev/null -I -H 'Referer: https://intimora.new.tg/' "$MEDIA" | head -25
+          echo "=== first bytes, following redirects ==="
+          curl -sSL -o /tmp/ad.mp4 -w 'status=%{http_code} type=%{content_type} size=%{size_download}\n' --max-time 60 "$MEDIA"
+      - name: live site ad config
+        run: |
+          echo "=== /partner-feed.json (does the new build serve it?) ==="
+          curl -sS -o /dev/null -w 'status=%{http_code} bytes=%{size_download}\n' https://intimora.new.tg/partner-feed.json
+          echo "=== CSP header on the live site ==="
+          curl -sS -D - -o /dev/null https://intimora.new.tg/ | grep -i -E 'content-security|referrer|frame' || echo "no security headers"
