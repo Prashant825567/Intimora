@@ -158,9 +158,18 @@ test("a pre-roll plays before the content, tracks impressions and can be skipped
     assert.equal(await page.locator("#player-container video").count(), 2, "the creative and the content are separate elements");
     // The content itself has not started while the pre-roll runs.
     assert.equal(await page.evaluate(() => document.querySelector("#player-container video")?.paused), true);
-    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/impression"), "the impression fired");
-    assert.ok(requests.some((item) => item.kind === "creative"), "the creative was requested in a media element");
-    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/start"), "the start event fired");
+    // Tracking pixels are asynchronous: wait for them instead of assuming the
+    // overlay mounting and the media element's play event happen in one tick.
+    const waitFor = async (predicate, message) => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if (requests.some(predicate)) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.fail(message);
+    };
+    await waitFor((item) => item.kind === "track" && item.path === "/impression", "the impression fired");
+    await waitFor((item) => item.kind === "creative", "the creative was requested in a media element");
+    await waitFor((item) => item.kind === "track" && item.path === "/start", "the start event fired");
 
     const link = page.getByRole("link", { name: /Visit Test campaign/ });
     assert.equal(await link.getAttribute("href"), "https://advertiser.example/landing");

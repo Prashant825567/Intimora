@@ -532,7 +532,7 @@ function App() {
               : <p className="text-gray-500 text-sm py-8">{feedLabels[activeView].empty}</p>)}
           </section>
         )}
-        {!accountPage && submittedQuery === null && <PartnerEmbed url={__INTIMORA_PARTNER_EMBED__} />}
+        {!accountPage && submittedQuery === null && <PartnerEmbed mode={__INTIMORA_PARTNER_MODE__} url={__INTIMORA_PARTNER_EMBED__} />}
       </main>
       <Footer />
       {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={closeVideo} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
