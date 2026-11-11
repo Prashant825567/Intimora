@@ -51,8 +51,21 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
     firePixels(ad.impressions);
     const element = videoRef.current;
     if (element) {
+      // Browsers may refuse an unmuted autoplay. Muted playback is always
+      // allowed, so retry that way instead of dropping the ad entirely; the
+      // viewer can unmute with the button in the overlay.
+      const retryMuted = () => {
+        if (element.muted) {
+          finish("error");
+          return;
+        }
+        element.muted = true;
+        setMuted(true);
+        const retry = element.play();
+        if (retry) void retry.catch(() => finish("error"));
+      };
       const attempt = element.play();
-      if (attempt) void attempt.catch(() => finish("error"));
+      if (attempt) void attempt.catch(retryMuted);
     }
     // If the creative never starts, fall through to the video instead of
     // leaving the viewer on a black frame.
