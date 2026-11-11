@@ -13,6 +13,7 @@ export interface VastAdData {
   errors: string[];
   events: Record<string, string[]>;
   tag: string;
+  source?: "live" | "cached";
 }
 
 export function requestVastText(url: string, timeoutMs?: number): Promise<string>;
@@ -24,5 +25,18 @@ export function loadVastAd(
     skipFallbackSeconds?: number;
     maxWrappers?: number;
     fetchText?: (url: string, timeoutMs: number) => Promise<string>;
+  },
+): Promise<VastAdData | null>;
+
+export function loadPreRoll(
+  tagUrl: string,
+  options?: {
+    timeoutMs?: number;
+    skipFallbackSeconds?: number;
+    maxWrappers?: number;
+    cachedUrl?: string;
+    liveBudgetMs?: number;
+    fetchText?: (url: string, timeoutMs: number) => Promise<string>;
+    fetchCached?: (url: string) => Promise<(VastAdData & { source: "cached" }) | null>;
   },
 ): Promise<VastAdData | null>;

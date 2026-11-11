@@ -6,12 +6,13 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import { applySecurityHeaders } from "./server/security.mjs";
 import { DEFAULT_DISCOVERY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
 import { PARTNER_EMBED_URL as configuredPartnerEmbed } from "./src/config/partner-embed";
-import { VAST_TAG_URL as configuredVastTag } from "./src/config/vast";
+import { VAST_SKIP_FALLBACK_SECONDS, VAST_TAG_URL as configuredVastTag } from "./src/config/vast";
 import { DEFAULT_PARTNER_EMBED_URL, partnerSource } from "./src/services/partner-embed.mjs";
 import { vastTagUrl } from "./src/services/vast-tag.mjs";
 import { sitemapPlugin } from "./scripts/sitemap-plugin.mjs";
 import { routeShellsPlugin } from "./scripts/route-shells-plugin.mjs";
 import { DEFAULT_FEED_TIMEOUT_MS, partnerFeedPlugin } from "./scripts/partner-feed-plugin.mjs";
+import { adFallbackPlugin } from "./scripts/ad-fallback-plugin.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +39,8 @@ export default defineConfig(({ mode }) => {
     ? env.INTIMORA_PUBLIC_VAST_TAG_URL
     : configuredVastTag;
   const vastTag = vastTagSource ? vastTagUrl(vastTagSource) : "";
+  // Offline builds (and tests) must never contact the ad network at build time.
+  const adProbeOffline = env.INTIMORA_AD_PROBE_OFFLINE === "1";
   if (vastTag === null) throw new Error("Invalid VAST tag: use an https HilltopAds tag URL, or leave src/config/vast.ts empty.");
   // Firebase tokens go only to explicitly trusted backend origins, never to an
   // arbitrary host that a compromised discovery response might return.
@@ -122,6 +125,9 @@ export default defineConfig(({ mode }) => {
       // A campaign feed becomes same-origin JSON at build time, so the client
       // never needs CORS from the feed host.
       ...(partner.mode === "feed" ? [partnerFeedPlugin({ feedUrl: partner.url, timeoutMs: partnerFeedTimeout, offline: partnerFeedOffline })] : []),
+      // A browser cannot read every VAST tag (CORS, slow ad server), so the build
+      // publishes one resolved creative that the player can fall back to.
+      ...(vastTag ? [adFallbackPlugin({ tagUrl: vastTag, skipFallbackSeconds: VAST_SKIP_FALLBACK_SECONDS, offline: adProbeOffline })] : []),
     ],
     resolve: { alias: { "@": path.resolve(__dirname, "src") } },
   };

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Shape of the live HilltopAds tag (publisher site 929597): two linear MP4
+     creatives, 15s skip offset, third-party creative host. -->
+<VAST version="3.0" xmlns="http://www.w3.org/2001/XMLSchema">
+  <Ad id="567553">
+    <InLine>
+      <AdSystem version="3.0">HilltopAds</AdSystem>
+      <Error><![CDATA[https://surprisedplate.com/dlmmF.znd-GpVqyrcsm/error?code=[ERRORCODE]]]></Error>
+      <Impression><![CDATA[https://surprisedplate.com/dlmmF.znd-GpVq2rZsW/impression]]></Impression>
+      <AdTitle>567553</AdTitle>
+      <Creatives>
+        <Creative>
+          <Linear skipoffset="00:00:15">
+            <TrackingEvents>
+              <Tracking event="start"><![CDATA[https://surprisedplate.com/dCm_FEzFd/start]]></Tracking>
+              <Tracking event="firstQuartile"><![CDATA[https://surprisedplate.com/dCm_FEzFd/q1]]></Tracking>
+              <Tracking event="midpoint"><![CDATA[https://surprisedplate.com/dCm_FEzFd/mid]]></Tracking>
+              <Tracking event="thirdQuartile"><![CDATA[https://surprisedplate.com/dCm_FEzFd/q3]]></Tracking>
+              <Tracking event="complete"><![CDATA[https://surprisedplate.com/dCm_FEzFd/complete]]></Tracking>
+              <Tracking event="skip"><![CDATA[https://surprisedplate.com/dCm_FEzFd/skip]]></Tracking>
+              <Tracking event="mute"><![CDATA[https://surprisedplate.com/dCm_FEzFd/mute]]></Tracking>
+            </TrackingEvents>
+            <Duration>00:00:20</Duration>
+            <MediaFiles>
+              <MediaFile delivery="progressive" type="video/mp4" bitrate="1986" width="1280" height="720" codec="h264"><![CDATA[https://www.dismal-library.pro/152327/199273/530462_76421y.mp4]]></MediaFile>
+              <MediaFile delivery="progressive" type="video/webm" bitrate="1606" width="1280" height="720" codec="vp9"><![CDATA[https://www.dismal-library.pro/152327/199273/530462_76421y.webm]]></MediaFile>
+              <MediaFile delivery="progressive" type="video/mp4" bitrate="1008" width="854" height="480" codec="h264"><![CDATA[https://www.dismal-library.pro/152327/199273/530462_76421y480.mp4]]></MediaFile>
+              <MediaFile delivery="progressive" type="video/mp4" bitrate="630" width="640" height="360" codec="h264"><![CDATA[https://www.dismal-library.pro/152327/199273/530462_76421y360.mp4]]></MediaFile>
+            </MediaFiles>
+            <VideoClicks>
+              <ClickThrough><![CDATA[https://surprisedplate.com/dpmqF_z.dsGtVu2vZ/click]]></ClickThrough>
+            </VideoClicks>
+          </Linear>
+        </Creative>
+      </Creatives>
+    </InLine>
+  </Ad>
+  <Ad id="567559">
+    <InLine>
+      <AdSystem version="3.0">HilltopAds</AdSystem>
+      <Impression><![CDATA[https://surprisedplate.com/dSmTF-z.dVGWVX2YZ/impression]]></Impression>
+      <AdTitle>567559</AdTitle>
+      <Creatives>
+        <Creative>
+          <Linear skipoffset="00:00:15">
+            <Duration>00:00:23</Duration>
+            <MediaFiles>
+              <MediaFile delivery="progressive" type="video/mp4" bitrate="844" width="404" height="720" codec="h264"><![CDATA[https://www.dismal-library.pro/152327/199273/530468_56523y.mp4]]></MediaFile>
+            </MediaFiles>
+          </Linear>
+        </Creative>
+      </Creatives>
+    </InLine>
+  </Ad>
+</VAST>

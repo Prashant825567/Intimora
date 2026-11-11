@@ -18,3 +18,9 @@ export const VAST_TIMEOUT_MS = 4000;
 // How long a play request waits for an in-flight ad decision before the content
 // starts instead. Pre-roll never interrupts playback that has already begun.
 export const VAST_DECISION_GRACE_MS = 1200;
+
+// The build resolves the tag once and publishes the creative as same-origin
+// JSON. A browser only falls back to it when the live tag cannot be read (no
+// CORS headers, ad blocker, offline) or answers slower than this budget.
+export const VAST_CACHED_AD_URL = "/ad-fallback.json";
+export const VAST_LIVE_BUDGET_MS = 800;
