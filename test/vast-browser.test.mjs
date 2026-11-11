@@ -304,3 +304,33 @@ test("a pre-roll still plays from the published snapshot when the browser cannot
     await page.close();
   } });
 });
+
+test("an ad that cannot autoplay with sound starts muted instead of being dropped", options, async () => {
+  await withPlayer({ vast: () => ({ xml: vastXml() }), run: async ({ context, base }) => {
+    const page = await context.newPage();
+    // Playwright's Chromium allows unmuted autoplay, so the browser's refusal is
+    // simulated the way Chrome reports it: a NotAllowedError from play().
+    await page.addInitScript(() => {
+      const original = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function play(...args) {
+        if (this.hasAttribute("data-ad-video") && !this.muted && !this.dataset.retriedMuted) {
+          this.dataset.retriedMuted = "1";
+          return Promise.reject(Object.assign(new Error("blocked"), { name: "NotAllowedError" }));
+        }
+        return original.apply(this, args);
+      };
+    });
+    await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".hero-banner__cta").click();
+    await page.locator("[data-ad-video]").waitFor({ timeout: 20_000 });
+    await page.waitForFunction(() => {
+      const element = document.querySelector("[data-ad-video]");
+      return element && !element.paused;
+    }, undefined, { timeout: 20_000 });
+    assert.equal(await page.evaluate(() => document.querySelector("[data-ad-video]").muted), true, "the creative plays muted");
+    assert.equal(await page.getByRole("button", { name: "Unmute advertisement" }).count(), 1, "the viewer can unmute it again");
+    assert.equal(await page.locator("[data-ad-overlay]").count(), 1, "the pre-roll is still shown");
+    await page.close();
+  } });
+});
