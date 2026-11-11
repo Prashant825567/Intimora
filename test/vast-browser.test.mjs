@@ -2,6 +2,8 @@
 // contacted: the tag, the creative, the trackers and the landing page are all
 // fulfilled locally. No shared "ads off" fixture is imported here.
 delete process.env.INTIMORA_PUBLIC_VAST_TAG_URL;
+// A build in this file must not reach the ad network either.
+process.env.INTIMORA_AD_PROBE_OFFLINE = "1";
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -69,7 +71,7 @@ function vastXml({ skipOffset = "00:00:02", duration = "00:00:30", media = adMed
 </VAST>`;
 }
 
-async function withPlayer({ vast, run }) {
+async function withPlayer({ vast, cached = null, run }) {
   const vite = await createViteServer({
     configFile: path.join(root, "vite.config.ts"), logLevel: "silent",
     server: { host: "127.0.0.1", port: 0, strictPort: false },
@@ -97,8 +99,15 @@ async function withPlayer({ vast, run }) {
         requests.push({ kind: "advertiser", path: url.pathname });
         return route.fulfill({ headers: { ...cors, "Content-Type": "text/html" }, body: "<!doctype html><title>Advertiser fixture</title>" });
       }
+      if (url.pathname === "/ad-fallback.json") {
+        requests.push({ kind: "cached" });
+        if (!cached) return route.fulfill({ status: 404, headers: cors, json: { enabled: false, ad: null } });
+        return route.fulfill({ headers: { ...cors, "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true, ad: cached }) });
+      }
       if (url.hostname === "surprisedplate.com") {
         requests.push({ kind: "tag" });
+        // A tag without CORS headers fails in the browser exactly like this.
+        if (vast === "blocked") return route.abort("failed");
         const response = typeof vast === "function" ? vast() : vast;
         if (!response) return route.fulfill({ status: 204, headers: cors, body: "" });
         if (response.xml) return route.fulfill({ status: response.status ?? 200, headers: { ...cors, "Content-Type": "text/xml" }, body: response.xml });
@@ -244,4 +253,54 @@ test("the configured tag is bundled and an invalid one fails the build", async (
     delete process.env.INTIMORA_PUBLIC_VAST_TAG_URL;
     await rm(output, { recursive: true, force: true });
   }
+});
+
+test("a pre-roll still plays from the published snapshot when the browser cannot read the tag", options, async () => {
+  const cachedAd = {
+    id: "cached-1",
+    system: "HilltopAds",
+    title: "Cached campaign",
+    mediaUrl: adMedia,
+    mediaType: "video/mp4",
+    durationSeconds: 20,
+    skipAfterSeconds: 2,
+    skippable: true,
+    clickThrough: "https://advertiser.example/landing",
+    clickTracking: ["https://track.example/click"],
+    impressions: ["https://track.example/impression"],
+    errors: [],
+    events: { start: ["https://track.example/start"], skip: ["https://track.example/skip"] },
+    tag: tagUrl,
+  };
+  // The tag request is aborted, which is what a missing Access-Control-Allow-Origin
+  // looks like to fetch(): the live ad can never resolve.
+  await withPlayer({ vast: "blocked", cached: cachedAd, run: async ({ context, base, requests }) => {
+    const { page, errors } = await openPlayer(context, base);
+    const ad = page.locator("[data-ad-video]");
+    await ad.waitFor({ timeout: 20_000 });
+    assert.equal(await ad.getAttribute("src"), adMedia, "the published creative is used");
+    assert.equal(await page.locator("[data-ad-overlay]").getAttribute("aria-label"), "Advertisement");
+    // The content has not started while the pre-roll runs.
+    assert.equal(await page.evaluate(() => document.querySelector("#player-container video")?.paused), true);
+    assert.ok(requests.some((item) => item.kind === "cached"), "the snapshot is read from our own origin");
+    for (let attempt = 0; attempt < 200 && !requests.some((item) => item.kind === "track" && item.path === "/impression"); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/impression"), "the cached impression fired");
+
+    const link = page.getByRole("link", { name: /Visit Cached campaign/ });
+    assert.equal(await link.getAttribute("href"), "https://advertiser.example/landing");
+
+    const skip = page.getByRole("button", { name: "Skip advertisement" });
+    await skip.waitFor({ timeout: 30_000 });
+    await skip.click();
+    await page.locator("[data-ad-overlay]").waitFor({ state: "detached" });
+    await page.waitForFunction(() => {
+      const element = document.querySelector("#player-container video");
+      return element && !element.paused && element.currentTime > 0;
+    });
+    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/skip"), "the cached skip event fired");
+    assert.deepEqual(errors, []);
+    await page.close();
+  } });
 });

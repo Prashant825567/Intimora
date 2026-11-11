@@ -3,3 +3,4 @@
 // The dedicated ad test removes this value again and stubs the tag instead.
 process.env.INTIMORA_PUBLIC_VAST_TAG_URL = "";
 process.env.INTIMORA_PARTNER_FEED_OFFLINE = "1";
+process.env.INTIMORA_AD_PROBE_OFFLINE = "1";

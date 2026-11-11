@@ -8,8 +8,8 @@ import type { Video } from "../data/mockVideos";
 import { isPremiumLabel } from "../utils/video-labels";
 import VideoAdOverlay from "./VideoAdOverlay";
 import type { VastAd } from "./VideoAdOverlay";
-import { loadVastAd } from "../services/vast-loader.mjs";
-import { VAST_DECISION_GRACE_MS, VAST_SKIP_FALLBACK_SECONDS, VAST_TIMEOUT_MS } from "../config/vast";
+import { loadPreRoll } from "../services/vast-loader.mjs";
+import { VAST_CACHED_AD_URL, VAST_DECISION_GRACE_MS, VAST_LIVE_BUDGET_MS, VAST_SKIP_FALLBACK_SECONDS, VAST_TIMEOUT_MS } from "../config/vast";
 
 // The ad tag is a public build constant. An empty value disables pre-roll.
 const VAST_TAG = __INTIMORA_VAST_TAG_URL__;
@@ -68,9 +68,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const ensureAdRequest = () => {
     if (!VAST_TAG || adState.current.status !== "idle") return;
     adState.current.status = "loading";
-    adState.current.promise = loadVastAd(VAST_TAG, {
+    adState.current.promise = loadPreRoll(VAST_TAG, {
       timeoutMs: VAST_TIMEOUT_MS,
       skipFallbackSeconds: VAST_SKIP_FALLBACK_SECONDS,
+      cachedUrl: VAST_CACHED_AD_URL,
+      liveBudgetMs: VAST_LIVE_BUDGET_MS,
     }).then((ad: VastAd | null) => ad, () => null);
   };
 
