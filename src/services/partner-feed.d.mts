@@ -7,4 +7,12 @@ export function parsePartnerFeed(
   options?: { limit?: number; hosts?: readonly string[] },
 ): string[];
 
-export function partnerFeedPayload(urls: readonly string[]): string;
+export interface PartnerFeedItem {
+  embedUrl: string;
+  title: string;
+  thumbnail: string | null;
+}
+
+export function parseEmbedPreview(html: string): { title: string; thumbnail: string | null };
+
+export function partnerFeedPayload(items: readonly (string | Partial<PartnerFeedItem>)[]): string;

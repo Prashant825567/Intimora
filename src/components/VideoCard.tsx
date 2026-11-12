@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Play, Clock, Eye, Share2, Heart, ThumbsUp } from "lucide-react";
+import { Play, Eye, Share2, Heart, ThumbsUp } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import type { LiveLikes } from "../hooks/useLiveLikes";
 import { isPremiumLabel } from "../utils/video-labels";
@@ -14,6 +14,10 @@ interface VideoCardProps {
   observeLikes: LiveLikes["observe"];
 }
 
+// A catalogue card: the thumbnail is the card, with the title and a single
+// metadata line underneath (creator · views · likes). No box, no frame — the
+// grid reads like a wall of thumbnails, and the image is never cropped or
+// zoomed.
 const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, saved, savePending, observeLikes }) => {
   const [hovered, setHovered] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -25,17 +29,15 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
   return (
     <div
       ref={cardRef}
-      className="video-card group rounded-xl overflow-hidden border border-gray-800/50 hover:border-yellow-800/50 transition-all duration-300 cursor-pointer"
+      className="video-card group cursor-pointer"
       style={{
-        background: "#0d0d0d",
-        boxShadow: hovered ? "0 8px 30px rgba(201,168,76,0.12), 0 2px 8px rgba(0,0,0,0.5)" : "0 2px 8px rgba(0,0,0,0.3)",
-        transform: hovered ? "translateY(-3px)" : "translateY(0)",
+        transform: hovered ? "translateY(-2px)" : "translateY(0)",
+        transition: "transform 200ms ease",
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Thumbnail */}
-      <div className="video-card__media relative overflow-hidden" style={{ aspectRatio: "16/9" }}>
+      <div className="video-card__media relative overflow-hidden rounded-lg" style={{ aspectRatio: "16/9" }}>
         <img
           src={video.thumbnail}
           crossOrigin="anonymous"
@@ -45,19 +47,19 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
           loading="lazy"
         />
 
-        {/* Category badge */}
-        {video.category && !isPremiumLabel(video.category) && (
+        {/* Only our exclusive videos carry a badge — the sponsored card reuses
+            this exact slot. Ordinary categories stay off the artwork. */}
+        {video.isExclusive && (
           <div
-            className="video-card__badge absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-bold tracking-wider"
+            className="video-card__badge absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider"
             style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
           >
-            {video.category.toUpperCase()}
+            EXCLUSIVE
           </div>
         )}
 
-        {/* Duration */}
-        <div className="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded bg-black/80 text-white text-xs font-mono">
-          <Clock className="w-3 h-3" />
+        {/* Duration, bottom right. */}
+        <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/85 text-white text-[11px] font-semibold tabular-nums">
           {video.duration}
         </div>
 
@@ -89,6 +91,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
           </button>
           {savePending && <span role="status" className="absolute right-full top-0 mr-1 whitespace-nowrap rounded bg-black/85 px-2 py-1 text-xs text-white">Saving…</span>}
           <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); onShare(video); }}
             aria-label="Share video"
             className="p-1.5 rounded-full bg-black/70 text-white hover:bg-yellow-500 hover:text-black transition-all"
@@ -99,38 +102,44 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
       </div>
 
       {/* Info */}
-      <div className="p-3" onClick={() => onPlay(video)}>
+      <div className="pt-2" onClick={() => onPlay(video)}>
         <h3 className="video-card__title text-white text-sm font-semibold line-clamp-2 leading-snug group-hover:text-yellow-300 transition-colors">
           {video.title}
         </h3>
 
-        <div className="video-card__creator flex items-center gap-2 mt-2">
-          <img src={video.creatorAvatar} alt={video.creator} className="video-card__avatar w-5 h-5 rounded-full border border-yellow-800/50" />
-          <span className="video-card__creator-name text-gray-500 text-xs">{video.creator}</span>
-        </div>
-
-        <div className="video-card__metadata flex items-center justify-between mt-2">
-          <div className="video-card__counts flex items-center gap-3 text-xs text-gray-600">
-            <span className="flex items-center gap-1">
+        <div className="video-card__metadata flex items-center flex-wrap gap-x-2 gap-y-1 mt-1.5 text-xs text-gray-500">
+          <span className="video-card__creator flex items-center gap-1.5 min-w-0">
+            <img src={video.creatorAvatar} alt={video.creator} className="video-card__avatar w-4 h-4 rounded-full border border-yellow-800/50" />
+            <span className="video-card__creator-name break-words">{video.creator}</span>
+          </span>
+          {/* Views and likes break onto the next line as one unit, so no
+              separator is ever left dangling at the end of a row. */}
+          <span className="flex items-center gap-2 whitespace-nowrap">
+            <span aria-hidden="true" className="hidden sm:inline text-gray-700">·</span>
+            <span className="video-card__views flex items-center gap-1">
               <Eye className="w-3 h-3" />
-              {video.views}
+              {video.views} views
             </span>
-            <span className="flex items-center gap-1" aria-label={video.likes === null ? "Like count unavailable" : `${video.likes.toLocaleString()} likes`}>
+            <span aria-hidden="true" className="text-gray-700">·</span>
+            <span
+              className="video-card__counts flex items-center gap-1"
+              aria-label={video.likes === null ? "Like count unavailable" : `${video.likes.toLocaleString()} likes`}
+            >
               <ThumbsUp className="w-3 h-3" />
               {video.likes === null ? "—" : video.likes.toLocaleString()}
             </span>
-          </div>
-          <span className="video-card__date text-gray-700 text-xs">{video.uploadedAt}</span>
+          </span>
         </div>
 
-        {/* Tags */}
-        <div className="flex flex-wrap gap-1 mt-2">
-          {video.tags.filter((tag) => !isPremiumLabel(tag)).slice(0, 2).map((tag) => (
-            <span key={tag} className="video-card__tag px-1.5 py-0.5 bg-gray-800 rounded text-xs text-gray-500">
-              #{tag}
-            </span>
-          ))}
-        </div>
+        {video.tags.filter((tag) => !isPremiumLabel(tag)).length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {video.tags.filter((tag) => !isPremiumLabel(tag)).slice(0, 2).map((tag) => (
+              <span key={tag} className="video-card__tag px-1.5 py-0.5 bg-gray-800/70 rounded text-[11px] text-gray-500">
+                #{tag}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

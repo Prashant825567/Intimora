@@ -37,9 +37,59 @@ export function parsePartnerFeed(text, { limit = PARTNER_FEED_LIMIT, hosts = PAR
   return urls;
 }
 
+const META_TAG = /<meta\b[^>]*>/gi;
+const TITLE_TAG = /<title>([^<]{1,300})<\/title>/i;
+
+function httpsUrl(value) {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:" || url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+// A partner embed page carries the video's own title and poster. Reading them at
+// build time lets a sponsored card look exactly like one of our cards.
+export function parseEmbedPreview(html) {
+  const preview = { title: "", thumbnail: null };
+  if (typeof html !== "string" || !html) return preview;
+  for (const tag of html.match(META_TAG) ?? []) {
+    const property = (/\bproperty\s*=\s*["']([^"']+)["']/i.exec(tag)?.[1] ?? "").toLowerCase();
+    if (property !== "og:title" && property !== "og:image" && property !== "og:image:secure_url") continue;
+    const content = /\bcontent\s*=\s*["']([^"']*)["']/i.exec(tag)?.[1];
+    if (!content) continue;
+    if (property === "og:title" && !preview.title) preview.title = decodeHtmlEntities(content).trim().slice(0, 120);
+    if (property !== "og:title" && !preview.thumbnail) {
+      const url = httpsUrl(content);
+      if (url) preview.thumbnail = url;
+    }
+    if (preview.title && preview.thumbnail) break;
+  }
+  if (!preview.title) {
+    const match = TITLE_TAG.exec(html);
+    if (match) preview.title = decodeHtmlEntities(match[1]).trim().slice(0, 120);
+  }
+  return preview;
+}
+
 // The build (or the dev server) publishes this as /partner-feed.json; the client
 // only ever reads same-origin JSON, so the feed host needs no CORS relaxation.
-export function partnerFeedPayload(urls) {
-  const items = Array.isArray(urls) ? urls.filter((url) => typeof url === "string") : [];
-  return `${JSON.stringify({ items }, null, 2)}\n`;
+export function partnerFeedPayload(items) {
+  const list = Array.isArray(items)
+    ? items.map((item) => {
+      const value = typeof item === "string" ? { embedUrl: item } : item;
+      if (!value || typeof value !== "object") return null;
+      const embedUrl = partnerEmbedUrl(value.embedUrl, { requireVideoPath: true });
+      if (!embedUrl) return null;
+      return {
+        embedUrl,
+        title: typeof value.title === "string" ? value.title.slice(0, 120) : "",
+        thumbnail: typeof value.thumbnail === "string" ? value.thumbnail : null,
+      };
+    }).filter(Boolean)
+    : [];
+  return `${JSON.stringify({ version: 2, items: list }, null, 2)}\n`;
 }
