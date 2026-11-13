@@ -1,7 +1,13 @@
 import { readJson, requestUpstream, validateNetworkUrl } from "../server/api-proxy.mjs";
+import { BROWSE_PATHS } from "../src/services/page-routes.mjs";
 import { DEFAULT_DISCOVERY_URL, publicBackendBase, publicHttpsUrl } from "../src/services/public-url.mjs";
 
 export const SITE_ORIGIN = "https://intimora.new.tg";
+
+// The site's own browsable pages, in the order a visitor meets them. They are
+// listed first so a crawler always finds the real Intimora pages even when the
+// catalog scan fails and no video page can be enumerated.
+export const SITE_PAGES = Object.freeze(Object.values(BROWSE_PATHS));
 const VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const PAGE_SIZE = 50;
 const MAX_PAGES = 120;
@@ -13,7 +19,10 @@ const BUILD_DEADLINE_MS = 60_000;
 // the sitemap, and duplicate or invalid IDs are omitted.
 export function renderSitemap(ids = []) {
   const unique = new Set(ids.filter((id) => typeof id === "string" && VIDEO_ID.test(id)));
-  const urls = [`${SITE_ORIGIN}/`, ...Array.from(unique, (id) => `${SITE_ORIGIN}/watch/${id}`)];
+  const urls = [
+    ...SITE_PAGES.map((path) => `${SITE_ORIGIN}${path}`),
+    ...Array.from(unique, (id) => `${SITE_ORIGIN}/watch/${id}`),
+  ];
   const lines = urls.map((url) => `  <url><loc>${url}</loc></url>`);
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${lines.join("\n")}\n</urlset>\n`;
 }

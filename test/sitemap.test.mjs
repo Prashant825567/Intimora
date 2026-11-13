@@ -37,8 +37,12 @@ test("robots advertises the valid checked-in sitemap snapshot", async () => {
   const urls = locs(fallback);
   assert.equal(urls[0], `${SITE_ORIGIN}/`);
   assert.equal(new Set(urls).size, urls.length);
-  for (const url of urls.slice(1)) assert.match(url, /^https:\/\/intimora\.new\.tg\/watch\/[A-Za-z0-9_-]{1,128}$/);
-  assert.equal(fallback, renderSitemap(urls.slice(1).map((url) => url.split("/").at(-1))));
+  // The site's own pages come first, then its video pages.
+  assert.deepEqual(urls.slice(0, 5), [
+    `${SITE_ORIGIN}/`, `${SITE_ORIGIN}/trending`, `${SITE_ORIGIN}/new`, `${SITE_ORIGIN}/exclusive`, `${SITE_ORIGIN}/categories`,
+  ]);
+  for (const url of urls.slice(5)) assert.match(url, /^https:\/\/intimora\.new\.tg\/watch\/[A-Za-z0-9_-]{1,128}$/);
+  assert.equal(fallback, renderSitemap(urls.slice(5).map((url) => url.split("/").at(-1))));
 });
 
 test("a sitemap includes the full public catalog once, safely, across overlapping cursor pages", async () => {
@@ -56,7 +60,8 @@ test("a sitemap includes the full public catalog once, safely, across overlappin
   const result = await buildSitemap({ discoveryUrl, requestJson: sitemapRequest(pages, calls) });
   assert.deepEqual({ complete: result.complete, videoCount: result.videoCount, pages: result.pages }, { complete: true, videoCount: 3, pages: 3 });
   assert.deepEqual(locs(result.xml), [
-    `${SITE_ORIGIN}/`, `${SITE_ORIGIN}/watch/normal`, `${SITE_ORIGIN}/watch/exclusive-1`, `${SITE_ORIGIN}/watch/third_3`,
+    `${SITE_ORIGIN}/`, `${SITE_ORIGIN}/trending`, `${SITE_ORIGIN}/new`, `${SITE_ORIGIN}/exclusive`, `${SITE_ORIGIN}/categories`,
+    `${SITE_ORIGIN}/watch/normal`, `${SITE_ORIGIN}/watch/exclusive-1`, `${SITE_ORIGIN}/watch/third_3`,
   ]);
   assert.equal(calls.filter((url) => url === discoveryUrl).length, 1);
   assert.equal(calls.length, 4);
@@ -85,7 +90,7 @@ test("ambiguous, failed, oversized and capped scans collect only known URLs and 
     throw new Error("private network detail secret-marker");
   } });
   assert.equal(partial.complete, false);
-  assert.deepEqual(locs(partial.xml), [`${SITE_ORIGIN}/`, `${SITE_ORIGIN}/watch/kept`]);
+  assert.deepEqual(locs(partial.xml), [`${SITE_ORIGIN}/`, `${SITE_ORIGIN}/trending`, `${SITE_ORIGIN}/new`, `${SITE_ORIGIN}/exclusive`, `${SITE_ORIGIN}/categories`, `${SITE_ORIGIN}/watch/kept`]);
   assert.doesNotMatch(partial.xml, /private|secret-marker/);
 
   const invalid = await buildSitemap({ discoveryUrl, requestJson: sitemapRequest({
@@ -153,7 +158,7 @@ test("a real Vite static build publishes generated XML and robots with crawler-f
     const response = await fetch(`${base}/sitemap.xml`, { headers });
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type"), /^application\/xml/i);
-    assert.deepEqual(locs(await response.text()), [`${SITE_ORIGIN}/`, `${SITE_ORIGIN}/watch/one`, `${SITE_ORIGIN}/watch/two`]);
+    assert.deepEqual(locs(await response.text()), [`${SITE_ORIGIN}/`, `${SITE_ORIGIN}/trending`, `${SITE_ORIGIN}/new`, `${SITE_ORIGIN}/exclusive`, `${SITE_ORIGIN}/categories`, `${SITE_ORIGIN}/watch/one`, `${SITE_ORIGIN}/watch/two`]);
     const head = await fetch(`${base}/sitemap.xml`, { method: "HEAD", headers });
     assert.equal(head.status, 200);
     assert.equal(await head.text(), "");
