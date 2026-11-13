@@ -30,7 +30,9 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
   const videoRef = useRef<HTMLVideoElement>(null);
   const fired = useRef(new Set<string>());
   const finished = useRef(false);
-  const [started, setStarted] = useState(false);
+  // A ref, not state: the watchdog below is registered once on mount, so a
+  // state value captured there would stay false forever and cut a playing ad.
+  const playing = useRef(false);
   const [muted, setMuted] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(ad.skippable ? Math.ceil(ad.skipAfterSeconds ?? 0) : null);
 
@@ -69,7 +71,7 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
     }
     // If the creative never starts, fall through to the video instead of
     // leaving the viewer on a black frame.
-    const watchdog = setTimeout(() => { if (!started) finish("error"); }, 6000);
+    const watchdog = setTimeout(() => { if (!playing.current) finish("error"); }, 6000);
     return () => clearTimeout(watchdog);
     // Ad identity never changes for a mounted overlay.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -128,7 +130,7 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
         autoPlay
         preload="auto"
         muted={muted}
-        onPlaying={() => { setStarted(true); track("start"); }}
+        onPlaying={() => { playing.current = true; track("start"); }}
         onTimeUpdate={handleTimeUpdate}
         onEnded={() => { track("complete"); finish("complete"); }}
         onError={() => finish("error")}

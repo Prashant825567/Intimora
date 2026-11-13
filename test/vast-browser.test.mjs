@@ -115,6 +115,9 @@ async function withPlayer({ vast, cached = null, run }) {
       }
       if (url.hostname === "ad-media.example") {
         requests.push({ kind: "creative", path: url.pathname, dest: request.headers()["sec-fetch-dest"] });
+        // A creative URL that no longer exists must fail, not serve bytes: the
+        // "skipped-looking tag" scenario below is a broken creative.
+        if (url.pathname.includes("missing")) return route.fulfill({ status: 404, headers: cors });
         const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers().range || "");
         const start = range ? Number(range[1]) : 0;
         const end = range && range[2] ? Math.min(Number(range[2]), clip.length - 1) : clip.length - 1;
@@ -204,6 +207,26 @@ test("a pre-roll plays before the content, tracks impressions and can be skipped
     assert.equal(requests.filter((item) => item.kind === "tag").length, before + 1, "one tag request per player");
     assert.deepEqual(errors, []);
     await page.close();
+  } });
+});
+
+test("a playing pre-roll is not cut short by the start-up watchdog", options, async () => {
+  await withPlayer({ vast: () => ({ xml: vastXml({ skipOffset: "00:00:15", duration: "00:00:20" }) }), run: async ({ context, base }) => {
+    const { page, errors } = await openPlayer(context, base);
+    const ad = page.locator("[data-ad-video]");
+    await ad.waitFor({ timeout: 20_000 });
+    // Well past the six-second window in which the creative should have started:
+    // the overlay used to be torn down here even though the ad was playing fine.
+    await page.waitForTimeout(8000);
+    assert.equal(await page.locator("[data-ad-overlay]").count(), 1, "a playing pre-roll stays on screen");
+    const played = await ad.evaluate((element) => element.currentTime);
+    assert.ok(played > 6, `the creative kept playing (t=${played.toFixed(1)}s)`);
+    // The skip button unlocks at the tag's own 15 second offset, not earlier.
+    const skip = page.getByRole("button", { name: "Skip advertisement" });
+    await skip.waitFor({ timeout: 20_000 });
+    await skip.click();
+    await page.locator("[data-ad-overlay]").waitFor({ state: "detached" });
+    assert.deepEqual(errors, []);
   } });
 });
 
