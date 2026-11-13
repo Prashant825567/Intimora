@@ -553,6 +553,10 @@ test("sanitized referral fixture renders only two descendant levels, grouped by 
       { name: "Direct Alice", username: "alice", referralCode: "REF-ALICE", referredBy: "REF-OWN001" },
       { name: "Ancestor Eve", username: "ancestor", referralCode: "REF-EVE", referredBy: "REF-OTHER" },
       { name: "Self", username: "self", referralCode: "REF-OWN001", referredBy: "REF-OWN001" },
+      // The live backend still sends whole user records and omits referredBy
+      // on direct descendants: private fields must never reach the page, and
+      // the relationship is implied by the request.
+      { name: "Leaky Direct", username: "leaky", referralCode: "REF-LEAKY", email: "leaky@example.com", firebaseUid: "leaky-firebase-uid", avatar: "", likedVideos: ["video-one"], savedVideos: [], createdAt: 1794233425 },
     ],
     level2: [
       { name: "Second Bob", username: "bob", referralCode: "REF-BOB", referredBy: "REF-ALICE" },
@@ -569,6 +573,10 @@ test("sanitized referral fixture renders only two descendant levels, grouped by 
     const tree = network.locator(".referral-tree > div").first();
     assert.match(await tree.innerText(), /Direct Alice[\s\S]*Second Bob/);
     assert.doesNotMatch(await network.innerText(), /Ancestor Eve|Unrelated|\bSelf\b/);
+    await network.getByText("Leaky Direct").waitFor();
+    const networkText = await network.innerText();
+    assert.doesNotMatch(networkText, /leaky@example\.com|leaky-firebase-uid|video-one/, "private fields from the raw response never reach the page");
+    assert.doesNotMatch(await page.locator("body").innerText(), /leaky@example\.com|leaky-firebase-uid/);
     state.tree.direct.push({ name: "New Carol", username: "carol", referralCode: "REF-CAROL", referredBy: "REF-OWN001" });
     await network.getByRole("button", { name: "Refresh referrals" }).click();
     await network.getByText("New Carol").waitFor();

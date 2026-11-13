@@ -47,6 +47,22 @@ async function getReferralTree(uid) {
 }
 ```
 
+### Response contract
+
+The dashboard accepts this envelope as `data.tree`:
+
+```json
+{
+  "code": "REF-OWN001",
+  "direct": [{ "name": "Aarav", "username": "aarav", "referralCode": "REF-ABC", "referredBy": "REF-OWN001" }],
+  "level2": [{ "name": "Meera", "username": "meera", "referralCode": "REF-XYZ", "referredBy": "REF-ABC" }]
+}
+```
+
+- `code` must equal the requester's own `referralCode`; otherwise the client rejects the payload and the section shows a retryable error.
+- `referredBy` on a **direct** entry may be omitted — the client reads that as the requester's own code — but a wrong value excludes that person. **Level-2** entries must carry the `referredBy` that links them to a direct descendant, or they cannot be placed.
+- Everything else is rebuilt field by field before rendering, so extra keys never reach the page — but they still travel over the network. `email`, `firebaseUid`, `avatar`, `likedVideos`, `savedVideos`, `createdAt`, Telegram message ids and storage paths must not be in the response at all. A live payload observed during this work still returned whole user records (email, Firebase UID, empty liked/saved lists) and no `referredBy`; apply the patch above to strip them.
+
 Verify on **both** deployed backends that the raw JSON contains no descendant emails, UIDs, `likedVideos`, `savedVideos`, Telegram message IDs, avatars or other private fields; unrelated people and ancestors must not be included. Check empty, duplicate, missing and two-level relationships with real authorized accounts. Confirm the current 5,000-message scan covers every relevant user and referral record, or implement complete pagination **before enabling**: an undetected duplicate outside the scan could misattribute a relationship, besides leaving the tree incomplete. Enforce unique referral codes when creating accounts. The local regression test uses mocked records, not the live service.
 
-The privacy fix is deployed, so the frontend enables the referral tree by default (`INTIMORA_PUBLIC_SAFE_REFERRALS` is treated as on unless it is set to `0`). If any trusted backend host still returns the old payload, the dashboard shows a retryable "temporarily unavailable" message instead of rendering it — set `INTIMORA_PUBLIC_SAFE_REFERRALS=0` as a **public build-time variable** for the frontend and redeploy to hide the section entirely. The dashboard then loads and groups direct and second-level referrals, pinned to the backend that verified the account, with refresh and retry controls. This repository does not deploy or change the separate backend.
+The privacy fix is deployed, so the frontend enables the referral tree by default (`INTIMORA_PUBLIC_SAFE_REFERRALS` is treated as on unless it is set to `0`). A payload whose `code` does not match the signed-in account is rejected with a retryable "Could not load referrals right now." message. Set `INTIMORA_PUBLIC_SAFE_REFERRALS=0` as a **public build-time variable** for the frontend and redeploy to hide the section entirely (it then reads "Referral details are temporarily unavailable"). The flag is a build-time constant, so a running deployment only picks up either change after a rebuild. The dashboard then loads and groups direct and second-level referrals, pinned to the backend that verified the account, with refresh and retry controls. This repository does not deploy or change the separate backend.
