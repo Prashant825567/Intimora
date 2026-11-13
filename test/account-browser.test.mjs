@@ -570,14 +570,30 @@ test("sanitized referral fixture renders only two descendant levels, grouped by 
     const network = page.getByRole("region", { name: "Referral network" });
     await network.getByText("Direct Alice").waitFor();
     await network.getByText("Second Bob").waitFor();
-    const tree = network.locator(".referral-tree > div").first();
-    assert.match(await tree.innerText(), /Direct Alice[\s\S]*Second Bob/);
+    // Each invited person is a small flow node, and their own invitees hang
+    // directly underneath it, joined by an arrow.
+    const alice = network.locator(".referral-flow__item", { hasText: "Direct Alice" }).first();
+    assert.match(await alice.innerText(), /Direct Alice[\s\S]*Second Bob/, "level 2 sits under its own parent");
+    assert.equal(await alice.locator(".referral-flow__head").count() >= 1, true, "the node is joined by an arrow");
+    assert.equal(await network.locator(".referral-flow__item .referral-flow__item", { hasText: "Second Bob" }).count(), 1, "level 2 is nested inside level 1");
+    assert.equal(await network.locator(".referral-node--root").count(), 1, "the tree starts at your own account");
+    const boxes = await network.locator(".referral-node").evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().width));
+    assert.ok(boxes.every((width) => width <= 260), `nodes stay small: ${JSON.stringify(boxes)}`);
+    const clipped = await network.locator(".referral-flow").evaluate((flow) => flow.scrollWidth > flow.clientWidth + 1);
+    assert.equal(clipped, false, "the flow never needs horizontal scrolling");
     assert.doesNotMatch(await network.innerText(), /Ancestor Eve|Unrelated|\bSelf\b/);
     await network.getByText("Leaky Direct").waitFor();
     const networkText = await network.innerText();
     assert.doesNotMatch(networkText, /leaky@example\.com|leaky-firebase-uid|video-one/, "private fields from the raw response never reach the page");
     assert.doesNotMatch(await page.locator("body").innerText(), /leaky@example\.com|leaky-firebase-uid/);
     state.tree.direct.push({ name: "New Carol", username: "carol", referralCode: "REF-CAROL", referredBy: "REF-OWN001" });
+    for (const width of [280, 320, 390, 900]) {
+      await page.setViewportSize({ width, height: 900 });
+      await assertFits(page);
+      const flowFits = await network.locator(".referral-flow").evaluate((flow) => flow.scrollWidth <= flow.clientWidth + 1);
+      assert.ok(flowFits, `${width}px: the referral flow never needs horizontal scrolling`);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
     await network.getByRole("button", { name: "Refresh referrals" }).click();
     await network.getByText("New Carol").waitFor();
     assert.ok(state.calls.filter((call) => call.path === "/api/user/referrals").length >= 2);
