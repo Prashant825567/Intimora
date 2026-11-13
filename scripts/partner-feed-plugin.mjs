@@ -1,9 +1,19 @@
 import { rm, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { parseEmbedPreview, parsePartnerFeed, partnerFeedPayload } from "../src/services/partner-feed.mjs";
+import { PARTNER_PREVIEW_LIMIT, parseEmbedPreview, parsePartnerFeed, partnerFeedPayload } from "../src/services/partner-feed.mjs";
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_FEED_TIMEOUT_MS = 10_000;
+
+// Partner pages are regular web pages: they only publish their Open Graph tags
+// to a request that looks like a browser. A bare bot user agent is often served
+// a challenge page instead, which is why sponsored cards used to arrive without
+// a title or a poster.
+const PREVIEW_HEADERS = Object.freeze({
+  accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+});
 
 // Read a campaign feed exactly once per build and turn it into same-origin JSON.
 // The feed host is a third party, so the request is time-boxed, size-capped and
@@ -36,8 +46,8 @@ export async function requestPartnerFeed(feedUrl, { fetchImpl = globalThis.fetch
 export async function enrichPartnerItems(embedUrls, {
   fetchImpl = globalThis.fetch,
   timeoutMs = 5000,
-  concurrency = 4,
-  limit = 12,
+  concurrency = 6,
+  limit = PARTNER_PREVIEW_LIMIT,
 } = {}) {
   const queue = (Array.isArray(embedUrls) ? embedUrls : []).slice(0, Math.max(0, limit));
   const items = new Array(queue.length);
@@ -56,9 +66,14 @@ export async function enrichPartnerItems(embedUrls, {
             signal: controller.signal,
             redirect: "follow",
             credentials: "omit",
-            headers: { accept: "text/html", "user-agent": "IntimoraFeed/1.0" },
+            headers: PREVIEW_HEADERS,
           });
-          if (response.ok) preview = parseEmbedPreview(await response.text());
+          // Some hosts answer a challenge page or an image with 200; only HTML
+          // can carry a preview, so anything else keeps the generic card.
+          const contentType = (response.headers?.get?.("content-type") ?? "").toLowerCase();
+          if (response.ok && (!contentType || contentType.includes("html") || contentType.includes("xml"))) {
+            preview = parseEmbedPreview(await response.text(), embedUrl);
+          }
         } catch {
           // No preview: the card still works with its generic title.
         } finally {

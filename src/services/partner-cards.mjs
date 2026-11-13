@@ -3,9 +3,12 @@
 // catalogue, and they are mixed into the browse grids as "four of ours, then one
 // sponsored". Everything here is pure so the mixing rules can be tested.
 import { partnerEmbedUrl } from "./partner-embed.mjs";
+import { PARTNER_PREVIEW_LIMIT } from "./partner-feed.mjs";
 
 export const SPONSORED_EVERY = 4;
-const MAX_CARDS = 24;
+// The build reads exactly this many embed pages for titles and posters, so the
+// grid never asks for a card that has no preview to show.
+const MAX_CARDS = PARTNER_PREVIEW_LIMIT;
 const MAX_TEXT = 2048;
 const MAX_TITLE = 120;
 

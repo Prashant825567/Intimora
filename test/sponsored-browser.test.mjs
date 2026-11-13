@@ -21,10 +21,11 @@ const sponsoredPayload = {
     { embedUrl: embed(764349), title: "Partner one", thumbnail: "https://cdn.partner.example/one.jpg" },
     { embedUrl: embed(762647), title: "Partner two", thumbnail: "https://cdn.partner.example/two.jpg" },
     { embedUrl: embed(762419), title: "Partner three", thumbnail: null },
+    { embedUrl: embed(760001), title: "Partner four", thumbnail: "https://cdn.partner.example/missing.jpg" },
   ],
 };
 
-const videos = Array.from({ length: 10 }, (_, index) => ({
+const videos = Array.from({ length: 21 }, (_, index) => ({
   id: `video-${index + 1}`,
   title: `Ours ${index + 1}`,
   createdAt: Date.parse("2026-11-07T12:00:00Z") / 1000 - index * 60,
@@ -71,7 +72,10 @@ test("sponsored partner videos sit between ours and open in our own player", {
       }
       if (url.hostname.endsWith("desi-porntube.com") || url.hostname.endsWith("cdn.partner.example")) {
         if (url.hostname.endsWith("desi-porntube.com")) requests.frames.push(url.href);
-        if (url.pathname.endsWith(".jpg")) return route.fulfill({ headers, contentType: "image/svg+xml", body: picture });
+        if (url.pathname.endsWith(".jpg")) {
+          if (url.pathname.includes("missing")) return route.fulfill({ status: 404, headers });
+          return route.fulfill({ headers, contentType: "image/svg+xml", body: picture });
+        }
         return route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Partner fixture</title>" });
       }
       if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
@@ -132,6 +136,16 @@ test("sponsored partner videos sit between ours and open in our own player", {
     assert.equal(await page.getByRole("button", { name: "Close video player" }).count(), 1);
     await page.getByRole("button", { name: "Close video player" }).click();
     await player.waitFor({ state: "detached" });
+
+    // A partner page without a poster still renders a tidy tile, never a broken image.
+    const withoutPoster = page.locator(".video-card--sponsored").nth(2);
+    await withoutPoster.getByText("Partner video").waitFor();
+    assert.equal(await withoutPoster.locator("img.video-card__image").count(), 0, "no broken image element is left behind");
+    // A poster that exists but fails to load (hotlink block, expired link) is
+    // swapped for the same tile as soon as the error fires.
+    const brokenPoster = page.locator(".video-card--sponsored").nth(3);
+    await brokenPoster.getByText("Partner video").waitFor({ timeout: 15_000 });
+    assert.equal(await brokenPoster.locator("img.video-card__image").count(), 0);
 
     // No sponsored cards over search results.
     await page.goto(`${base}/search?q=test`, { waitUntil: "domcontentloaded" });
