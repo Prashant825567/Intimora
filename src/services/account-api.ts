@@ -103,12 +103,16 @@ export async function toggleAccountVideo(user: FirebaseUser, action: "like" | "s
   };
 }
 
-function person(value: unknown): ReferralPerson | null {
+// Rebuilds a person from scratch, so private fields a backend may still send
+// (email, UID, avatar, liked/saved lists, timestamps) can never reach the DOM.
+function person(value: unknown, fallbackReferredBy = ""): ReferralPerson | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
   const username = text(item.username, 80);
   const referralCode = text(item.referralCode, 80);
-  const referredBy = text(item.referredBy, 80);
+  // Older backends omit `referredBy` on direct descendants; their parent is
+  // implied by the request itself, so fall back to the owner's own code.
+  const referredBy = text(item.referredBy, 80) || fallbackReferredBy;
   if (!username || !CODE.test(referralCode) || !CODE.test(referredBy)) return null;
   return { username, referralCode, referredBy, name: text(item.name, 100) || username };
 }
@@ -117,11 +121,12 @@ function person(value: unknown): ReferralPerson | null {
 export function sanitizeReferralTree(raw: unknown, ownCode: string): ReferralTree {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new AccountRequestError();
   const tree = raw as Record<string, unknown>;
-  if (tree.code !== ownCode || !Array.isArray(tree.direct) || !Array.isArray(tree.level2)) throw new AccountRequestError();
+  if (tree.code !== ownCode || !Array.isArray(tree.direct)) throw new AccountRequestError();
+  const level2Raw = Array.isArray(tree.level2) ? tree.level2 : [];
   const seen = new Set([ownCode]);
   const direct: ReferralPerson[] = [];
   for (const input of tree.direct.slice(0, 5000)) {
-    const item = person(input);
+    const item = person(input, ownCode);
     if (item && item.referredBy === ownCode && !seen.has(item.referralCode)) {
       seen.add(item.referralCode);
       direct.push(item);
@@ -129,7 +134,7 @@ export function sanitizeReferralTree(raw: unknown, ownCode: string): ReferralTre
   }
   const directCodes = new Set(direct.map((item) => item.referralCode));
   const level2: ReferralPerson[] = [];
-  for (const input of tree.level2.slice(0, 5000)) {
+  for (const input of level2Raw.slice(0, 5000)) {
     const item = person(input);
     if (item && directCodes.has(item.referredBy) && !seen.has(item.referralCode)) {
       seen.add(item.referralCode);
@@ -140,8 +145,9 @@ export function sanitizeReferralTree(raw: unknown, ownCode: string): ReferralTre
 }
 
 export async function getReferralTree(user: FirebaseUser, ownCode: string, backend?: string): Promise<ReferralTree> {
-  // The current backend returns other users' private histories here. Do not
-  // make the request unless its response has been fixed server-side.
+  // The response is rebuilt field by field, so private data a backend still
+  // sends can never be rendered. `INTIMORA_PUBLIC_SAFE_REFERRALS=0` turns the
+  // whole request off for a backend that has not been fixed yet.
   if (!referralsEnabled) throw new AccountRequestError();
   const { data } = await request("/api/user/referrals", { token: await token(user), backend });
   return sanitizeReferralTree(data.tree, ownCode);
