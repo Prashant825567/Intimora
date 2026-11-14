@@ -4,7 +4,8 @@ import { ArrowLeft, ArrowRight, Bookmark, Check, Copy, Heart, Loader2, LogOut, S
 import type { Video } from "../data/mockVideos";
 import type { AccountController } from "../hooks/useAccount";
 import { getReferralTree, referralsEnabled } from "../services/account-api";
-import type { ReferralPerson, ReferralTree } from "../services/account-api";
+import type { ReferralTree } from "../services/account-api";
+import ReferralFlow from "./ReferralFlow";
 import { AccountRequestError } from "../services/auth-request.mjs";
 
 export type AccountPage = "login" | "profile" | "referral" | "dashboard";
@@ -23,19 +24,6 @@ interface Props {
 
 const validName = (value: string) => value.trim().length >= 1 && value.trim().length <= 100;
 const validUsername = (value: string) => /^[A-Za-z0-9_]{3,30}$/.test(value.trim());
-
-function Person({ person, level }: { person: ReferralPerson; level: 1 | 2 }) {
-  return (
-    <div className={`referral-person referral-person--level-${level}`}>
-      <span className="referral-person__avatar" aria-hidden="true">{person.name.charAt(0).toUpperCase() || "U"}</span>
-      <div className="min-w-0">
-        <strong>{person.name}</strong>
-        <span>@{person.username}</span>
-      </div>
-      <span className="referral-person__level">Level {level}</span>
-    </div>
-  );
-}
 
 export default function AccountPages({ page, account, videos, catalogLoading, catalogUnavailable, onRetryCatalog, renderVideos, onPage, onBack }: Props) {
   const [name, setName] = useState(account.identity?.displayName || "");
@@ -235,12 +223,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
             : treeError ? <div className="dashboard__empty"><p role="alert">Could not load referrals right now.</p><button type="button" className="catalog-status__retry" onClick={() => setTreeRevision((revision) => revision + 1)}>Retry referrals</button></div>
               : tree?.direct.length ? <>
                 <p className="account-hint">Direct: {tree.direct.length} · Level 2: {tree.level2.length}</p>
-                <div className="referral-tree">{tree.direct.map((item) => (
-                  <div key={item.referralCode}>
-                    <Person person={item} level={1} />
-                    {tree.level2.filter((child) => child.referredBy === item.referralCode).map((child) => <Person key={child.referralCode} person={child} level={2} />)}
-                  </div>
-                ))}</div>
+                <ReferralFlow tree={tree} ownName={profile.name} ownCode={profile.referralCode} />
               </> : <p className="dashboard__empty">No referrals yet. Share your code to invite someone.</p>}
       </section>
     </section>

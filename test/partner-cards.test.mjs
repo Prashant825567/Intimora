@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { interleaveSponsored, sponsoredCards, SPONSORED_EVERY } from "../src/services/partner-cards.mjs";
+import { PARTNER_PREVIEW_LIMIT } from "../src/services/partner-feed.mjs";
 
 const embed = (id) => `https://desi-porntube.com/embed/${id}/?source=1849513610`;
 
@@ -26,6 +27,8 @@ test("sponsored cards are validated before they enter a grid", () => {
   assert.deepEqual(sponsoredCards(null), []);
   assert.deepEqual(sponsoredCards({ items: "nope" }), []);
   assert.equal(sponsoredCards({ items: [embed(1), embed(2), embed(3)] }, { limit: 2 }).length, 2);
+  // The grid never asks for a card whose preview the build did not read.
+  assert.equal(sponsoredCards({ items: Array.from({ length: 40 }, (_, index) => embed(5000 + index)) }).length, PARTNER_PREVIEW_LIMIT);
 });
 
 test("four of ours, then one sponsored, without a trailing sponsored card", () => {

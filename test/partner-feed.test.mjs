@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { enrichPartnerItems, partnerFeedPlugin, requestPartnerFeed } from "../scripts/partner-feed-plugin.mjs";
-import { decodeHtmlEntities, parseEmbedPreview, parsePartnerFeed, partnerFeedPayload } from "../src/services/partner-feed.mjs";
+import { decodeHtmlEntities, PARTNER_PREVIEW_LIMIT, parseEmbedPreview, parsePartnerFeed, partnerFeedPayload } from "../src/services/partner-feed.mjs";
 
 const embedA = "https://desi-porntube.com/embed/764349/?source=1849513610";
 const embedB = "https://desi-porntube.com/embed/762647/?source=1849513610";
@@ -69,6 +69,66 @@ test("a sponsored card can borrow the partner video's own title and poster", () 
   assert.deepEqual(parseEmbedPreview("<meta property=\"og:image\" content=\"http://insecure.example/a.jpg\">"), { title: "", thumbnail: null });
   assert.deepEqual(parseEmbedPreview(""), { title: "", thumbnail: null });
   assert.deepEqual(parseEmbedPreview(undefined), { title: "", thumbnail: null });
+});
+
+test("partner posters are read from every common meta spelling", () => {
+  const base = "https://desi-porntube.com/embed/764349/?source=1849513610";
+  // Twitter cards label the same fields with name= instead of property=.
+  assert.deepEqual(
+    parseEmbedPreview('<meta name="twitter:title" content="T"><meta name="twitter:image" content="//cdn.example/x.jpg">', base),
+    { title: "T", thumbnail: "https://cdn.example/x.jpg" },
+  );
+  // A poster may be a root-relative path on the partner's own host.
+  assert.deepEqual(
+    parseEmbedPreview('<meta property="og:title" content="Rel"><meta property="og:image" content="contents/videos_screenshots/764000/764349/320x180/1.jpg">', base),
+    { title: "Rel", thumbnail: "https://desi-porntube.com/embed/764349/contents/videos_screenshots/764000/764349/320x180/1.jpg" },
+  );
+  assert.deepEqual(
+    parseEmbedPreview('<link rel="image_src" href="https://cdn.example/i.jpg"><title>TT</title>'),
+    { title: "TT", thumbnail: "https://cdn.example/i.jpg" },
+  );
+  assert.deepEqual(
+    parseEmbedPreview('<video poster="https://cdn.example/p.jpg"></video>'),
+    { title: "", thumbnail: "https://cdn.example/p.jpg" },
+  );
+  assert.deepEqual(
+    parseEmbedPreview('<script type="application/ld+json">{"thumbnailUrl":"https://cdn.example/j.jpg"}</script>'),
+    { title: "", thumbnail: "https://cdn.example/j.jpg" },
+  );
+  // An insecure poster is still refused.
+  assert.deepEqual(parseEmbedPreview('<meta property="og:image" content="http://cdn.example/a.jpg">'), { title: "", thumbnail: null });
+});
+
+test("previews are fetched like a browser, from the embed page the card links to", async () => {
+  const seen = [];
+  const [item] = await enrichPartnerItems([embedA], {
+    fetchImpl: async (url, init) => {
+      seen.push({ url, headers: init.headers });
+      return {
+        ok: true,
+        headers: { get: () => "text/html; charset=utf-8" },
+        text: async () => '<meta property="og:title" content="Partner title"><meta property="og:image" content="/contents/1.jpg">',
+      };
+    },
+  });
+  assert.equal(seen.length, 1);
+  assert.match(seen[0].headers["user-agent"], /Mozilla\/5\.0/, "the page is asked with a browser user agent");
+  assert.match(seen[0].headers.accept, /text\/html/);
+  assert.equal(item.thumbnail, "https://desi-porntube.com/contents/1.jpg", "a relative poster is resolved against the embed host");
+  assert.equal(item.title, "Partner title");
+});
+
+test("the build reads as many pages as the grid can show", async () => {
+  const urls = Array.from({ length: 30 }, (_, index) => `https://desi-porntube.com/embed/${1000 + index}/?source=1849513610`);
+  let calls = 0;
+  const items = await enrichPartnerItems(urls, {
+    fetchImpl: async () => {
+      calls += 1;
+      return { ok: true, headers: { get: () => "text/html" }, text: async () => "<title>x</title>" };
+    },
+  });
+  assert.equal(items.length, PARTNER_PREVIEW_LIMIT);
+  assert.equal(calls, PARTNER_PREVIEW_LIMIT, "no more pages are read than the grid can display");
 });
 
 test("previews are enriched within a bounded number of pages", async () => {

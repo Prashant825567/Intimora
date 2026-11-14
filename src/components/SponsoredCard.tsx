@@ -12,7 +12,11 @@ interface SponsoredCardProps {
 
 const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
   const [hovered, setHovered] = useState(false);
+  // A partner CDN can refuse the poster (hotlink protection, expired link), so
+  // a failed load falls back to the same tile instead of an empty black box.
+  const [posterFailed, setPosterFailed] = useState(false);
   const title = card.title || "Sponsored video";
+  const poster = card.thumbnail && !posterFailed ? card.thumbnail : null;
   return (
     <div
       className="video-card video-card--sponsored group cursor-pointer"
@@ -24,17 +28,25 @@ const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
       onMouseLeave={() => setHovered(false)}
     >
       <div className="video-card__media relative overflow-hidden rounded-lg" style={{ aspectRatio: "16/9" }}>
-        {card.thumbnail ? (
+        {poster ? (
           <img
-            src={card.thumbnail}
+            src={poster}
             referrerPolicy="no-referrer"
             alt={title}
             className="video-card__image w-full h-full object-contain"
             loading="lazy"
+            decoding="async"
+            onError={() => setPosterFailed(true)}
           />
         ) : (
-          <div className="video-card__image w-full h-full flex items-center justify-center">
-            <Play className="w-10 h-10" style={{ color: "#3a3a3a" }} />
+          <div
+            className="video-card__placeholder w-full h-full flex flex-col items-center justify-center gap-2"
+            style={{ background: "linear-gradient(135deg, #171310, #241c12 55%, #100e0c)" }}
+          >
+            <span className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: "rgba(201,168,76,0.16)", border: "1px solid rgba(201,168,76,0.35)" }}>
+              <Play className="w-6 h-6 ml-0.5" style={{ color: "#d8b759" }} fill="#d8b759" />
+            </span>
+            <span className="text-[10px] uppercase tracking-[0.18em] text-gray-500">Partner video</span>
           </div>
         )}
 
