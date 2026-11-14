@@ -37,6 +37,59 @@ export function parsePartnerFeed(text, { limit = PARTNER_FEED_LIMIT, hosts = PAR
   return urls;
 }
 
+// A campaign feed can carry more than the iframe: with extra `csv_columns`
+// (title, screenshot) the same row also holds the video's name and poster. When
+// those columns are present they are used as-is, so a sponsored card needs no
+// page scrape at all; when they are absent the build reads the pages instead.
+const ROW_SPLIT = /\t|\|/;
+const ROW_IMAGE = /(?:https?:)?\/\/[^\s"'|<>]+?\.(?:jpe?g|png|webp)(?:\?[^\s"'|<>]*)?/i;
+const ROW_URL = /https?:\/\/[^\s"'|<>]+/gi;
+
+export function parsePartnerFeedEntries(text, { limit = PARTNER_FEED_LIMIT, hosts = PARTNER_EMBED_HOSTS } = {}) {
+  if (typeof text !== "string" || !text) return [];
+  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, PARTNER_FEED_LIMIT) : PARTNER_FEED_LIMIT;
+  const entries = [];
+  const seen = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.includes("iframe") && !line.includes("http")) continue;
+    const values = line.split(ROW_SPLIT).map((value) => value.trim());
+    let embedUrl = parsePartnerFeed(line, { limit: 1, hosts })[0] ?? null;
+    if (!embedUrl) {
+      for (const value of values) {
+        for (const candidate of value.match(ROW_URL) ?? []) {
+          const url = partnerEmbedUrl(decodeHtmlEntities(candidate), { hosts, requireVideoPath: true });
+          if (url) {
+            embedUrl = url;
+            break;
+          }
+        }
+        if (embedUrl) break;
+      }
+    }
+    if (!embedUrl || seen.has(embedUrl)) continue;
+    seen.add(embedUrl);
+    let title = "";
+    let poster = null;
+    for (const value of values) {
+      if (!value || value === embedUrl) continue;
+      if (value.startsWith("<")) {
+        // The iframe snippet itself can carry the poster as a fallback image.
+        const inner = ROW_IMAGE.exec(value)?.[0];
+        if (inner && !poster) poster = httpsUrl(decodeHtmlEntities(inner), embedUrl);
+        continue;
+      }
+      if (ROW_IMAGE.test(value)) {
+        if (!poster) poster = httpsUrl(decodeHtmlEntities(ROW_IMAGE.exec(value)[0]), embedUrl);
+        continue;
+      }
+      if (!title && !/^https?:/i.test(value) && !/^\d+(?::\d+)?$/.test(value)) title = tidyTitle(value);
+    }
+    entries.push({ embedUrl, title, thumbnail: poster });
+    if (entries.length >= cap) break;
+  }
+  return entries;
+}
+
 const META_TAG = /<meta\b[^>]*>/gi;
 const LINK_TAG = /<link\b[^>]*>/gi;
 const TITLE_TAG = /<title>([^<]{1,300})<\/title>/i;
@@ -56,13 +109,17 @@ function attribute(tag, name) {
 }
 
 // Poster URLs are usually absolute, but partners also publish protocol-relative
-// ("//cdn/…") and root-relative ("/contents/…") paths, which only make sense
-// next to the embed page they came from.
+// ("//cdn/…"), root-relative ("/contents/…") and plain-http URLs, which only
+// make sense next to the embed page they came from. A plain-http poster is
+// upgraded to https so the page never mixes protocols; if that host cannot serve
+// https the card falls back to the generic tile at runtime.
 function httpsUrl(value, base) {
   if (typeof value !== "string" || !value) return null;
   try {
     const url = new URL(value.trim(), base || undefined);
-    if (url.protocol !== "https:" || url.username || url.password) return null;
+    if (url.username || url.password) return null;
+    if (url.protocol === "http:") url.protocol = "https:";
+    else if (url.protocol !== "https:") return null;
     url.hash = "";
     return url.href;
   } catch {
@@ -76,6 +133,50 @@ function firstPoster(candidates, base) {
     if (url) return url;
   }
   return null;
+}
+
+// Most TubeCorporate sites keep their screenshots on a predictable path. When
+// the page itself cannot be read (bot protection, an empty Open Graph block) the
+// build probes these in order, and the browser does the same at runtime, so a
+// sponsored card still gets the partner's own poster.
+export function partnerPosterCandidates(videoUrl, { origin } = {}) {
+  if (typeof videoUrl !== "string") return [];
+  let url;
+  try {
+    url = new URL(videoUrl);
+  } catch {
+    return [];
+  }
+  if (url.protocol !== "https:") return [];
+  const id = /\/(?:embed|video|videos)\/(\d{1,12})\/?/.exec(url.pathname)?.[1];
+  if (!id) return [];
+  const host = (() => {
+    try {
+      return origin ? new URL(origin).origin : url.origin;
+    } catch {
+      return url.origin;
+    }
+  })();
+  const bucket = String(Math.floor(Number(id) / 1000) * 1000);
+  const base = `${host}/contents/videos_screenshots/${bucket}/${id}`;
+  return [`${base}/320x180/1.jpg`, `${base}/320x180/2.jpg`, `${base}/preview.jpg`, `${base}/400x225/1.jpg`];
+}
+
+// Partner pages answer a bot with a challenge page, and that page has a title of
+// its own ("Just a moment…", "Content not found"). Such a title must never end up
+// on a sponsored card.
+const CHALLENGE_TITLE = /^(?:just a moment|attention required|access denied|access to this page|checking your browser|please wait|verify (?:you are|that you are)|ddos-guard|403 forbidden|404 not found|not found|content not found|page not found|error|service unavailable|too many requests)\b/i;
+const SITE_SUFFIX = /\s+[|\-–—]\s+([^|\-–—]{1,20})$/;
+
+function tidyTitle(value) {
+  if (typeof value !== "string" || !value) return "";
+  const title = decodeHtmlEntities(value).replace(/\s+/g, " ").trim();
+  if (!title || CHALLENGE_TITLE.test(title)) return "";
+  // "Indian Girls Sweet Sex | DesiPorn" reads better without the site name, but
+  // only a single short word is stripped so real titles keep their dash.
+  const suffix = SITE_SUFFIX.exec(title);
+  const trimmed = suffix && !/\s/.test(suffix[1]) ? title.slice(0, suffix.index).trim() : title;
+  return (trimmed || title).slice(0, 120);
 }
 
 // A partner embed page carries the video's own title and poster. Reading them at
@@ -92,7 +193,7 @@ export function parseEmbedPreview(html, base) {
     const content = attribute(tag, "content");
     if (!content) continue;
     if (TITLE_PROPERTIES.has(property)) {
-      if (!preview.title) preview.title = decodeHtmlEntities(content).trim().slice(0, 120);
+      if (!preview.title) preview.title = tidyTitle(content);
     } else if (IMAGE_PROPERTIES.has(property)) {
       posters.push(content);
     }
@@ -107,7 +208,7 @@ export function parseEmbedPreview(html, base) {
     ?? firstPoster([VIDEO_POSTER.exec(html)?.[1], JSON_LD_POSTER.exec(html)?.[1]], base);
   if (!preview.title) {
     const match = TITLE_TAG.exec(html);
-    if (match) preview.title = decodeHtmlEntities(match[1]).trim().slice(0, 120);
+    if (match) preview.title = tidyTitle(match[1]);
   }
   return preview;
 }

@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Play, Eye } from "lucide-react";
 import type { SponsoredCard as SponsoredCardData } from "../services/partner-cards.mjs";
+import { partnerPosterCandidates } from "../services/partner-feed.mjs";
 
 // A sponsored partner video in the site's own card design: same thumbnail
 // treatment, same title block, same metadata line. The only difference is the
@@ -12,11 +13,21 @@ interface SponsoredCardProps {
 
 const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
   const [hovered, setHovered] = useState(false);
-  // A partner CDN can refuse the poster (hotlink protection, expired link), so
-  // a failed load falls back to the same tile instead of an empty black box.
-  const [posterFailed, setPosterFailed] = useState(false);
+  // A partner CDN can refuse a poster (hotlink protection, expired link), so the
+  // browser walks the same fallbacks the build used and only then shows the
+  // neutral tile instead of an empty black box.
+  const sources = useMemo(() => {
+    const list: string[] = [];
+    if (card.thumbnail) list.push(card.thumbnail);
+    for (const candidate of partnerPosterCandidates(card.embedUrl)) {
+      if (!list.includes(candidate)) list.push(candidate);
+    }
+    return list;
+  }, [card.thumbnail, card.embedUrl]);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  useEffect(() => setSourceIndex(0), [sources]);
   const title = card.title || "Sponsored video";
-  const poster = card.thumbnail && !posterFailed ? card.thumbnail : null;
+  const poster = sources[sourceIndex] ?? null;
   return (
     <div
       className="video-card video-card--sponsored group cursor-pointer"
@@ -36,7 +47,7 @@ const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
             className="video-card__image w-full h-full object-contain"
             loading="lazy"
             decoding="async"
-            onError={() => setPosterFailed(true)}
+            onError={() => setSourceIndex((index) => index + 1)}
           />
         ) : (
           <div
