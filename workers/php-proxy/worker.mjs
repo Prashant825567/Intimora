@@ -240,7 +240,9 @@ export function createChallengeClient({
   fetchImpl = globalThis.fetch,
   userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
   now = () => Date.now(),
-  attempts = 2,
+  // The host may bind the cookie to the request's IP; a Worker cannot pin its
+  // egress address, so a challenged request is solved and retried a few times.
+  attempts = 3,
 } = {}) {
   if (typeof fetchImpl !== "function") throw new Error("no fetch implementation");
   let cookie = null; // { name, value, expiresAt }

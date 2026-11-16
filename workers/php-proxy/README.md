@@ -8,6 +8,37 @@ ki zaroorat nahi — deploy karo aur site chalti hai.
 `worker.mjs` **ek hi self-contained file** hai (koi import nahi), seedha
 Cloudflare dashboard me paste hoti hai.
 
+## Kaunsa proxy use karein (`IP-bound` cookie)
+
+Free host ka `__test` cookie **us connection/IP se bandha** hota hai jisne use solve
+kiya. Cloudflare Workers ka egress IP har request par badal sakta hai, isliye wahan
+"cookie 6 ghante cache karo" model **reliable nahi** — cookie dusre IP par reject ho
+jaati hai. (Worker version ab best-effort hai: har request me challenge solve karke
+same request me 3 baar retry karta hai.)
+
+Pakka solution: aisa proxy jiska **ek hi outbound connection/IP** ho —
+`node-proxy.mjs`. Ye ek hi keep-alive socket (`maxSockets: 1`) par challenge, cookie
+aur saari API calls bhejta hai, isliye session kabhi IP nahi badalti.
+
+```bash
+# Render / VPS / kisi bhi Node host par
+PORT=8787 DISCOVERY_URL=https://intimora.tmc78lxnu.workers.dev/api/get-server \
+  node workers/php-proxy/node-proxy.mjs
+```
+
+Render par: **New → Web Service** → repo → Runtime **Node** → Build Command khali
+chhodo (koi dependency nahi) → Start Command
+`node workers/php-proxy/node-proxy.mjs` → Environment me `DISCOVERY_URL` (ya
+`PHP_ORIGINS`) → Deploy. Phir `https://<service>.onrender.com/__proxy-health`
+browser me kholo.
+
+| | Cloudflare Worker | Node proxy |
+|---|---|---|
+| Egress IP | badalta hai | ek hi socket/IP |
+| IP-bound cookie | best-effort (retry) | **reliable** |
+| Deploy | paste | Render/VPS par start command |
+| Video streaming | Worker se | Node se (Range support) |
+
 ## Kyun proxy zaroori hai
 
 Free hosting har request par HTML challenge bhejti hai:
