@@ -1,3 +1,4 @@
+import { recordDiagnostic } from "./diagnostics.mjs";
 import { publicBackendBase } from "./public-url.mjs";
 
 const VIDEO_ACTION = /^\/api\/videos\/[A-Za-z0-9_-]{1,128}\/(?:like|save)$/;
@@ -89,12 +90,13 @@ export function createAuthenticatedRequest({
       throw new AccountRequestError();
     }
     let timer;
+    let php = false;
     const controller = new AbortController();
     try {
       const resolved = resolveTarget
         ? await resolveTarget(backend)
         : { backend: backend ?? await selectBackend(), php: false };
-      const php = resolved?.php === true;
+      php = resolved?.php === true;
       const selected = publicBackendBase(resolved?.backend);
       if (!selected) throw new AccountRequestError();
       const target = new URL(selected);
@@ -129,16 +131,21 @@ export function createAuthenticatedRequest({
           : { Authorization: `Bearer ${token}`, ...(effectiveMethod === "POST" ? { "Content-Type": "application/json" } : {}) },
         ...(payload === undefined ? {} : { body: payload }),
         credentials: php ? "include" : "omit",
-        mode: "cors", cache: "no-store", referrerPolicy: "no-referrer", redirect: "error", signal: controller.signal,
+        mode: "cors", cache: "no-store", referrerPolicy: "no-referrer",
+        // The PHP host may redirect to its own check page first; an ordinary
+        // backend keeps the stricter behaviour.
+        redirect: php ? "follow" : "error", signal: controller.signal,
       });
       const contentType = (response.headers?.get?.("content-type") || "").toLowerCase();
       if (contentType.includes("text/html")) {
         // The host answered with its browser check instead of the account API.
+        recordDiagnostic("account", { path, php, challenge: true });
         notifyUnlock(path);
         throw new AccountRequestError();
       }
       const json = await boundedJson(response);
       if (!response.ok || json?.ok !== true || !json.data || typeof json.data !== "object") {
+        recordDiagnostic("account", { path, php, status: response.status });
         throw new AccountRequestError(errorCode(response.status, json?.error));
       }
       return { data: json.data, backend: target.origin };
@@ -146,7 +153,10 @@ export function createAuthenticatedRequest({
       controller.abort();
       // A CORS rejection and a refused connection both look like this; the PHP
       // host's check is the usual cause, so the unlock is offered once.
-      if (!(error instanceof AccountRequestError)) notifyUnlock(path);
+      if (!(error instanceof AccountRequestError)) {
+        recordDiagnostic("account", { path, php, blocked: true });
+        notifyUnlock(path);
+      }
       if (error instanceof AccountRequestError) throw error;
       throw new AccountRequestError();
     } finally {

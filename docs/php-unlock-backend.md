@@ -121,4 +121,19 @@ node scripts/php-api-check.mjs https://intimora-api2.site.je
 
 It solves the host's check the way the browser's unlock page does, then walks `/api/videos`, `/api/videos/:id`, `/api/search` and the like counts, printing PASS/FAIL per row. If that prints JSON rows, the host is healthy; if it prints the challenge HTML, the check is still in front of the API and step 1 is missing.
 
-The site itself has one more symptom to check: open the browser console on `php: true` and look at the request to `https://<php-host>/api/videos`. **A red CORS message means step 2 is missing** — that is a server problem, and no frontend change can work around it.
+## 5. When the site still shows "Content Unavailable"
+
+The site names the reason now, and the same information is in the console:
+
+```js
+__intimoraDiag();   // table: target, php flag, request path + outcome, and each unlock
+```
+
+| Last event | What it means | What to fix |
+|---|---|---|
+| `request` with `challenge: true` | the host answered with its check page even after the unlock | step 1 or 2 — the cookie is not being re-issued as `SameSite=None`, or `/__unlock` does not return to the site |
+| `request` with `blocked: true` | the browser could not read the answer at all (CORS) | step 3 — headers on that exact route, including error responses |
+| `request` with `status: 5xx` | the PHP code itself failed | the route's own error log |
+| `shape` | JSON arrived but without `data.videos` | the route's response shape |
+
+The screen shows the same distinctions in plain words, and after coming back from `/__unlock` the first catalogue request is retried twice before anything is shown, so a slow cookie does not become an error page.

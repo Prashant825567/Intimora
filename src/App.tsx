@@ -19,9 +19,10 @@ import type { LiveLikes } from "./hooks/useLiveLikes";
 import type { Video } from "./data/mockVideos";
 import type { BrowseView } from "./types/navigation";
 import { TrendingUp, Flame, Sparkles, ChevronRight, Loader2, Upload, Wifi, WifiOff, Grid2X2 } from "lucide-react";
-import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, retryPhpSession } from "./services/api";
+import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, phpFailure, retryPhpSession } from "./services/api";
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
+import { unlockReturnedThisLoad } from "./services/unlock.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
@@ -239,11 +240,26 @@ function App() {
     if (!firstPageRequest.current || firstPageRequest.current.revision !== catalogRevision) {
       firstPageRequest.current = { revision: catalogRevision, promise: fetchVideos(null, CATALOG_PAGE_SIZE) };
     }
-    const first = firstPageRequest.current.promise;
+    // The host just sent the visitor back from its check page: the first request
+    // can still land while the browser finishes storing the cookie, so give it a
+    // couple of quiet attempts before showing an error.
+    const loadFirstPage = async () => {
+      let attempt = 0;
+      while (true) {
+        try {
+          return await firstPageRequest.current!.promise;
+        } catch (error) {
+          if (!unlockReturnedThisLoad() || attempt >= 2) throw error;
+          attempt += 1;
+          await new Promise((resolve) => setTimeout(resolve, 1_500));
+          firstPageRequest.current = { revision: catalogRevision, promise: fetchVideos(null, CATALOG_PAGE_SIZE) };
+        }
+      }
+    };
     (async () => {
       let receivedFirstPage = false;
       try {
-        const response = await first;
+        const response = await loadFirstPage();
         if (cancelled) return;
         receivedFirstPage = true;
         const result = await collectCatalog({
@@ -343,6 +359,19 @@ function App() {
     observer.observe(element);
     return () => observer.disconnect();
   }, [ageVerified, initialLoading, apiError, submittedQuery, activeView, catalogStatus, hasMoreVisible, visibleCount, currentFeed.length]);
+
+  // The screen says what actually happened: the host's check page coming back,
+  // the browser blocking the answer, or the server's own error status.
+  const catalogErrorText = () => {
+    const failure = phpFailure();
+    if (!failure) return "We could not load content right now. Please try again.";
+    if (failure.kind === "check-page") return "The server answered with its verification page again. Tap retry.";
+    if (failure.kind === "blocked") return "The browser could not read the server's answer (its CORS headers are missing). Tap retry, or tell the site owner.";
+    if (failure.kind === "status") return `The server returned an error (${failure.status ?? "unknown"}). Tap retry.`;
+    if (failure.kind === "shape") return "The server answered in a format this app cannot read. Tap retry.";
+    if (phpConnectionBlocked()) return "This server could not complete its connection check. Tap retry to ask once more.";
+    return "We could not load content right now. Please try again.";
+  };
 
   const retryCatalog = () => {
     // A PHP host that never confirmed its cookie gets its unlock budget back,
@@ -512,11 +541,7 @@ function App() {
           <div className="flex flex-col items-center justify-center py-32">
             <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6" style={{ background: "rgba(239,68,68,0.1)", border: "2px solid rgba(239,68,68,0.3)" }}><WifiOff className="w-10 h-10 text-red-500" /></div>
             <h2 className="text-white text-2xl font-bold mb-2">Content Unavailable</h2>
-            <p className="text-gray-500 text-sm mb-6 text-center">
-              {phpConnectionBlocked()
-                ? "This server could not complete its connection check. Tap retry to ask once more."
-                : "We could not load content right now. Please try again."}
-            </p>
+            <p className="text-gray-500 text-sm mb-6 text-center">{catalogErrorText()}</p>
             <button type="button" onClick={retryCatalog} className="px-6 py-3 rounded-full font-bold text-sm transition-all hover:scale-105" style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}>🔄 Retry Connection</button>
           </div>
         ) : activeView === "Home" && videos.length === 0 && catalogStatus === "complete" ? (

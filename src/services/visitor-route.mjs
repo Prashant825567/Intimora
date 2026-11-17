@@ -64,6 +64,10 @@ export function createVisitorRequest(options = {}) {
   // Told when a PHP answer actually arrived, which is the proof its session
   // cookie works — from then on the window needs no new unlock.
   const onPhpSuccess = typeof options.onPhpSuccess === "function" ? options.onPhpSuccess : null;
+  // Told how every direct call ended, so a failure can name its own reason
+  // (the host's check page, a blocked request, an error status) instead of a
+  // generic message.
+  const onOutcome = typeof options.onOutcome === "function" ? options.onOutcome : null;
   // A pinned origin is treated as PHP, because that is what it is used for.
   const pinnedPhp = Boolean(backendOverride);
   const fetcher = options.fetcher ?? ((url, init) => fetch(url, init));
@@ -139,15 +143,18 @@ export function createVisitorRequest(options = {}) {
         credentials: php ? "include" : "omit",
         referrerPolicy: "no-referrer",
         cache: "no-store",
-        redirect: "error",
+        // A PHP host may answer with a redirect of its own (to the check page or
+        // a canonical path); following it is what a browser navigation does.
+        // An ordinary backend keeps its stricter behaviour.
+        redirect: php ? "follow" : "error",
         signal: controller.signal,
       });
       // The free host's browser check answers with an HTML page instead of JSON;
       // that is what the unlock flow is for.
       const contentType = response.headers.get("content-type") || "";
       const challenge = contentType.toLowerCase().includes("text/html");
-      if (!response.ok) return { failed: true, invalidate: response.status >= 500, challenge };
-      if (challenge) return { failed: true, invalidate: false, challenge: true };
+      if (!response.ok) return { failed: true, invalidate: response.status >= 500, challenge, status: response.status };
+      if (challenge) return { failed: true, invalidate: false, challenge: true, status: response.status };
       let body;
       if (counts) {
         const length = Number(response.headers.get("content-length"));
@@ -175,7 +182,7 @@ export function createVisitorRequest(options = {}) {
           }
         }
       } else body = await response.json();
-      if (!body || body.ok !== true) return { failed: true, invalidate: true };
+      if (!body || body.ok !== true) return { failed: true, invalidate: true, status: response.status };
       return { body };
     } catch {
       controller.abort();
@@ -254,6 +261,16 @@ export function createVisitorRequest(options = {}) {
     const requestGeneration = generation;
     const counts = new URL(path, "https://route.invalid").pathname === "/api/likes/counts";
     const result = await readJson(url, method, { signal: init.signal, counts, php });
+    if (onOutcome) {
+      onOutcome({
+        path,
+        php,
+        ok: !result.failed,
+        challenge: Boolean(result.challenge),
+        blocked: Boolean(result.network),
+        status: result.status,
+      });
+    }
     if (result.failed) {
       // Optional count polling must not disrupt catalog routing. A stale
       // response for an older backend must not erase a newer selection either.

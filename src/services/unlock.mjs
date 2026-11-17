@@ -10,6 +10,9 @@
 // React so it can run before the app mounts.
 const STORAGE_KEY = "intimora_unlock_v1";
 export const UNLOCK_QUERY = "__unlocked";
+// Set for the page load that the host sent back to us: the app uses it to give
+// the first request a second chance instead of painting an error immediately.
+let returnedThisLoad = false;
 // The host's own check page is the only thing that can hand out its cookie, so
 // this flow happens in the browser, once, and without any proxy in between.
 const MIN_GAP_MS = 4_000;
@@ -80,6 +83,10 @@ export function shouldRequestUnlock({ storage, now = Date.now(), freshMs = 5.5 *
   if (minGapMs > 0 && now - at < minGapMs) return false;
   const tries = Number(state.tries);
   return !(Number.isFinite(tries) && tries >= maxTries);
+}
+
+export function unlockReturnedThisLoad() {
+  return returnedThisLoad;
 }
 
 export function isChallengeContentType(contentType) {
@@ -160,6 +167,7 @@ export function completeUnlockReturn({
   now = Date.now(),
 } = {}) {
   if (!loc?.search?.includes(UNLOCK_QUERY)) return false;
+  returnedThisLoad = true;
   const params = new URLSearchParams(loc.search);
   params.delete(UNLOCK_QUERY);
   const search = params.toString();

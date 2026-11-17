@@ -16,6 +16,7 @@ import {
   UNLOCK_MIN_GAP_MS,
   UNLOCK_SPLASH_MS,
 } from "../config/php-backend.mjs";
+import { recordDiagnostic } from "./diagnostics.mjs";
 import { setPhpMediaOrigin } from "./media-credentials.mjs";
 import {
   clearUnlockAttempt,
@@ -25,6 +26,9 @@ import {
 } from "./unlock.mjs";
 
 const state = { backend: null, php: false };
+// Why the last PHP call failed, in the three shapes that matter: the host's own
+// check page, a request the browser refused to hand over, or an error status.
+let lastFailure = null;
 // One navigation per page: parallel requests that all hit the check must not
 // each ask for a redirect.
 let leaving = false;
@@ -34,6 +38,7 @@ export function setActiveTarget(target) {
   const php = target?.php === true || Boolean(PHP_ORIGIN_OVERRIDE);
   state.backend = backend;
   state.php = php && Boolean(backend);
+  recordDiagnostic("target", { backend: state.backend ?? "", php: state.php });
   // Media from a PHP host must drop its CORS attribute, or the cookie never goes.
   setPhpMediaOrigin(state.php ? backend : null);
 }
@@ -64,6 +69,7 @@ export function phpSessionPending({ storage, now, freshMs = UNLOCK_FRESH_MS } = 
 // can never loop.
 export function requestPhpUnlock(navigation = {}) {
   if (!state.php || !state.backend || leaving) return false;
+  recordDiagnostic("unlock", { reason: lastFailure?.kind ?? "first-attempt" });
   const requested = requestUnlockNavigation({
     phpOrigin: state.backend,
     freshMs: UNLOCK_FRESH_MS,
@@ -76,12 +82,37 @@ export function requestPhpUnlock(navigation = {}) {
   return requested;
 }
 
+// Called for every direct call that ends badly on this host.
+export function notePhpFailure(detail) {
+  if (!state.php) return;
+  const kind = detail?.shape ? "shape"
+    : detail?.challenge ? "check-page"
+      : detail?.blocked ? "blocked"
+        : detail?.status ? "status" : "unknown";
+  lastFailure = {
+    kind,
+    status: typeof detail?.status === "number" ? detail.status : undefined,
+    path: typeof detail?.path === "string" ? detail.path : undefined,
+  };
+  recordDiagnostic("php-failure", { kind, status: lastFailure.status, path: lastFailure.path });
+}
+
+// The reason to show instead of "we could not load content".
+export function phpFailureReason() {
+  return lastFailure ? { ...lastFailure } : null;
+}
+
+function clearFailure() {
+  lastFailure = null;
+}
+
 // A PHP answer that actually arrived is proof the cookie works: the window is
 // quiet until the host's session would have expired.
 export function confirmPhpSession({ storage, now } = {}) {
   if (!state.php) return;
   confirmUnlockSession(storage, now === undefined ? {} : { now });
   leaving = false;
+  clearFailure();
 }
 
 // The visitor asked to try again ("Retry Connection"): give the unlock its full
@@ -89,4 +120,5 @@ export function confirmPhpSession({ storage, now } = {}) {
 export function resetPhpSession(storage) {
   clearUnlockAttempt(storage);
   leaving = false;
+  clearFailure();
 }
