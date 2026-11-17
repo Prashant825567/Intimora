@@ -10,6 +10,7 @@ import VideoAdOverlay from "./VideoAdOverlay";
 import type { VastAd } from "./VideoAdOverlay";
 import { loadPreRoll } from "../services/vast-loader.mjs";
 import { VAST_CACHED_AD_URL, VAST_DECISION_GRACE_MS, VAST_LIVE_BUDGET_MS, VAST_SKIP_FALLBACK_SECONDS, VAST_TIMEOUT_MS } from "../config/vast";
+import { mediaCrossOrigin } from "../services/media-credentials.mjs";
 
 // The ad tag is a public build constant. An empty value disables pre-roll.
 const VAST_TAG = __INTIMORA_VAST_TAG_URL__;
@@ -274,7 +275,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             ref={videoRef}
             src={video.videoUrl}
             poster={video.thumbnail}
-            crossOrigin="anonymous"
+            crossOrigin={mediaCrossOrigin(video.videoUrl)}
             preload={preload}
             playsInline
             className="w-full h-full object-contain"

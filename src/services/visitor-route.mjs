@@ -51,6 +51,16 @@ function apiUrl(base, path, method) {
 // copied sessionStorage entry; a reload can reuse this tab's unexpired entry.
 export function createVisitorRequest(options = {}) {
   const discoveryUrl = publicHttpsUrl(options.discoveryUrl);
+  // Temporary testing mode: one fixed PHP origin instead of discovery. The
+  // browser then calls that host directly, with cookies, so the one-time unlock
+  // navigation can hand it the session cookie its own check issues.
+  const backendOverride = publicBackendBase(options.backendOverride);
+  // Optional safety net when the direct call cannot be made to work.
+  const proxyBackend = publicBackendBase(options.proxyBackend);
+  // Called when a direct call hits the host's HTML check. Returns true when the
+  // browser was sent to the unlock page and this request should stop waiting.
+  const requestUnlock = typeof options.requestUnlock === "function" ? options.requestUnlock : null;
+  const credentials = backendOverride ? "include" : "omit";
   const fetcher = options.fetcher ?? ((url, init) => fetch(url, init));
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => globalThis.performance?.now?.() ?? now());
@@ -116,13 +126,20 @@ export function createVisitorRequest(options = {}) {
         method,
         ...(method === "POST" ? { headers: { "Content-Type": "application/json" }, body: "{}" } : {}),
         mode: "cors",
-        credentials: "omit",
+        // Cookies only travel to a pinned PHP host; discovery backends stay
+        // credential-free exactly as before.
+        credentials,
         referrerPolicy: "no-referrer",
         cache: "no-store",
         redirect: "error",
         signal: controller.signal,
       });
-      if (!response.ok) return { failed: true, invalidate: response.status >= 500 };
+      // The free host's browser check answers with an HTML page instead of JSON;
+      // that is what the unlock flow is for.
+      const contentType = response.headers.get("content-type") || "";
+      const challenge = contentType.toLowerCase().includes("text/html");
+      if (!response.ok) return { failed: true, invalidate: response.status >= 500, challenge };
+      if (challenge) return { failed: true, invalidate: false, challenge: true };
       let body;
       if (counts) {
         const length = Number(response.headers.get("content-length"));
@@ -154,7 +171,9 @@ export function createVisitorRequest(options = {}) {
       return { body };
     } catch {
       controller.abort();
-      return { failed: true, invalidate: true };
+      // A CORS rejection and a refused connection both look like this; in pinned
+      // mode the unlock flow is the only thing that can fix either.
+      return { failed: true, invalidate: true, network: true };
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
@@ -162,6 +181,8 @@ export function createVisitorRequest(options = {}) {
   }
 
   async function selectBackend() {
+    // A pinned origin skips discovery entirely (and never caches a selection).
+    if (backendOverride) return backendOverride;
     const selection = current();
     if (selection) return selection.backend;
     if (bootstrap) return bootstrap;
@@ -207,6 +228,21 @@ export function createVisitorRequest(options = {}) {
       // Optional count polling must not disrupt catalog routing. A stale
       // response for an older backend must not erase a newer selection either.
       if (!counts && result.invalidate && generation === requestGeneration && cached?.backend === backend) clear();
+      // Pinned PHP mode: the host answered with its own HTML check (or the call
+      // never left the browser). Ask for the one-time unlock navigation; if this
+      // window already used it, try the proxy instead of failing outright.
+      if (!counts && backendOverride && requestUnlock && (result.challenge || result.network)) {
+        if (requestUnlock({ path, challenge: Boolean(result.challenge) })) throw new Error(UNAVAILABLE);
+      }
+      if (!counts && proxyBackend && backend !== proxyBackend) {
+        const proxyUrl = apiUrl(proxyBackend, path, method);
+        if (proxyUrl) {
+          const retry = await readJson(proxyUrl, method, { signal: init.signal, counts });
+          if (!retry.failed) {
+            return { body: retry.body, backend: proxyBackend, invalidate() {} };
+          }
+        }
+      }
       throw new Error(UNAVAILABLE);
     }
     return {

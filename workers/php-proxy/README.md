@@ -155,3 +155,92 @@ aur `/__proxy-health`.
 
 Optional CLI (agar kabhi terminal se poori API dekhni ho):
 `node scripts/php-api-check.mjs https://intimora-api2.site.je`
+
+---
+
+# Direct mode: frontend → PHP (unlock flow)
+
+Yeh proxy ke **bina** chalta hai: browser seedha PHP host ko call karta hai
+(`credentials: "include"`), aur agar host apna HTML check bhej de to **ek baar**
+visitor ko `<php>/__unlock?back=<wahi page>` par bhej dete hain — wahan challenge
+browser me khud chalta hai, cookie ban jaati hai, aur page wapas site par le aata
+hai. Uske baad ~6 ghante normal direct calls.
+
+Frontend me sab lag chuka hai (`src/config/php-backend.mjs`,
+`src/services/unlock.mjs`, `src/services/visitor-route.mjs`,
+`src/services/media-credentials.mjs`). **Kaam karne ke liye PHP side par sirf 2
+cheezein chahiye:**
+
+## 1) `/__unlock` endpoint (PHP) — cookie ko SameSite=None banao
+
+Free host ki `__test` cookie `SameSite` ke bina aati hai = **Lax**, aur Lax cookie
+`site.je` → `new.tg` cross-site XHR/image me **bhejti hi nahi**. Isliye unlock page
+par wahi value dobara set karni hai, is baar `SameSite=None; Secure` ke saath
+(browser ise accept karta hai kyunki set karne wala khud PHP domain hai):
+
+```php
+<?php // /__unlock
+$back = $_GET['back'] ?? 'https://intimora.new.tg/';
+// sirf apni site par wapas bhejo (open redirect se bachne ke liye)
+if (!preg_match('#^https://(www\.)?intimora\.new\.tg(/|$)#', $back)) {
+    $back = 'https://intimora.new.tg/';
+}
+// free-host session cookie ko cross-site bhejne layak banao
+if (!empty($_COOKIE['__test'])) {
+    setcookie('__test', $_COOKIE['__test'], [
+        'expires'  => time() + 21600,
+        'path'     => '/',
+        'secure'   => true,
+        'httponly' => false,
+        'samesite' => 'None',
+    ]);
+}
+$sep = str_contains($back, '?') ? '&' : '?';
+header('Location: ' . $back . $sep . '__unlocked=1');
+exit;
+```
+
+Flow: visitor `/__unlock` par jaata hai → (cookie nahi thi to) challenge JS chalti
+hai aur page reload hota hai → ab PHP chalta hai → cookie `SameSite=None` ho jaati
+hai → wapas site par `?__unlocked=1` ke saath.
+
+## 2) Har API/media response par CORS (credentials ke sath)
+
+`credentials: "include"` ke saath `Access-Control-Allow-Origin: *` **nahi** chalta —
+exact origin + `Allow-Credentials: true` chahiye:
+
+```php
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+$allowed = ['https://intimora.new.tg', 'https://www.intimora.new.tg'];
+if (in_array($origin, $allowed, true)) {
+    header("Access-Control-Allow-Origin: $origin");
+    header('Access-Control-Allow-Credentials: true');
+    header('Vary: Origin');
+}
+header('Access-Control-Allow-Headers: Authorization, Content-Type, Range');
+header('Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS');
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') { http_response_code(204); exit; }
+```
+
+Yeh bootstrap me (har request se pehle) lagao, aur thumbnails/stream routes par bhi.
+
+## Frontend me kya hua
+
+| File | Kaam |
+|---|---|
+| `src/config/php-backend.mjs` | PHP URL **hardcoded** (`PHP_ORIGIN_OVERRIDE`), proxy fallback, window timing. LB se URL maangna band — wapas jaana ho to is constant ko `""` kar dena |
+| `src/services/unlock.mjs` | ek-baar-per-6h guard, `__unlock` URL, splash, `?__unlocked` cleanup |
+| `src/services/visitor-route.mjs` | pinned host direct call + `credentials: "include"` + HTML challenge detect + unlock trigger + proxy fallback |
+| `src/services/media-credentials.mjs` | PHP origin ke media par `crossorigin` hata diya (warna wahi CORS problem), cookie phir bhi jaati hai |
+| `src/index.css` | `.unlock-splash` (logo + spinner + "You will be brought back here automatically") |
+
+## Test (browser se, machine par kuch nahi)
+
+1. Site kholo → pehli call par splash aayega → PHP par challenge → wapas → catalog load.
+2. DevTools → Network: `api/videos?limit=50` ka URL `https://intimora-api3.site.je/...` hona chahiye (koi proxy hop nahi), status 200, `content-type: application/json`.
+3. Galat hone par kya dekho: response ka `content-type` `text/html` = cookie nahi gayi (SameSite fix missing) ya CORS header nahi (Console me `blocked by CORS policy`).
+
+**Warning:** Safari/ITP aur 3rd-party cookie block karne wale browsers is flow me
+PHP se direct baat nahi kar payenge (unke liye `PHP_PROXY_ORIGIN` fallback rakha hai).
+Aur agar PHP host apni cookie `SameSite=None` re-issue nahi karta, to flow proxy par
+gir jaayega.
