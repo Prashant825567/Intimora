@@ -166,10 +166,24 @@ visitor ko `<php>/__unlock?back=<wahi page>` par bhej dete hain — wahan challe
 browser me khud chalta hai, cookie ban jaati hai, aur page wapas site par le aata
 hai. Uske baad ~6 ghante normal direct calls.
 
-Frontend me sab lag chuka hai (`src/config/php-backend.mjs`,
-`src/services/unlock.mjs`, `src/services/visitor-route.mjs`,
-`src/services/media-credentials.mjs`). **Kaam karne ke liye PHP side par sirf 2
-cheezein chahiye:**
+## Load balancer contract (transport ka faisla yahin hota hai)
+
+```json
+{"ok":true,"data":{"server":"https://api-intimora.vercel.app","php":false}}
+{"ok":true,"data":{"server":"https://intimora-api3.site.je","php":true}}
+```
+
+| `php` | Frontend ka behaviour |
+|---|---|
+| `true` | Cookie system ON: `credentials: "include"`, HTML check par ek-baar unlock redirect, proxy fallback, auth calls preflight-free (`text/plain` + token body), media par `crossorigin` hataya |
+| `false` / field missing | Purana behaviour: direct call, `credentials: "omit"`, koi redirect nahi, `Authorization: Bearer` + JSON auth contract, media `crossorigin="anonymous"` |
+
+`src/services/php-session.mjs` isi flag ko yaad rakhta hai aur media + account
+calls ko bhi wahi rule deta hai. Hardcoded URL hata diya gaya hai
+(`PHP_ORIGIN_OVERRIDE` khali hai) — testing ke liye kabhi bhi ek origin pin kar
+sakte ho.
+
+**PHP mode ke liye PHP side par 2 cheezein chahiye:**
 
 ## 1) `/__unlock` endpoint (PHP) — cookie ko SameSite=None banao
 
@@ -228,7 +242,8 @@ Yeh bootstrap me (har request se pehle) lagao, aur thumbnails/stream routes par 
 
 | File | Kaam |
 |---|---|
-| `src/config/php-backend.mjs` | PHP URL **hardcoded** (`PHP_ORIGIN_OVERRIDE`), proxy fallback, window timing. LB se URL maangna band — wapas jaana ho to is constant ko `""` kar dena |
+| `src/config/php-backend.mjs` | `PHP_ORIGIN_OVERRIDE` (normal me **khali** — LB se URL aata hai), proxy fallback, unlock window timing |
+| `src/services/php-session.mjs` | discovery ke `php` flag ko yaad rakhta hai; media aur auth calls ko wahi transport deta hai |
 | `src/services/unlock.mjs` | ek-baar-per-6h guard, `__unlock` URL, splash, `?__unlocked` cleanup |
 | `src/services/visitor-route.mjs` | pinned host direct call + `credentials: "include"` + HTML challenge detect + unlock trigger + proxy fallback |
 | `src/services/media-credentials.mjs` | PHP origin ke media par `crossorigin` hata diya (warna wahi CORS problem), cookie phir bhi jaati hai |

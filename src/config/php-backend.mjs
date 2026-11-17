@@ -1,14 +1,14 @@
-// TEMPORARY: the PHP backend is pinned here while the "unlock" flow is being
-// tested against the free host. The load balancer is not asked for a server in
-// this mode.
+// The server URL comes from the load balancer, and its `php` flag decides the
+// transport: `php: true` → session-cookie dance (credentials, one-time unlock,
+// proxy fallback); `php: false` → a plain direct call.
 //
-// To go back to the load balancer, empty PHP_ORIGIN_OVERRIDE (set it to "").
-// Nothing else has to change: discovery takes over again automatically.
-export const PHP_ORIGIN_OVERRIDE = "https://intimora-api3.site.je";
+// Set PHP_ORIGIN_OVERRIDE to an origin to pin one backend for testing; empty
+// (the default) means "ask the load balancer", which is the normal mode.
+export const PHP_ORIGIN_OVERRIDE = "";
 
-// Optional safety net. If the direct call fails and the one-time unlock does not
-// help, the same request is retried through this proxy (see workers/php-proxy/).
-// Empty means "no fallback": the site reports the ordinary error instead.
+// Optional safety net for the PHP mode. If the direct call fails and the one-time
+// unlock does not help, the request is retried through this proxy (see
+// workers/php-proxy/). Empty means "no fallback".
 export const PHP_PROXY_ORIGIN = "";
 
 // The free host grants a six-hour session; a new unlock is requested a little

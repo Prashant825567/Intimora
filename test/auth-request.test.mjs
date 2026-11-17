@@ -28,22 +28,19 @@ test("authenticated requests use the visitor's selected backend and pin video ac
   assert.equal(selections, 2);
   assert.equal(calls[1].url, `${backendA}/api/videos/video-1/like`);
   assert.equal(calls[1].method, "POST");
-  assert.deepEqual(JSON.parse(calls[1].body), { token }, "the token travels in the body");
+  assert.equal(calls[1].body, "{}");
   for (const call of calls) {
-    // No preflight: no Authorization header, no JSON content type, and the token
-    // never appears in a URL or a query string.
-    assert.equal(call.headers.Authorization, undefined);
-    assert.equal(call.headers["Content-Type"], "text/plain");
-    assert.equal(JSON.parse(call.body).token, token);
-    assert.ok(!call.url.includes(token));
-    assert.equal(call.method, "POST", "a GET cannot carry the token without a query string");
-    // The free host only knows the visitor through its own session cookie.
-    assert.equal(call.credentials, "include");
+    // An ordinary (non-PHP) backend keeps the documented bearer contract.
+    assert.equal(call.headers.Authorization, `Bearer ${token}`);
+    assert.ok(!call.url.includes(token), "the token never appears in a URL");
+    assert.equal(call.credentials, "omit");
     assert.equal(call.cache, "no-store");
     assert.equal(call.mode, "cors");
     assert.equal(call.redirect, "error");
     assert.equal(call.referrerPolicy, "no-referrer");
   }
+  assert.equal(calls[0].method, "GET", "an ordinary backend keeps its GET route");
+  assert.equal(calls[1].headers["Content-Type"], "application/json");
   selection = backendA;
   assert.equal((await request("/api/auth/me", { token })).backend, backendA);
 });
@@ -71,12 +68,19 @@ test("tokens never leave the exact trusted origins or permitted account routes",
     ["//evil.example/api/auth/me", "GET"], ["/api/admin", "GET"], ["/api/videos/../save", "POST"],
     ["/api/videos/video-1/like", "GET"], ["/api/auth/verify", "GET"],
   ]) await assert.rejects(request(route, { method, token }), generic);
-  // The account routes are POST now, and a POST that is allowed must not be
-  // refused just because the old call site did not name a method.
-  const postable = createAuthenticatedRequest({ selectBackend: async () => backendA, allowedBackends, fetcher: async () => Response.json({ ok: true, data: {} }) });
-  for (const [route, method] of [["/api/auth/me", undefined], ["/api/auth/me", "POST"], ["/api/user/referrals", "POST"], ["/api/auth/verify", "POST"]]) {
-    assert.equal((await postable(route, { method, token })).backend, backendA);
+  // On a PHP host every account route is POST (a GET cannot carry the body), and
+  // omitting the method must not be refused.
+  const postable = createAuthenticatedRequest({
+    selectBackend: async () => backendA,
+    allowedBackends,
+    resolveTarget: async () => ({ backend: backendA, php: true }),
+    fetcher: async () => Response.json({ ok: true, data: {} }),
+  });
+  for (const method of [undefined, "POST"]) {
+    assert.equal((await postable("/api/auth/me", { method, token })).backend, backendA);
   }
+  assert.equal((await postable("/api/user/referrals", { method: "POST", token })).backend, backendA);
+  assert.equal((await postable("/api/auth/verify", { method: "POST", token })).backend, backendA);
   await assert.rejects(request("/api/auth/me", { token: "bad\nAuthorization: secret" }), generic);
   assert.equal(calls, 0);
 });
@@ -138,4 +142,62 @@ test("an HTML answer asks for the one-time unlock instead of a dead account scre
   });
   await assert.rejects(unauthorized("/api/auth/me", { token }), { name: "AccountRequestError", code: "unauthorized" });
   assert.equal(unlocks.length, 2, "the server's own rejection does not trigger an unlock");
+});
+
+test("a PHP backend gets the preflight-free shape, an ordinary one keeps the bearer contract", async () => {
+  const phpBackend = "https://intimora-api3.site.je";
+  const calls = [];
+  const phpRequest = createAuthenticatedRequest({
+    selectBackend: async () => phpBackend,
+    allowedBackends,
+    resolveTarget: async (pinned) => ({ backend: pinned ?? phpBackend, php: true }),
+    trustedPhpBackend: () => phpBackend,
+    fetcher: async (url, init) => {
+      calls.push({ url, ...init });
+      return Response.json({ ok: true, data: { user: "me" } });
+    },
+  });
+
+  await phpRequest("/api/auth/me", { token });
+  const me = calls[0];
+  assert.equal(me.method, "POST", "a GET cannot carry the token without a query string");
+  assert.equal(me.headers.Authorization, undefined, "no custom header: no preflight");
+  assert.equal(me.headers["Content-Type"], "text/plain", "a simple content type: no preflight");
+  assert.equal(JSON.parse(me.body).token, token);
+  assert.equal(me.credentials, "include", "the host's session cookie has to travel");
+  assert.ok(!me.url.includes(token), "the token never appears in a URL");
+
+  const plainCall = [];
+  const plainRequest = createAuthenticatedRequest({
+    selectBackend: async () => backendA,
+    allowedBackends,
+    resolveTarget: async (pinned) => ({ backend: pinned ?? backendA, php: false }),
+    fetcher: async (url, init) => {
+      plainCall.push({ url, ...init });
+      return Response.json({ ok: true, data: { user: "me" } });
+    },
+  });
+  await plainRequest("/api/auth/me", { token });
+  assert.equal(plainCall[0].method, "GET", "an ordinary backend keeps its GET route");
+  assert.equal(plainCall[0].headers.Authorization, `Bearer ${token}`);
+  assert.equal(plainCall[0].credentials, "omit");
+});
+
+test("a runtime PHP host is trusted, but an arbitrary one is not", async () => {
+  const runtime = "https://intimora-api9.site.je";
+  let trusted = runtime;
+  let calls = 0;
+  const request = createAuthenticatedRequest({
+    selectBackend: async () => runtime,
+    allowedBackends,
+    resolveTarget: async () => ({ backend: runtime, php: true }),
+    trustedPhpBackend: () => trusted,
+    fetcher: async () => { calls += 1; return Response.json({ ok: true, data: {} }); },
+  });
+  await request("/api/auth/me", { token });
+  assert.equal(calls, 1, "the host the load balancer named is trusted");
+
+  trusted = "https://intimora-api8.site.je";
+  await assert.rejects(request("/api/auth/me", { token }), generic);
+  assert.equal(calls, 1, "a token never reaches an origin nobody vouched for");
 });
