@@ -406,8 +406,32 @@ test("data saver and very slow connections use metadata preload", options, async
   } finally { await fixture.close(); }
 });
 
-test("media failure and a rejected play promise remain retryable", options, async () => {
+test("a cut media request recovers without asking the visitor to press Try again", options, async () => {
+  // The exact shape of the pre-roll bug: the content request is aborted while
+  // something else is on screen, the element lands in its error state, and the
+  // visitor used to get "This video could not be played" plus a button for a
+  // reload the player can do itself.
   const fixture = await createFixture({ failMedia: 1 });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    const player = page.locator("#player-container");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+    assert.equal(await player.getByRole("alert").count(), 0, "no error is shown for a failure that repairs itself");
+    assert.ok(streamCalls(fixture.state).length >= 2, "the element was reloaded on its own");
+    assert.ok(streamCalls(fixture.state).every((call) => call.search === ""), "the reload keeps the stable URL");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a media failure that survives the silent retries still offers Try again", options, async () => {
+  const fixture = await createFixture({ failMedia: 2 });
   try {
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
@@ -421,8 +445,25 @@ test("media failure and a rejected play promise remain retryable", options, asyn
       const video = document.querySelector("#player-container video");
       return video && !video.paused && video.currentTime > 0.05;
     }, undefined, { timeout: 20_000 });
-    assert.ok(streamCalls(fixture.state).length >= 2, "a genuine media failure is reloaded on user retry");
+    assert.ok(streamCalls(fixture.state).length >= 3, "a genuine media failure is reloaded on user retry");
     assert.ok(streamCalls(fixture.state).every((call) => call.search === ""), "retry keeps the stable URL");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a rejected play promise stays retryable and keeps the buffer", options, async () => {
+  const fixture = await createFixture();
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    const player = page.locator("#player-container");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
     await player.getByRole("button", { name: "Pause video" }).click();
     await page.waitForFunction(() => document.querySelector("#player-container video")?.paused);
     await page.evaluate(() => {

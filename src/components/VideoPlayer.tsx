@@ -11,6 +11,7 @@ import type { VastAd } from "./VideoAdOverlay";
 import { loadPreRoll } from "../services/vast-loader.mjs";
 import { VAST_CACHED_AD_URL, VAST_DECISION_GRACE_MS, VAST_LIVE_BUDGET_MS, VAST_SKIP_FALLBACK_SECONDS, VAST_TIMEOUT_MS } from "../config/vast";
 import { mediaCrossOrigin } from "../services/media-credentials.mjs";
+import { RECOVERY_DELAY_MS, shouldAutoRecover, playbackFailureMessage } from "../services/playback-recovery.mjs";
 
 // The ad tag is a public build constant. An empty value disables pre-roll.
 const VAST_TAG = __INTIMORA_VAST_TAG_URL__;
@@ -46,6 +47,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const playAttempt = useRef(0);
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [preload] = useState(preloadHint);
+  // The CORS attribute is read once: changing it makes the browser throw away
+  // the media load in progress, which showed up as a playback error. It follows
+  // a different video only while nothing is being loaded.
+  const [crossOrigin, setCrossOrigin] = useState(() => mediaCrossOrigin(video.videoUrl));
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
@@ -57,11 +62,35 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const [showControls, setShowControls] = useState(true);
   const [buffered, setBuffered] = useState<BufferedRange[]>([]);
   const [adPlaying, setAdPlaying] = useState<VastAd | null>(null);
+  // The pre-roll's own media element cuts the content's request; that failure is
+  // remembered and repaired when the ad ends instead of being shown to anyone.
+  const adPlayingRef = useRef(false);
+  const pendingReload = useRef(false);
+  const recoveries = useRef(0);
+  // Whether playback was asked for at all: a silent reload must not start a
+  // video that nobody wanted to watch.
+  const wantsPlay = useRef(false);
+  // One pending reload at a time. It is deliberately not tied to playAttempt:
+  // a second play request (StrictMode, a fast double tap) must not cancel it.
+  const recoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const adState = useRef<{ status: "idle" | "loading" | "deciding" | "done"; promise: Promise<VastAd | null> | null }>({ status: "idle", promise: null });
+
+  useEffect(() => { adPlayingRef.current = Boolean(adPlaying); }, [adPlaying]);
+
+  // A different video starts with a fresh budget.
+  useEffect(() => {
+    recoveries.current = 0;
+    pendingReload.current = false;
+    const element = videoRef.current;
+    if (!element || element.networkState === HTMLMediaElement.NETWORK_EMPTY) {
+      setCrossOrigin(mediaCrossOrigin(video.videoUrl));
+    }
+  }, [video.videoUrl]);
 
   useEffect(() => () => {
     playAttempt.current += 1;
     if (controlsTimer.current) clearTimeout(controlsTimer.current);
+    if (recoveryTimer.current) clearTimeout(recoveryTimer.current);
   }, []);
 
   // The tag is requested once per player, while it opens. It resolves to null on
@@ -103,6 +132,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     controlsTimer.current = setTimeout(() => setShowControls(false), 3000);
   };
 
+  // The recovery is exactly what the "Try again" button does — load(), then play
+  // — only without making the visitor press it. A media element leaves its error
+  // state in no other way, so this is the whole fix for a request that was cut
+  // while the pre-roll (or anything else) was using the network.
+  const recoverContent = (v: HTMLVideoElement, automatic: boolean) => {
+    if (!shouldAutoRecover({ code: v.error?.code ?? 0, recoveries: recoveries.current })) return false;
+    recoveries.current += 1;
+    if (recoveryTimer.current) clearTimeout(recoveryTimer.current);
+    recoveryTimer.current = setTimeout(() => {
+      recoveryTimer.current = null;
+      if (videoRef.current !== v) return;
+      v.load();
+      if (wantsPlay.current) playContent(v, automatic, ++playAttempt.current);
+    }, RECOVERY_DELAY_MS);
+    return true;
+  };
+
   const playContent = (v: HTMLVideoElement, automatic: boolean, attempt: number) => {
     setPlaybackError("");
     setBuffering(v.readyState < HTMLMediaElement.HAVE_FUTURE_DATA);
@@ -115,7 +161,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
       // If an automatic start is blocked, leave the large play button visible
       // so the user can explicitly start it with a gesture.
       if (blocked && automatic) return;
-      setPlaybackError(blocked ? "Playback was blocked. Please try again." : "This video could not be played. Please try again.");
+      if (blocked) { setPlaybackError("Playback was blocked. Please try again."); return; }
+      // An element in the error state rejects play() until it is reloaded.
+      if (recoverContent(v, automatic)) return;
+      setPlaybackError(playbackFailureMessage({ code: v.error?.code ?? 0 }));
     };
     try {
       // A rejected play() must not leave the UI stuck in the playing state.
@@ -128,6 +177,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // not answered within the short grace window, playback begins instead, so an
   // ad server can never block the video.
   const startPlayback = (v: HTMLVideoElement, automatic = false) => {
+    wantsPlay.current = true;
     const attempt = ++playAttempt.current;
     ensureAdRequest();
     if (!VAST_TAG || adState.current.status === "done") {
@@ -156,9 +206,18 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
 
   const finishAd = () => {
     setAdPlaying(null);
+    adPlayingRef.current = false;
     adState.current.status = "done";
     const v = videoRef.current;
-    if (v) playContent(v, false, ++playAttempt.current);
+    if (!v) return;
+    // The content request is usually cut while the ad plays, so the element is
+    // in its error state by now. One reload brings it back with whatever the
+    // browser already buffered, and playback starts on its own.
+    if (pendingReload.current || v.error) {
+      pendingReload.current = false;
+      v.load();
+    }
+    playContent(v, false, ++playAttempt.current);
   };
 
   useLayoutEffect(() => {
@@ -172,6 +231,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     if (!v || adPlaying) return;
     if (!v.paused && !v.ended) {
       playAttempt.current += 1;
+      wantsPlay.current = false;
       v.pause();
     } else {
       startPlayback(v);
@@ -184,6 +244,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     if (!v) return;
     // Reload only after a media error. For a blocked play request, retain any
     // data already buffered instead of starting a second download.
+    recoveries.current = 0;
     if (v.error) {
       setCurrentTime(0);
       setDuration(0);
@@ -275,7 +336,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             ref={videoRef}
             src={video.videoUrl}
             poster={video.thumbnail}
-            crossOrigin={mediaCrossOrigin(video.videoUrl)}
+            crossOrigin={crossOrigin}
             preload={preload}
             playsInline
             className="w-full h-full object-contain"
@@ -287,12 +348,22 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             onStalled={(e) => { if (!e.currentTarget.paused && e.currentTarget.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) setBuffering(true); }}
             onPause={() => { playAttempt.current += 1; setPlaying(false); setBuffering(false); }}
             onEnded={() => { setPlaying(false); setBuffering(false); setShowControls(true); }}
-            onError={() => {
+            onError={(e) => {
               playAttempt.current += 1;
               setPlaying(false);
               setBuffering(false);
               setShowControls(true);
-              setPlaybackError("This video could not be loaded. Please try again.");
+              const element = e.currentTarget;
+              const code = element.error?.code ?? 0;
+              // Nothing is shown while the pre-roll is on screen: its own media
+              // element is what interrupted this request, and the reload below
+              // happens the moment the ad ends.
+              if (adPlayingRef.current) {
+                pendingReload.current = true;
+                return;
+              }
+              if (recoverContent(element, false)) return;
+              setPlaybackError(playbackFailureMessage({ code }));
             }}
             onTimeUpdate={(e) => setCurrentTime(Number.isFinite(e.currentTarget.currentTime) ? e.currentTarget.currentTime : 0)}
             onLoadedMetadata={(e) => updateDuration(e.currentTarget)}
