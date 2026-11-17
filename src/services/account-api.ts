@@ -2,8 +2,22 @@ import type { FirebaseUser } from "./firebase";
 import { primeBackendSelection } from "./api";
 import { AccountRequestError, createAuthenticatedRequest } from "./auth-request.mjs";
 import { readLikeCount } from "./like-counts.mjs";
+import { PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN, UNLOCK_FRESH_MS, UNLOCK_SPLASH_MS } from "../config/php-backend.mjs";
+import { requestUnlockNavigation } from "./unlock.mjs";
 
-const request = createAuthenticatedRequest({ selectBackend: primeBackendSelection, allowedBackends: __INTIMORA_AUTH_BACKENDS__ });
+const request = createAuthenticatedRequest({
+  selectBackend: primeBackendSelection,
+  // A token is only ever sent to a trusted origin, so the backend the site is
+  // actually using has to be on the list — the pinned PHP host included.
+  allowedBackends: [...new Set([...__INTIMORA_AUTH_BACKENDS__, PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN].filter(Boolean))],
+  // The host's browser check answers with HTML instead of JSON until its session
+  // cookie exists; that is the one case worth the one-time unlock navigation.
+  requestUnlock: () => requestUnlockNavigation({
+    phpOrigin: PHP_ORIGIN_OVERRIDE,
+    freshMs: UNLOCK_FRESH_MS,
+    splashMs: UNLOCK_SPLASH_MS,
+  }),
+});
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CODE = /^[A-Za-z0-9_-]{1,80}$/;
 export const referralsEnabled = __INTIMORA_SAFE_REFERRALS__;

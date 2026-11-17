@@ -124,7 +124,10 @@ export function createVisitorRequest(options = {}) {
     try {
       const response = await fetcher(url, {
         method,
-        ...(method === "POST" ? { headers: { "Content-Type": "application/json" }, body: "{}" } : {}),
+        // `text/plain` is a "simple" content type, so a POST is sent without a
+        // preflight. A preflight carries no cookies, and a free host answers one
+        // without cookies with its HTML check instead of JSON.
+        ...(method === "POST" ? { headers: { "Content-Type": "text/plain" }, body: "{}" } : {}),
         mode: "cors",
         // Cookies only travel to a pinned PHP host; discovery backends stay
         // credential-free exactly as before.

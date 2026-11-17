@@ -7,6 +7,7 @@ export function createAuthenticatedRequest(options: {
   selectBackend: () => Promise<string>;
   allowedBackends: string[];
   fetcher?: typeof fetch;
+  requestUnlock?: (context: { path: string }) => void;
 }): (path: string, options: {
   method?: "GET" | "POST";
   token: string;

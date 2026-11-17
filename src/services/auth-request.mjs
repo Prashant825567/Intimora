@@ -1,8 +1,18 @@
 import { publicBackendBase } from "./public-url.mjs";
 
 const VIDEO_ACTION = /^\/api\/videos\/[A-Za-z0-9_-]{1,128}\/(?:like|save)$/;
-const GET_ROUTES = new Set(["/api/auth/me", "/api/user/referrals"]);
-const POST_ROUTES = new Set(["/api/auth/verify", "/api/auth/profile"]);
+// Every account route is called with POST and a `text/plain` body, so the browser
+// never sends a preflight. A preflight would leave without cookies (the Fetch
+// spec forbids them on OPTIONS), which is exactly what a free host's JavaScript
+// check answers with an HTML page — and an HTML page has no CORS headers.
+const ACCOUNT_ROUTES = new Set([
+  "/api/auth/me",
+  "/api/auth/verify",
+  "/api/auth/profile",
+  "/api/user/referrals",
+]);
+// A "simple" content type: no preflight, and the JSON travels as plain text.
+const SIMPLE_CONTENT_TYPE = "text/plain";
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const UNAVAILABLE = "Account service is temporarily unavailable.";
 
@@ -53,11 +63,21 @@ function errorCode(status, error) {
 // Tokens are sent only to exact configured origins. The Worker is still used to
 // select the backend; this allowlist prevents a hostile selection from stealing
 // a Firebase token. Video actions may use their original, trusted backend.
-export function createAuthenticatedRequest({ selectBackend, allowedBackends, fetcher = fetch }) {
+export function createAuthenticatedRequest({ selectBackend, allowedBackends, fetcher = fetch, requestUnlock = null }) {
   const allowed = new Set(allowedBackends);
-  return async function request(path, { method = "GET", token, body, backend } = {}) {
-    const routeAllowed = method === "GET" ? GET_ROUTES.has(path)
-      : method === "POST" && (POST_ROUTES.has(path) || VIDEO_ACTION.test(path));
+  // The one-time unlock navigation is only worth asking for once per request, and
+  // only when the caller supplied the hook.
+  const notifyUnlock = (path) => {
+    try {
+      requestUnlock?.({ path });
+    } catch {
+      // A navigation that cannot start must not break the account screen.
+    }
+  };
+  return async function request(path, { method, token, body, backend } = {}) {
+    const routeAllowed = VIDEO_ACTION.test(path)
+      ? method === "POST"
+      : ACCOUNT_ROUTES.has(path) && (method === undefined || method === "POST");
     if (!routeAllowed || typeof token !== "string" || token.length < 1 || token.length > 8192 || !/^[A-Za-z0-9._-]+$/.test(token)) {
       throw new AccountRequestError();
     }
@@ -71,15 +91,25 @@ export function createAuthenticatedRequest({ selectBackend, allowedBackends, fet
       // Refresh an expired visitor selection independently, but keep this
       // video's action pinned to the backend that supplied it.
       if (backend !== undefined) void Promise.resolve().then(selectBackend).catch(() => {});
-      const payload = method === "POST" ? JSON.stringify(body ?? {}) : undefined;
-      if (payload && payload.length > 8192) throw new AccountRequestError();
+      // The token travels in the body instead of an `Authorization` header: no
+      // custom header and no JSON content type means no preflight at all.
+      const payload = JSON.stringify({ token, ...(body && typeof body === "object" ? body : {}) });
+      if (payload.length > 8192) throw new AccountRequestError();
       timer = setTimeout(() => controller.abort(), 20_000);
       const response = await fetcher(`${target.origin}${path}`, {
-        method,
-        headers: { Authorization: `Bearer ${token}`, ...(method === "POST" ? { "Content-Type": "application/json" } : {}) },
-        ...(payload === undefined ? {} : { body: payload }),
-        credentials: "omit", mode: "cors", cache: "no-store", referrerPolicy: "no-referrer", redirect: "error", signal: controller.signal,
+        method: "POST",
+        headers: { "Content-Type": SIMPLE_CONTENT_TYPE },
+        body: payload,
+        // The pinned PHP host only recognises the visitor after its own check has
+        // set a session cookie, so it has to be allowed to travel.
+        credentials: "include", mode: "cors", cache: "no-store", referrerPolicy: "no-referrer", redirect: "error", signal: controller.signal,
       });
+      const contentType = (response.headers?.get?.("content-type") || "").toLowerCase();
+      if (contentType.includes("text/html")) {
+        // The host answered with its browser check instead of the account API.
+        notifyUnlock(path);
+        throw new AccountRequestError();
+      }
       const json = await boundedJson(response);
       if (!response.ok || json?.ok !== true || !json.data || typeof json.data !== "object") {
         throw new AccountRequestError(errorCode(response.status, json?.error));
@@ -87,6 +117,9 @@ export function createAuthenticatedRequest({ selectBackend, allowedBackends, fet
       return { data: json.data, backend: target.origin };
     } catch (error) {
       controller.abort();
+      // A CORS rejection and a refused connection both look like this; the PHP
+      // host's check is the usual cause, so the unlock is offered once.
+      if (!(error instanceof AccountRequestError)) notifyUnlock(path);
       if (error instanceof AccountRequestError) throw error;
       throw new AccountRequestError();
     } finally {
