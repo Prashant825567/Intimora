@@ -137,21 +137,29 @@ test("sponsored partner videos sit between ours and open in our own player", {
     await page.getByRole("button", { name: "Close video player" }).click();
     await player.waitFor({ state: "detached" });
 
-    // A partner page without a poster still renders a tidy tile, never a broken image.
+    // A partner item without a thumbnail is not left as a hole: the card derives
+    // the partner's own screenshot from the embed id.
     const withoutPoster = page.locator(".video-card--sponsored").nth(2);
-    await withoutPoster.getByText("Partner video").waitFor();
-    assert.equal(await withoutPoster.locator("img.video-card__image").count(), 0, "no broken image element is left behind");
+    await withoutPoster.scrollIntoViewIfNeeded();
+    const derived = await withoutPoster.locator("img.video-card__image").getAttribute("src");
+    assert.match(derived, /desi-porntube\.com\/contents\/videos_screenshots\/762000\/762419\//);
     // A poster that exists but fails to load (hotlink block, expired link) is
-    // swapped for the same tile as soon as the error fires.
+    // swapped for that derived screenshot as soon as the error fires.
     const brokenPoster = page.locator(".video-card--sponsored").nth(3);
-    await brokenPoster.getByText("Partner video").waitFor({ timeout: 15_000 });
-    assert.equal(await brokenPoster.locator("img.video-card__image").count(), 0);
+    await brokenPoster.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => {
+      const image = document.querySelectorAll(".video-card--sponsored")[3]?.querySelector("img.video-card__image");
+      return Boolean(image && image.getAttribute("src")?.includes("desi-porntube.com"));
+    }, undefined, { timeout: 15_000 });
+    assert.equal(await brokenPoster.locator("img.video-card__image").evaluate((img) => img.complete && img.naturalWidth > 0), true, "a failed hotlink is replaced by a picture that loads");
 
     // No sponsored cards over search results.
     await page.goto(`${base}/search?q=test`, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: /Search results for/ }).waitFor();
     assert.equal(await page.locator(".video-card--sponsored").count(), 0, "no sponsored cards in search results");
-    assert.deepEqual(requests.frames, [embed(764349)], "only the opened sponsored video is requested");
+    // Only the card the visitor opened loads a partner page; the derived
+    // screenshots are images, not navigations.
+    assert.deepEqual(requests.frames.filter((href) => href.includes("/embed/")), [embed(764349)], "only the opened sponsored video is requested as a page");
 
     // The feeds keep the same rhythm.
     await page.goto(`${base}/trending`, { waitUntil: "domcontentloaded" });

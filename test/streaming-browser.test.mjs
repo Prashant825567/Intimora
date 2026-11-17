@@ -38,7 +38,7 @@ async function availablePort() {
   return port;
 }
 
-async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, format = "webm" } = {}) {
+async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm" } = {}) {
   const clip = clips[format];
   const video = { ...fixtureVideo, duration: format === "mp4" ? 30 : 20 };
   const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "intimora-stream-test-"));
@@ -46,7 +46,7 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
   let backendServer;
   let vite;
   let browser;
-  const state = { calls: [], pending: [], pendingDetails: [], holdMedia, holdAfter, holdDetail, failMedia };
+  const state = { calls: [], pending: [], pendingDetails: [], holdMedia, holdAfter, holdDetail, failMedia, failCatalog };
   try {
     const key = path.join(temporaryDirectory, "test-key.pem");
     const cert = path.join(temporaryDirectory, "test-cert.pem");
@@ -69,7 +69,15 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         res.end(JSON.stringify(body));
       };
       if (url.pathname === "/api/get-server") return json({ ok: true, data: { server: backend } });
-      if (url.pathname === "/api/videos") return json({ ok: true, data: { videos: [video], nextCursor: null } });
+      if (url.pathname === "/api/videos") {
+        if (state.failCatalog > 0) {
+          state.failCatalog -= 1;
+          res.writeHead(503, { ...cors, "Cache-Control": "no-store" });
+          res.end("temporary catalog failure");
+          return;
+        }
+        return json({ ok: true, data: { videos: [video], nextCursor: null } });
+      }
       if (url.pathname === "/api/videos/sample-1") {
         if (state.holdDetail) state.pendingDetails.push(() => { if (!res.destroyed) json({ ok: true, data: { ...video, views: 123 } }); });
         else json({ ok: true, data: { ...video, views: 123 } });
@@ -406,8 +414,32 @@ test("data saver and very slow connections use metadata preload", options, async
   } finally { await fixture.close(); }
 });
 
-test("media failure and a rejected play promise remain retryable", options, async () => {
+test("a cut media request recovers without asking the visitor to press Try again", options, async () => {
+  // The exact shape of the pre-roll bug: the content request is aborted while
+  // something else is on screen, the element lands in its error state, and the
+  // visitor used to get "This video could not be played" plus a button for a
+  // reload the player can do itself.
   const fixture = await createFixture({ failMedia: 1 });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    const player = page.locator("#player-container");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+    assert.equal(await player.getByRole("alert").count(), 0, "no error is shown for a failure that repairs itself");
+    assert.ok(streamCalls(fixture.state).length >= 2, "the element was reloaded on its own");
+    assert.ok(streamCalls(fixture.state).every((call) => call.search === ""), "the reload keeps the stable URL");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a media failure that survives the silent retries still offers Try again", options, async () => {
+  const fixture = await createFixture({ failMedia: 2 });
   try {
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
@@ -421,8 +453,25 @@ test("media failure and a rejected play promise remain retryable", options, asyn
       const video = document.querySelector("#player-container video");
       return video && !video.paused && video.currentTime > 0.05;
     }, undefined, { timeout: 20_000 });
-    assert.ok(streamCalls(fixture.state).length >= 2, "a genuine media failure is reloaded on user retry");
+    assert.ok(streamCalls(fixture.state).length >= 3, "a genuine media failure is reloaded on user retry");
     assert.ok(streamCalls(fixture.state).every((call) => call.search === ""), "retry keeps the stable URL");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a rejected play promise stays retryable and keeps the buffer", options, async () => {
+  const fixture = await createFixture();
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    const player = page.locator("#player-container");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
     await player.getByRole("button", { name: "Pause video" }).click();
     await page.waitForFunction(() => document.querySelector("#player-container video")?.paused);
     await page.evaluate(() => {
@@ -442,6 +491,60 @@ test("media failure and a rejected play promise remain retryable", options, asyn
     await player.getByRole("button", { name: "Try again" }).click();
     await player.getByRole("button", { name: "Pause video" }).waitFor();
     assert.equal(await page.evaluate(() => window.__fixtureLoadCalls), 0, "blocked play does not discard an existing buffer");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a transient catalog failure is retried before the visitor is told", options, async () => {
+  const fixture = await createFixture({ failCatalog: 1 });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    // The first /api/videos answers 503; the retry must fill the grid without
+    // ever painting "Content Unavailable".
+    await page.getByRole("button", { name: /WATCH NOW/i }).waitFor({ timeout: 20_000 });
+    assert.equal(await page.getByText("Content Unavailable").count(), 0, "no error screen for a retried request");
+    const catalogCalls = fixture.state.calls.filter((call) => call.path === "/api/videos");
+    assert.ok(catalogCalls.length >= 2, "the catalog request was repeated");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("clicking the picture toggles the controls and never pauses", options, async () => {
+  const fixture = await createFixture();
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    const player = page.locator("#player-container");
+    const media = player.locator("video");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+
+    const controls = player.locator("[data-controls]").first();
+    assert.equal(await controls.getAttribute("data-controls"), "visible");
+
+    await media.click({ position: { x: 260, y: 170 } });
+    assert.equal(await controls.getAttribute("data-controls"), "hidden", "a click hides the timeline");
+    assert.equal(await media.evaluate((video) => video.paused), false, "and the video keeps playing");
+
+    await media.click({ position: { x: 260, y: 170 } });
+    assert.equal(await controls.getAttribute("data-controls"), "visible", "a second click brings it back");
+    assert.equal(await media.evaluate((video) => video.paused), false);
+
+    // Only the pause button pauses.
+    await player.getByRole("button", { name: "Pause video" }).click();
+    await page.waitForFunction(() => document.querySelector("#player-container video")?.paused);
+    assert.equal(await controls.getAttribute("data-controls"), "visible", "a paused video shows its controls");
+    // While paused the large play button covers the picture, so a tap there is
+    // the play action; the timeline is only paused by its own button.
+    assert.equal(await media.evaluate((video) => video.paused), true);
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }

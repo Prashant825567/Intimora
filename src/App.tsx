@@ -23,6 +23,13 @@ import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoTo
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
 import { unlockReturnedThisLoad } from "./services/unlock.mjs";
+import {
+  CATALOG_RETRY_DELAYS_MS,
+  SEARCH_RETRY_DELAYS_MS,
+  SHARED_LINK_RETRY_DELAYS_MS,
+  UNLOCK_RETRY_DELAYS_MS,
+  retryWithDelays,
+} from "./services/retry.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
@@ -240,21 +247,16 @@ function App() {
     if (!firstPageRequest.current || firstPageRequest.current.revision !== catalogRevision) {
       firstPageRequest.current = { revision: catalogRevision, promise: fetchVideos(null, CATALOG_PAGE_SIZE) };
     }
-    // The host just sent the visitor back from its check page: the first request
-    // can still land while the browser finishes storing the cookie, so give it a
-    // couple of quiet attempts before showing an error.
-    const loadFirstPage = async () => {
-      let attempt = 0;
-      while (true) {
-        try {
-          return await firstPageRequest.current!.promise;
-        } catch (error) {
-          if (!unlockReturnedThisLoad() || attempt >= 2) throw error;
-          attempt += 1;
-          await new Promise((resolve) => setTimeout(resolve, 1_500));
-          firstPageRequest.current = { revision: catalogRevision, promise: fetchVideos(null, CATALOG_PAGE_SIZE) };
-        }
-      }
+    // A failed first page is retried quietly before anything is shown: a backend
+    // hiccup, a cookie the browser is still settling after the host's check page,
+    // or a dropped connection used to read as "Content Unavailable" on the first
+    // paint. The visitor is only told after those attempts are spent.
+    const loadFirstPage = () => {
+      const cached = firstPageRequest.current;
+      return retryWithDelays(async (attempt) => {
+        if (attempt === 0 && cached) return await cached.promise;
+        return await fetchVideos(null, CATALOG_PAGE_SIZE);
+      }, { delays: unlockReturnedThisLoad() ? UNLOCK_RETRY_DELAYS_MS : CATALOG_RETRY_DELAYS_MS });
     };
     (async () => {
       let receivedFirstPage = false;
@@ -303,7 +305,7 @@ function App() {
     }
     let cancelled = false;
     setSearchLoading(true);
-    searchVideos(submittedQuery).then((response) => {
+    retryWithDelays(() => searchVideos(submittedQuery), { delays: SEARCH_RETRY_DELAYS_MS }).then((response) => {
       if (!cancelled && request === searchRequest.current) {
         setSearchResults(response.data.videos.map((video) => mapApiVideoToVideo(video, response.data.backend)));
       }
@@ -324,13 +326,18 @@ function App() {
     if (!sharedVideoRequest.current || sharedVideoRequest.current.id !== id) {
       sharedVideoRequest.current = { id, promise: fetchVideoDetail(id) };
     }
-    sharedVideoRequest.current.promise.then(({ video, backend }) => {
-      if (cancelled) return;
-      if (video) {
-        // A shared link may open after the gate without an explicit play click.
-        setStartVideoOnOpen(false);
-        setActiveVideo(mapApiVideoToVideo(video, backend));
-      } else setSharedVideoUnavailable(true);
+    const first = sharedVideoRequest.current.promise;
+    // A shared link is the one address a visitor may open cold, so a transient
+    // failure is retried once before "This video is currently unavailable."
+    retryWithDelays(async (attempt) => {
+      const result = attempt === 0 ? await first : await fetchVideoDetail(id);
+      if (!result.video) throw new Error("unavailable");
+      return result;
+    }, { delays: SHARED_LINK_RETRY_DELAYS_MS }).then(({ video, backend }) => {
+      if (cancelled || !video) return;
+      // A shared link may open after the gate without an explicit play click.
+      setStartVideoOnOpen(false);
+      setActiveVideo(mapApiVideoToVideo(video, backend));
     }).catch(() => { if (!cancelled) setSharedVideoUnavailable(true); });
     return () => { cancelled = true; };
   }, [ageVerified, pathname, historyRevision]);
