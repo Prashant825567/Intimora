@@ -55,14 +55,15 @@ export function createVisitorRequest(options = {}) {
   // browser then calls that host directly, with cookies, so the one-time unlock
   // navigation can hand it the session cookie its own check issues.
   const backendOverride = publicBackendBase(options.backendOverride);
-  // Optional safety net when the direct call cannot be made to work.
-  const proxyBackend = publicBackendBase(options.proxyBackend);
   // Called when a direct call hits the host's HTML check. Returns true when the
   // browser was sent to the unlock page and this request should stop waiting.
   const requestUnlock = typeof options.requestUnlock === "function" ? options.requestUnlock : null;
   // Told whenever the visitor's target is (re)selected, so media and the unlock
   // flow know whether this backend is the kind behind a browser check.
   const onTarget = typeof options.onTarget === "function" ? options.onTarget : null;
+  // Told when a PHP answer actually arrived, which is the proof its session
+  // cookie works — from then on the window needs no new unlock.
+  const onPhpSuccess = typeof options.onPhpSuccess === "function" ? options.onPhpSuccess : null;
   // A pinned origin is treated as PHP, because that is what it is used for.
   const pinnedPhp = Boolean(backendOverride);
   const fetcher = options.fetcher ?? ((url, init) => fetch(url, init));
@@ -178,8 +179,9 @@ export function createVisitorRequest(options = {}) {
       return { body };
     } catch {
       controller.abort();
-      // A CORS rejection and a refused connection both look like this; in pinned
-      // mode the unlock flow is the only thing that can fix either.
+      // A CORS rejection, a refused connection and a redirect all look like
+      // this. On a PHP host the browser's own unlock page is the only thing that
+      // can hand out the cookie, so that is what the caller is told next.
       return { failed: true, invalidate: true, network: true };
     } finally {
       clearTimeout(timer);
@@ -193,8 +195,9 @@ export function createVisitorRequest(options = {}) {
   }
 
   // The load balancer decides the transport: `php: true` means the server hides
-  // its API behind a cookie-based browser check, so only that case needs
-  // credentials, the one-time unlock and the proxy fallback.
+  // its API behind a cookie-based browser check, so only that case sends
+  // credentials and may ask for the one-time unlock navigation. There is no
+  // proxy: the browser calls that host itself.
   async function selectTarget() {
     // A pinned origin skips discovery entirely (and never caches a selection).
     if (backendOverride) return announce({ backend: backendOverride, php: pinnedPhp });
@@ -255,24 +258,16 @@ export function createVisitorRequest(options = {}) {
       // Optional count polling must not disrupt catalog routing. A stale
       // response for an older backend must not erase a newer selection either.
       if (!counts && result.invalidate && generation === requestGeneration && cached?.backend === backend) clear();
-      // Pinned PHP mode: the host answered with its own HTML check (or the call
-      // never left the browser). Ask for the one-time unlock navigation; if this
-      // window already used it, try the proxy instead of failing outright.
+      // PHP mode: the host answered with its own HTML check, or the call never
+      // left the browser. Send the visitor through the host's own unlock page
+      // once (no proxy in between); the request stops here because the page is
+      // about to leave.
       if (!counts && php && requestUnlock && (result.challenge || result.network)) {
         if (requestUnlock({ path, challenge: Boolean(result.challenge) })) throw new Error(UNAVAILABLE);
       }
-      if (!counts && php && proxyBackend && backend !== proxyBackend) {
-        const proxyUrl = apiUrl(proxyBackend, path, method);
-        if (proxyUrl) {
-          // The proxy solves the host's check itself, so no further retries.
-          const retry = await readJson(proxyUrl, method, { signal: init.signal, counts, php: false });
-          if (!retry.failed) {
-            return { body: retry.body, backend: proxyBackend, invalidate() {} };
-          }
-        }
-      }
       throw new Error(UNAVAILABLE);
     }
+    if (php && onPhpSuccess) onPhpSuccess();
     return {
       body: result.body,
       backend,

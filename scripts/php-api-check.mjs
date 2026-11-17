@@ -6,11 +6,11 @@
 //   node scripts/php-api-check.mjs https://intimora-api3.site.je
 //   node scripts/php-api-check.mjs https://a.site.je https://b.site.je --writes
 //
-// It solves the challenge exactly like workers/php-proxy does, then walks every
+// It solves the host's challenge the same way scripts/php-challenge.mjs does, then walks every
 // endpoint the site calls and prints PASS/FAIL per row. Nothing is written
 // unless --writes is passed (the share endpoint increments a counter).
 import { pathToFileURL } from "node:url";
-import { createChallengeClient, isChallengePage, solveChallenge } from "../workers/php-proxy/worker.mjs";
+import { createChallengeClient, isChallengePage, solveChallenge } from "./php-challenge.mjs";
 
 const DEFAULT_ORIGINS = ["https://intimora-api2.site.je"];
 const ROWS = [];

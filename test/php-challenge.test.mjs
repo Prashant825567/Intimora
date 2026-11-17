@@ -10,7 +10,7 @@ import {
   isChallengePage,
   parseChallenge,
   solveChallenge,
-} from "../workers/php-proxy/worker.mjs";
+} from "../scripts/php-challenge.mjs";
 
 const TOKEN = "2f312d304562ccae42675f89848424b1";
 
@@ -248,11 +248,11 @@ test("the health URL reports a broken deployment instead of hiding it", async ()
   assert.match(report.targets[0].error, /host down/);
 });
 
-test("the Worker file is self-contained, so it can be pasted as-is", async () => {
-  const source = await readFile(new URL("../workers/php-proxy/worker.mjs", import.meta.url), "utf8");
-  assert.equal(/^\s*import\s/m.test(source), false, "no imports: the dashboard editor only accepts one file");
+test("the challenge helper is self-contained, so it runs without the app", async () => {
+  const source = await readFile(new URL("../scripts/php-challenge.mjs", import.meta.url), "utf8");
+  assert.equal(/^\s*import\s/m.test(source), false, "no imports: it runs on its own");
   assert.match(source, /export default \{/);
-  assert.ok(source.length < 60_000, "small enough for the Cloudflare editor");
+  assert.ok(source.length < 60_000, "small enough to stay readable");
 });
 
 test("the proxy follows the load balancer when no fixed origin is set", async () => {
