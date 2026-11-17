@@ -1,8 +1,23 @@
 import type { Video } from "../data/mockVideos";
 import { createVisitorRequest } from "./visitor-route.mjs";
+import { PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN, UNLOCK_FRESH_MS, UNLOCK_SPLASH_MS } from "../config/php-backend.mjs";
+import { requestUnlockNavigation } from "./unlock.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
-const visitor = createVisitorRequest({ discoveryUrl: __INTIMORA_DISCOVERY_URL__ });
+const visitor = createVisitorRequest({
+  discoveryUrl: __INTIMORA_DISCOVERY_URL__,
+  // TEMPORARY (src/config/php-backend.mjs): a pinned PHP origin, called directly
+  // by the browser with cookies. Empty the constant to return to discovery.
+  backendOverride: PHP_ORIGIN_OVERRIDE,
+  proxyBackend: PHP_PROXY_ORIGIN,
+  // When the host answers a direct call with its own HTML check, the visitor is
+  // sent once to its unlock page, which returns them to the same address.
+  requestUnlock: () => requestUnlockNavigation({
+    phpOrigin: PHP_ORIGIN_OVERRIDE,
+    freshMs: UNLOCK_FRESH_MS,
+    splashMs: UNLOCK_SPLASH_MS,
+  }),
+});
 const unavailable = () => new Error("Content is temporarily unavailable");
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 

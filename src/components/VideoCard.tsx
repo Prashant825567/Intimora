@@ -3,6 +3,7 @@ import { Play, Eye, Share2, Heart, ThumbsUp } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import type { LiveLikes } from "../hooks/useLiveLikes";
 import { isPremiumLabel } from "../utils/video-labels";
+import { mediaCrossOrigin } from "../services/media-credentials.mjs";
 
 interface VideoCardProps {
   video: Video;
@@ -40,7 +41,7 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
       <div className="video-card__media relative overflow-hidden rounded-lg" style={{ aspectRatio: "16/9" }}>
         <img
           src={video.thumbnail}
-          crossOrigin="anonymous"
+          crossOrigin={mediaCrossOrigin(video.thumbnail)}
           referrerPolicy="no-referrer"
           alt={video.title}
           className="video-card__image w-full h-full object-contain"

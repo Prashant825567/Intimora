@@ -5,6 +5,9 @@ export interface VisitorRequestOptions {
   now?: () => number;
   monotonicNow?: () => number;
   reuseStoredSelection?: boolean;
+  backendOverride?: string;
+  proxyBackend?: string;
+  requestUnlock?: (context: { path: string; challenge: boolean }) => boolean;
 }
 
 export interface VisitorRequest {

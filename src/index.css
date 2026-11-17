@@ -990,3 +990,72 @@ img {
   .dashboard__avatar { width: 3rem; height: 3rem; }
   .referral-flow { --indent: 1.15rem; --rail-inset: 0.95rem; }
 }
+
+/* One-time connection check before the browser leaves for the PHP host. It sits
+   above everything, including the age gate, and disappears by navigation. */
+.unlock-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 35%, rgba(36, 28, 18, 0.98), rgba(9, 8, 7, 0.99));
+  animation: unlock-fade 220ms ease-out;
+}
+
+.unlock-splash__card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  padding: 2rem 2.5rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(201, 168, 76, 0.28);
+  background: rgba(23, 19, 16, 0.92);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  text-align: center;
+}
+
+.unlock-splash__logo {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: contain;
+}
+
+.unlock-splash__ring {
+  position: absolute;
+  top: 2rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 9999px;
+  border: 2px solid rgba(240, 208, 128, 0.85);
+  border-top-color: transparent;
+  animation: unlock-spin 900ms linear infinite;
+}
+
+.unlock-splash__title {
+  margin: 0.5rem 0 0;
+  color: #f7f3ea;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.unlock-splash__note {
+  margin: 0;
+  color: #9c9488;
+  font-size: 0.75rem;
+}
+
+@keyframes unlock-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes unlock-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .unlock-splash__ring { animation: none; }
+  .unlock-splash { animation: none; }
+}

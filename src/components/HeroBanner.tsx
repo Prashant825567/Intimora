@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Play, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import { isPremiumLabel } from "../utils/video-labels";
+import { mediaCrossOrigin } from "../services/media-credentials.mjs";
 
 interface HeroBannerProps {
   videos: Video[];
@@ -37,7 +38,7 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
         <img
           key={video.id}
           src={video.thumbnail}
-          crossOrigin="anonymous"
+          crossOrigin={mediaCrossOrigin(video.thumbnail)}
           referrerPolicy="no-referrer"
           alt={video.title}
           className="hero-banner__image"
