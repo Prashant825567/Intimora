@@ -244,3 +244,27 @@ Yeh bootstrap me (har request se pehle) lagao, aur thumbnails/stream routes par 
 PHP se direct baat nahi kar payenge (unke liye `PHP_PROXY_ORIGIN` fallback rakha hai).
 Aur agar PHP host apni cookie `SameSite=None` re-issue nahi karta, to flow proxy par
 gir jaayega.
+
+## Preflight-free account calls (auth)
+
+`OPTIONS` preflight me cookies **kabhi nahi** jaati (Fetch spec), isliye free host us
+preflight ko HTML challenge se answer karta hai → CORS fail → "Account unavailable".
+Frontend ab aise calls bhejta hai jinme preflight hi nahi hota:
+
+| Pehle | Ab |
+|---|---|
+| `Authorization: Bearer <token>` header | token **JSON body** me: `{"token":"…"}` |
+| `Content-Type: application/json` | `Content-Type: text/plain` (simple type) |
+| `GET /api/auth/me` | `POST /api/auth/me` (GET me body nahi) |
+| `credentials: "omit"` | `credentials: "include"` |
+| like/save POST JSON | same, `text/plain` + token body me |
+
+PHP side par: `php://input` padho (text/plain bhi wahin aata hai), `json_decode`,
+token `token`/`idToken`/`authToken`/`id_token` se, aur har response par CORS
+(`Access-Control-Allow-Origin: <exact origin>` + `Allow-Credentials: true`).
+`__unlock` wala SameSite=None fix bhi zaroori hai, kyunki request ke saath cookie
+jaani chahiye.
+
+Dhyan: `/api/videos/<id>/like` aur `/api/videos/<id>/save` bhi ab `text/plain` +
+token body me aate hain — in routes par bhi wahi `get_bearer_token()` aur
+`json_body()` chahiye (`active` field body me hota hai).

@@ -28,17 +28,22 @@ test("authenticated requests use the visitor's selected backend and pin video ac
   assert.equal(selections, 2);
   assert.equal(calls[1].url, `${backendA}/api/videos/video-1/like`);
   assert.equal(calls[1].method, "POST");
-  assert.equal(calls[1].body, "{}");
+  assert.deepEqual(JSON.parse(calls[1].body), { token }, "the token travels in the body");
   for (const call of calls) {
-    assert.equal(call.headers.Authorization, `Bearer ${token}`);
+    // No preflight: no Authorization header, no JSON content type, and the token
+    // never appears in a URL or a query string.
+    assert.equal(call.headers.Authorization, undefined);
+    assert.equal(call.headers["Content-Type"], "text/plain");
+    assert.equal(JSON.parse(call.body).token, token);
     assert.ok(!call.url.includes(token));
-    assert.equal(call.credentials, "omit");
+    assert.equal(call.method, "POST", "a GET cannot carry the token without a query string");
+    // The free host only knows the visitor through its own session cookie.
+    assert.equal(call.credentials, "include");
     assert.equal(call.cache, "no-store");
     assert.equal(call.mode, "cors");
     assert.equal(call.redirect, "error");
     assert.equal(call.referrerPolicy, "no-referrer");
   }
-  assert.equal(calls[1].headers["Content-Type"], "application/json");
   selection = backendA;
   assert.equal((await request("/api/auth/me", { token })).backend, backendA);
 });
@@ -64,8 +69,14 @@ test("tokens never leave the exact trusted origins or permitted account routes",
   for (const [route, method] of [
     ["/api/user/liked", "GET"], ["/api/user/saved", "GET"], ["/api/auth/me?token=x", "GET"],
     ["//evil.example/api/auth/me", "GET"], ["/api/admin", "GET"], ["/api/videos/../save", "POST"],
-    ["/api/videos/video-1/like", "GET"], ["/api/auth/me", "POST"],
+    ["/api/videos/video-1/like", "GET"], ["/api/auth/verify", "GET"],
   ]) await assert.rejects(request(route, { method, token }), generic);
+  // The account routes are POST now, and a POST that is allowed must not be
+  // refused just because the old call site did not name a method.
+  const postable = createAuthenticatedRequest({ selectBackend: async () => backendA, allowedBackends, fetcher: async () => Response.json({ ok: true, data: {} }) });
+  for (const [route, method] of [["/api/auth/me", undefined], ["/api/auth/me", "POST"], ["/api/user/referrals", "POST"], ["/api/auth/verify", "POST"]]) {
+    assert.equal((await postable(route, { method, token })).backend, backendA);
+  }
   await assert.rejects(request("/api/auth/me", { token: "bad\nAuthorization: secret" }), generic);
   assert.equal(calls, 0);
 });
@@ -93,4 +104,38 @@ test("account failures are generic except for the exact actionable validation co
   }
   const failing = createAuthenticatedRequest({ selectBackend: async () => { throw Error("secret https://private.example"); }, allowedBackends });
   await assert.rejects(failing("/api/auth/me", { token }), generic);
+});
+
+test("an HTML answer asks for the one-time unlock instead of a dead account screen", async () => {
+  const unlocks = [];
+  const request = createAuthenticatedRequest({
+    selectBackend: async () => backendA,
+    allowedBackends,
+    requestUnlock: (context) => unlocks.push(context),
+    fetcher: async () => new Response("<html><script>var a=toNumbers('00')</script></html>", {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    }),
+  });
+  await assert.rejects(request("/api/auth/me", { token }), generic);
+  assert.deepEqual(unlocks, [{ path: "/api/auth/me" }]);
+
+  const offline = createAuthenticatedRequest({
+    selectBackend: async () => backendA,
+    allowedBackends,
+    requestUnlock: (context) => unlocks.push(context),
+    fetcher: async () => { throw new TypeError("Failed to fetch"); },
+  });
+  await assert.rejects(offline("/api/user/referrals", { token }), generic);
+  assert.deepEqual(unlocks[1], { path: "/api/user/referrals" }, "a blocked or refused call is the same situation");
+
+  // A 401 is the server's own answer: no redirect is forced.
+  const unauthorized = createAuthenticatedRequest({
+    selectBackend: async () => backendA,
+    allowedBackends,
+    requestUnlock: (context) => unlocks.push(context),
+    fetcher: async () => Response.json({ ok: false, error: "Invalid token" }, { status: 401 }),
+  });
+  await assert.rejects(unauthorized("/api/auth/me", { token }), { name: "AccountRequestError", code: "unauthorized" });
+  assert.equal(unlocks.length, 2, "the server's own rejection does not trigger an unlock");
 });

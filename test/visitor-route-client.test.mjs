@@ -144,7 +144,9 @@ test("pinned requests use their original backend while a new selection is discov
   const share = calls.find((call) => call.url === `${backendA}/api/videos/video-1/share`);
   assert.equal(share.method, "POST");
   assert.equal(share.body, "{}");
-  assert.equal(share.headers["Content-Type"], "application/json");
+  // A simple content type keeps this POST out of the preflight path, which is the
+  // only kind a cookie-less host check can answer.
+  assert.equal(share.headers["Content-Type"], "text/plain");
   assert.ok(calls.some((call) => call.url === `${backendA}/api/videos?cursor=next%20page`));
 });
 
