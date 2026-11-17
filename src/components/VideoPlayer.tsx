@@ -70,12 +70,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // Whether playback was asked for at all: a silent reload must not start a
   // video that nobody wanted to watch.
   const wantsPlay = useRef(false);
+  const playingRef = useRef(false);
+  // A click arrives together with the pointer move that precedes it; without
+  // this the move would re-show the controls the click just hid.
+  const controlsToggledAt = useRef(0);
   // One pending reload at a time. It is deliberately not tied to playAttempt:
   // a second play request (StrictMode, a fast double tap) must not cancel it.
   const recoveryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const adState = useRef<{ status: "idle" | "loading" | "deciding" | "done"; promise: Promise<VastAd | null> | null }>({ status: "idle", promise: null });
 
   useEffect(() => { adPlayingRef.current = Boolean(adPlaying); }, [adPlaying]);
+  useEffect(() => { playingRef.current = playing; }, [playing]);
 
   // A different video starts with a fresh budget.
   useEffect(() => {
@@ -126,10 +131,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     updateBuffered(v);
   };
 
+  // Controls stay while paused; while playing they fade after a few seconds of
+  // no movement. Nothing here ever touches playback.
+  const scheduleControlsHide = () => {
+    if (controlsTimer.current) clearTimeout(controlsTimer.current);
+    controlsTimer.current = null;
+    if (!playingRef.current || adPlayingRef.current) return;
+    controlsTimer.current = setTimeout(() => setShowControls(false), 3000);
+  };
+
   const resetControlsTimer = () => {
     setShowControls(true);
-    if (controlsTimer.current) clearTimeout(controlsTimer.current);
-    controlsTimer.current = setTimeout(() => setShowControls(false), 3000);
+    scheduleControlsHide();
+  };
+
+  // A click on the picture is for the controls only: it never pauses, because
+  // pausing is the pause button's job (and an accidental tap mid-video is
+  // exactly what the visitor does not want).
+  const toggleControls = () => {
+    if (adPlayingRef.current) return;
+    controlsToggledAt.current = Date.now();
+    setShowControls((visible) => {
+      const next = !visible;
+      if (next) scheduleControlsHide();
+      else if (controlsTimer.current) { clearTimeout(controlsTimer.current); controlsTimer.current = null; }
+      return next;
+    });
   };
 
   // The recovery is exactly what the "Try again" button does — load(), then play
@@ -329,8 +356,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
           id="player-container"
           className="relative bg-black rounded-xl overflow-hidden group"
           style={{ aspectRatio: "16/9", boxShadow: "0 0 60px rgba(0,0,0,0.9), 0 0 0 1px rgba(201,168,76,0.2)" }}
-          onMouseMove={resetControlsTimer}
-          onMouseLeave={() => playing && setShowControls(false)}
+          onMouseMove={() => { if (Date.now() - controlsToggledAt.current > 250) resetControlsTimer(); }}
+          onMouseLeave={() => { if (playing && !adPlaying) setShowControls(false); }}
         >
           <video
             ref={videoRef}
@@ -340,14 +367,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             preload={preload}
             playsInline
             className="w-full h-full object-contain"
-            onClick={togglePlay}
-            onPlay={() => { setPlaying(true); setPlaybackError(""); }}
-            onPlaying={() => { setPlaying(true); setBuffering(false); setPlaybackError(""); }}
+            onClick={toggleControls}
+            onPlay={() => { playingRef.current = true; setPlaying(true); setPlaybackError(""); scheduleControlsHide(); }}
+            onPlaying={() => { playingRef.current = true; setPlaying(true); setBuffering(false); setPlaybackError(""); }}
             onCanPlay={(e) => { if (!e.currentTarget.paused) setBuffering(false); }}
             onWaiting={(e) => { if (!e.currentTarget.paused && !e.currentTarget.ended) setBuffering(true); }}
             onStalled={(e) => { if (!e.currentTarget.paused && e.currentTarget.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) setBuffering(true); }}
-            onPause={() => { playAttempt.current += 1; setPlaying(false); setBuffering(false); }}
-            onEnded={() => { setPlaying(false); setBuffering(false); setShowControls(true); }}
+            onPause={() => { playingRef.current = false; playAttempt.current += 1; setPlaying(false); setBuffering(false); setShowControls(true); }}
+            onEnded={() => { playingRef.current = false; setPlaying(false); setBuffering(false); setShowControls(true); }}
             onError={(e) => {
               playAttempt.current += 1;
               setPlaying(false);
@@ -404,7 +431,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
 
           {/* Top controls */}
           <div
-            className={`video-player__top absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${adPlaying ? "opacity-0 pointer-events-none" : showControls || !playing ? "opacity-100" : "opacity-0"}`}
+            className={`video-player__top absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${adPlaying || !showControls ? "opacity-0 pointer-events-none" : "opacity-100"}`}
             style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)" }}
           >
             <div className="flex-1 min-w-0">
@@ -423,7 +450,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
 
           {/* Bottom controls */}
           <div
-            className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${adPlaying ? "opacity-0 pointer-events-none" : showControls || !playing ? "opacity-100" : "opacity-0"}`}
+            data-controls={adPlaying || !showControls ? "hidden" : "visible"}
+            className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${adPlaying || !showControls ? "opacity-0 pointer-events-none" : "opacity-100"}`}
             style={{ background: "linear-gradient(to top, rgba(0,0,0,0.9), transparent)" }}
           >
             {/* Progress bar */}
