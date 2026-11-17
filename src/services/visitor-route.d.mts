@@ -9,6 +9,7 @@ export interface VisitorRequestOptions {
   requestUnlock?: (context: { path: string; challenge: boolean }) => boolean;
   onTarget?: (target: { backend: string; php: boolean }) => void;
   onPhpSuccess?: () => void;
+  onOutcome?: (outcome: { path: string; php: boolean; ok: boolean; challenge: boolean; blocked: boolean; status?: number }) => void;
 }
 
 export interface VisitorTarget {

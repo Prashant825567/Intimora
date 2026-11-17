@@ -165,6 +165,7 @@ test("a PHP backend gets the preflight-free shape, an ordinary one keeps the bea
   assert.equal(me.headers["Content-Type"], "text/plain", "a simple content type: no preflight");
   assert.equal(JSON.parse(me.body).token, token);
   assert.equal(me.credentials, "include", "the host's session cookie has to travel");
+  assert.equal(me.redirect, "follow", "the host may redirect to its own check page first");
   assert.ok(!me.url.includes(token), "the token never appears in a URL");
 
   const plainCall = [];

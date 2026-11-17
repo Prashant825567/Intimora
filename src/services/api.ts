@@ -1,7 +1,17 @@
 import type { Video } from "../data/mockVideos";
 import { createVisitorRequest } from "./visitor-route.mjs";
 import { PHP_ORIGIN_OVERRIDE } from "../config/php-backend.mjs";
-import { activeTarget, confirmPhpSession, phpSessionPending, requestPhpUnlock, resetPhpSession, setActiveTarget } from "./php-session.mjs";
+import {
+  activeTarget,
+  confirmPhpSession,
+  notePhpFailure,
+  phpFailureReason,
+  phpSessionPending,
+  requestPhpUnlock,
+  resetPhpSession,
+  setActiveTarget,
+} from "./php-session.mjs";
+import { recordDiagnostic } from "./diagnostics.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
 const visitor = createVisitorRequest({
@@ -17,6 +27,12 @@ const visitor = createVisitorRequest({
   requestUnlock: requestPhpUnlock,
   // A PHP answer that arrived means the cookie works; the window goes quiet.
   onPhpSuccess: confirmPhpSession,
+  // Every direct call reports how it ended, so the failure screen can name its
+  // reason and the console trace can be pasted as-is.
+  onOutcome: (outcome: { path: string; php: boolean; ok: boolean; challenge: boolean; blocked: boolean; status?: number }) => {
+    recordDiagnostic("request", outcome);
+    if (!outcome.ok) notePhpFailure(outcome);
+  },
 });
 const unavailable = () => new Error("Content is temporarily unavailable");
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -181,6 +197,10 @@ const formatDate = (createdAt: number | undefined): string => {
 async function catalog(path: string, pinnedBackend?: string): Promise<CatalogResponse> {
   const { body, backend, invalidate } = await visitor.requestJson(path, undefined, pinnedBackend);
   if (!Array.isArray(body?.data?.videos)) {
+    // The server answered, but not in the shape this client reads. That is a
+    // different problem from a check page, so it is reported as one.
+    recordDiagnostic("shape", { path });
+    notePhpFailure({ shape: true, path });
     invalidate();
     throw unavailable();
   }
@@ -198,6 +218,9 @@ export const retryPhpSession = resetPhpSession;
 // True when the visitor is on a PHP host that already spent its unlock budget
 // and still has not been let in — the honest reason for an "unavailable" screen.
 export const phpConnectionBlocked = () => activeTarget().php && !phpSessionPending();
+// The reason behind an "unavailable" screen on a PHP host, for the message on
+// screen and for `__intimoraDiag()` in the console.
+export const phpFailure = phpFailureReason;
 // The transport (backend + `php` flag) for the account calls.
 export const primeBackendTarget = () => visitor.selectTarget();
 export const resolveBackendTarget = (pinned?: string) => visitor.resolveTarget(pinned);
