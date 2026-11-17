@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PHP_ORIGIN_OVERRIDE, UNLOCK_FRESH_MS } from "../src/config/php-backend.mjs";
-import { setPhpMediaOrigin } from "../src/services/media-credentials.mjs";
-import { mediaCrossOrigin } from "../src/services/media-credentials.mjs";
+import {
+  PHP_ORIGIN_OVERRIDE,
+  UNLOCK_FRESH_MS,
+  UNLOCK_MAX_TRIES,
+  UNLOCK_MIN_GAP_MS,
+} from "../src/config/php-backend.mjs";
+import { setPhpMediaOrigin, mediaCrossOrigin } from "../src/services/media-credentials.mjs";
 import {
   completeUnlockReturn,
+  confirmUnlockSession,
   isChallengeContentType,
   markUnlockAttempt,
   readUnlockState,
@@ -16,7 +21,6 @@ import { createVisitorRequest } from "../src/services/visitor-route.mjs";
 
 const discoveryUrl = "https://discovery.example/api/get-server";
 const php = "https://intimora-api3.site.je";
-const proxy = "https://proxy.example";
 
 function memoryStorage() {
   const map = new Map();
@@ -37,20 +41,53 @@ function fakeDocument() {
   };
 }
 
-test("the unlock is requested at most once per session window", () => {
+test("an unconfirmed window retries a bounded number of times, then stops", () => {
   const storage = memoryStorage();
   const now = 1_700_000_000_000;
-  assert.equal(shouldRequestUnlock({ storage, now, freshMs: UNLOCK_FRESH_MS }), true, "first visit may ask");
+  const guard = (at) => shouldRequestUnlock({ storage, now: at, freshMs: UNLOCK_FRESH_MS });
+
+  assert.equal(guard(now), true, "first visit may ask");
+  for (let tryIndex = 1; tryIndex <= UNLOCK_MAX_TRIES; tryIndex += 1) {
+    const at = now + tryIndex * (UNLOCK_MIN_GAP_MS + 1_000);
+    markUnlockAttempt(storage, { now: at });
+    assert.equal(readUnlockState(storage).tries, tryIndex);
+    assert.equal(guard(at + UNLOCK_MIN_GAP_MS + 1_000), tryIndex < UNLOCK_MAX_TRIES, `try ${tryIndex}`);
+  }
+  const lastTry = now + UNLOCK_MAX_TRIES * (UNLOCK_MIN_GAP_MS + 1_000);
+  assert.equal(
+    guard(lastTry + UNLOCK_FRESH_MS + 1),
+    true,
+    "a new window is allowed once the host's session would have expired",
+  );
+});
+
+test("two redirects never follow each other inside the minimum gap", () => {
+  const storage = memoryStorage();
+  const now = 1_700_000_000_000;
   markUnlockAttempt(storage, { now });
-  assert.equal(shouldRequestUnlock({ storage, now: now + 60_000, freshMs: UNLOCK_FRESH_MS }), false, "not twice in a row");
+  assert.equal(shouldRequestUnlock({ storage, now: now + 500, freshMs: UNLOCK_FRESH_MS }), false);
+  assert.equal(shouldRequestUnlock({ storage, now: now + UNLOCK_MIN_GAP_MS + 1, freshMs: UNLOCK_FRESH_MS }), true);
+});
+
+test("a confirmed session keeps the window quiet for the host's lifetime", () => {
+  const storage = memoryStorage();
+  const now = 1_700_000_000_000;
+  confirmUnlockSession(storage, { now });
+  assert.deepEqual(readUnlockState(storage), { at: now, tries: 0, ok: true });
+  assert.equal(shouldRequestUnlock({ storage, now: now + 60_000, freshMs: UNLOCK_FRESH_MS }), false);
   assert.equal(
     shouldRequestUnlock({ storage, now: now + UNLOCK_FRESH_MS + 1, freshMs: UNLOCK_FRESH_MS }),
     true,
-    "a new attempt is allowed after the host's session would have expired",
+    "the cookie is re-earned before the host's six hours run out",
   );
+});
+
+test("a host that refuses is never retried", () => {
+  const storage = memoryStorage();
+  const now = 1_700_000_000_000;
   markUnlockAttempt(storage, { now, blocked: true });
-  assert.equal(shouldRequestUnlock({ storage, now: now + UNLOCK_FRESH_MS * 3, freshMs: UNLOCK_FRESH_MS }), false, "a refused host is not retried forever");
-  assert.deepEqual(readUnlockState(storage), { at: now, blocked: true });
+  assert.equal(shouldRequestUnlock({ storage, now: now + UNLOCK_FRESH_MS * 3, freshMs: UNLOCK_FRESH_MS }), false);
+  assert.deepEqual(readUnlockState(storage), { at: now, tries: 1, ok: false, blocked: true });
 });
 
 test("the unlock URL carries the visitor back to the exact page", () => {
@@ -96,19 +133,21 @@ test("requesting the unlock shows a splash and only then navigates", () => {
     navigate: (url) => navigations.push(url),
     setTimeoutImpl: (fn) => { fn(); return 1; },
   });
-  assert.equal(second, false, "a second redirect cannot happen in the same window");
+  assert.equal(second, false, "a second redirect cannot happen inside the gap");
   assert.equal(navigations.length, 1);
 });
 
-test("coming back from the unlock page cleans the address bar", () => {
+test("coming back from the unlock page cleans the address bar without spending an attempt", () => {
+  const storage = memoryStorage();
   const replaced = [];
   const returned = completeUnlockReturn({
     location: { pathname: "/watch/local-1", search: "?__unlocked=1&x=2", hash: "#t=10" },
     history: { state: { a: 1 }, replaceState: (...args) => replaced.push(args) },
-    storage: memoryStorage(),
+    storage,
   });
   assert.equal(returned, true);
   assert.deepEqual(replaced[0], [{ a: 1 }, "", "/watch/local-1?x=2#t=10"]);
+  assert.deepEqual(readUnlockState(storage), {}, "only a real PHP answer confirms the session");
   assert.equal(
     completeUnlockReturn({ location: { pathname: "/", search: "", hash: "" }, history: { replaceState() {} }, storage: null }),
     false,
@@ -122,7 +161,7 @@ test("an HTML answer is the host's check, not an error to hide", () => {
   assert.equal(isChallengeContentType(null), false);
 });
 
-test("the load balancer decides the transport: a PHP host is called with cookies", async () => {
+test("the load balancer decides the transport: a PHP host is called directly with cookies", async () => {
   const calls = [];
   const visitor = createVisitorRequest({
     discoveryUrl,
@@ -141,19 +180,18 @@ test("the load balancer decides the transport: a PHP host is called with cookies
   assert.equal(calls[1].init.credentials, "include", "the session cookie must be allowed to travel");
 });
 
-test("an ordinary backend is untouched: no cookies, no unlock, no proxy", async () => {
+test("an ordinary backend is untouched: no cookies, no unlock, no extra hop", async () => {
   const calls = [];
   const unlocks = [];
   const plain = "https://api-intimora.vercel.app";
   const visitor = createVisitorRequest({
     discoveryUrl,
-    proxyBackend: proxy,
     requestUnlock: (context) => { unlocks.push(context); return true; },
     fetcher: async (url, init) => {
       calls.push({ url, init });
       if (url === discoveryUrl) return Response.json({ ok: true, data: { server: plain, php: false } });
       if (url.startsWith(plain)) return new Response("nope", { status: 500 });
-      return Response.json({ ok: true, data: { videos: [] } });
+      throw new Error(`unexpected ${url}`);
     },
     storage: null,
     reuseStoredSelection: false,
@@ -161,7 +199,7 @@ test("an ordinary backend is untouched: no cookies, no unlock, no proxy", async 
   await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
   assert.equal(calls[1].init.credentials, "omit", "an ordinary API stays credential-free");
   assert.equal(unlocks.length, 0, "no redirect for a backend that has no browser check");
-  assert.ok(!calls.some((call) => call.url.startsWith(proxy)), "and no proxy hop either");
+  assert.equal(calls.length, 2, "and no second call to anywhere else");
 });
 
 test("a discovery answer without the flag is treated as an ordinary backend", async () => {
@@ -201,25 +239,36 @@ test("a direct call that hits the check triggers one unlock instead of an error 
   assert.equal(unlocks[0].path, "/api/videos?limit=5");
 });
 
-test("when the unlock window is spent, the proxy answers instead", async () => {
-  const seen = [];
+test("a PHP answer that arrived proves the cookie and marks the session", async () => {
+  const confirmed = [];
   const visitor = createVisitorRequest({
     discoveryUrl,
-    proxyBackend: proxy,
+    onPhpSuccess: () => confirmed.push("ok"),
     fetcher: async (url) => {
-      seen.push(url);
       if (url === discoveryUrl) return Response.json({ ok: true, data: { server: php, php: true } });
-      if (url.startsWith(php)) throw new Error("CORS");
-      return Response.json({ ok: true, data: { videos: [{ id: "via-proxy" }] } });
+      return Response.json({ ok: true, data: { videos: [] } });
     },
-    requestUnlock: () => false,
     storage: null,
     reuseStoredSelection: false,
   });
-  const result = await visitor.requestJson("/api/videos?limit=5");
-  assert.equal(result.backend, proxy);
-  assert.equal(result.body.data.videos[0].id, "via-proxy");
-  assert.ok(seen.some((url) => url.startsWith(php)), "the direct call was tried first");
+  await visitor.requestJson("/api/videos?limit=5");
+  assert.deepEqual(confirmed, ["ok"]);
+});
+
+test("an ordinary backend never claims the PHP session", async () => {
+  const confirmed = [];
+  const visitor = createVisitorRequest({
+    discoveryUrl,
+    onPhpSuccess: () => confirmed.push("ok"),
+    fetcher: async (url) => {
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: "https://api-intimora.vercel.app", php: false } });
+      return Response.json({ ok: true, data: { videos: [] } });
+    },
+    storage: null,
+    reuseStoredSelection: false,
+  });
+  await visitor.requestJson("/api/videos?limit=5");
+  assert.deepEqual(confirmed, []);
 });
 
 test("media from the PHP host drops the CORS attribute so the cookie still goes", () => {

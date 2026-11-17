@@ -1,7 +1,7 @@
 import type { Video } from "../data/mockVideos";
 import { createVisitorRequest } from "./visitor-route.mjs";
-import { PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN } from "../config/php-backend.mjs";
-import { requestPhpUnlock, setActiveTarget } from "./php-session.mjs";
+import { PHP_ORIGIN_OVERRIDE } from "../config/php-backend.mjs";
+import { activeTarget, confirmPhpSession, phpSessionPending, requestPhpUnlock, resetPhpSession, setActiveTarget } from "./php-session.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
 const visitor = createVisitorRequest({
@@ -9,12 +9,14 @@ const visitor = createVisitorRequest({
   // The load balancer decides everything: its `php` flag selects the transport.
   // PHP_ORIGIN_OVERRIDE is empty in normal use; it only pins a host for testing.
   backendOverride: PHP_ORIGIN_OVERRIDE,
-  proxyBackend: PHP_PROXY_ORIGIN,
   // Remembers which backend the visitor is on, including whether it is a PHP
   // host, so media and account calls follow the same rules.
   onTarget: setActiveTarget,
-  // Only a PHP host can ask for this: one navigation through its check page.
+  // Only a PHP host can ask for this: one navigation through its check page,
+  // with no proxy in between.
   requestUnlock: requestPhpUnlock,
+  // A PHP answer that arrived means the cookie works; the window goes quiet.
+  onPhpSuccess: confirmPhpSession,
 });
 const unavailable = () => new Error("Content is temporarily unavailable");
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -191,6 +193,11 @@ async function catalog(path: string, pinnedBackend?: string): Promise<CatalogRes
 
 // Start discovery when the visitor arrives, including while the age gate is open.
 export const primeBackendSelection = () => visitor.selectBackend();
+// The visitor pressed "Retry Connection": give the PHP unlock its budget back.
+export const retryPhpSession = resetPhpSession;
+// True when the visitor is on a PHP host that already spent its unlock budget
+// and still has not been let in — the honest reason for an "unavailable" screen.
+export const phpConnectionBlocked = () => activeTarget().php && !phpSessionPending();
 // The transport (backend + `php` flag) for the account calls.
 export const primeBackendTarget = () => visitor.selectTarget();
 export const resolveBackendTarget = (pinned?: string) => visitor.resolveTarget(pinned);

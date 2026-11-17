@@ -6,9 +6,9 @@ export interface VisitorRequestOptions {
   monotonicNow?: () => number;
   reuseStoredSelection?: boolean;
   backendOverride?: string;
-  proxyBackend?: string;
   requestUnlock?: (context: { path: string; challenge: boolean }) => boolean;
   onTarget?: (target: { backend: string; php: boolean }) => void;
+  onPhpSuccess?: () => void;
 }
 
 export interface VisitorTarget {

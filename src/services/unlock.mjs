@@ -10,6 +10,11 @@
 // React so it can run before the app mounts.
 const STORAGE_KEY = "intimora_unlock_v1";
 export const UNLOCK_QUERY = "__unlocked";
+// The host's own check page is the only thing that can hand out its cookie, so
+// this flow happens in the browser, once, and without any proxy in between.
+const MIN_GAP_MS = 4_000;
+const MAX_TRIES = 3;
+const CLOCK_SLACK_MS = 60_000;
 
 function safely(action, fallback = null) {
   try {
@@ -32,10 +37,27 @@ export function readUnlockState(storage) {
   }
 }
 
-export function markUnlockAttempt(storage, { now = Date.now(), blocked = false } = {}) {
+function write(storage, state) {
   const store = storage === undefined ? safely(() => globalThis.localStorage) : storage;
   if (!store) return;
-  safely(() => store.setItem(STORAGE_KEY, JSON.stringify({ at: now, blocked })));
+  safely(() => store.setItem(STORAGE_KEY, JSON.stringify(state)));
+}
+
+// Remembers that the browser left for the check page. `tries` counts the
+// redirects inside one window, so a host that never confirms a session is
+// dropped after a few attempts instead of bouncing the visitor forever.
+export function markUnlockAttempt(storage, { now = Date.now(), blocked = false, freshMs = 5.5 * 60 * 60 * 1000 } = {}) {
+  const state = readUnlockState(storage);
+  const at = Number(state.at);
+  const insideWindow = Number.isFinite(at) && at > 0 && now >= at - CLOCK_SLACK_MS && now - at <= freshMs;
+  const tries = insideWindow ? (Number(state.tries) || 0) + 1 : 1;
+  write(storage, { at: now, tries, ok: false, ...(blocked ? { blocked: true } : {}) });
+}
+
+// The first PHP answer that actually arrived proves the cookie works; from then
+// on this window is quiet until the host's six-hour session would have expired.
+export function confirmUnlockSession(storage, { now = Date.now() } = {}) {
+  write(storage, { at: now, tries: 0, ok: true });
 }
 
 export function clearUnlockAttempt(storage) {
@@ -43,14 +65,21 @@ export function clearUnlockAttempt(storage) {
   safely(() => store?.removeItem(STORAGE_KEY));
 }
 
-// True when a new unlock is worth asking for: never twice inside the window, and
-// never again once the host has refused to let us through.
-export function shouldRequestUnlock({ storage, now = Date.now(), freshMs } = {}) {
+// True when a new unlock is worth asking for: a confirmed session lasts the
+// host's window, an unconfirmed one is retried a bounded number of times with a
+// minimum gap so the visitor never sees a redirect loop.
+export function shouldRequestUnlock({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000, maxTries = MAX_TRIES, minGapMs = MIN_GAP_MS } = {}) {
   const state = readUnlockState(storage);
   if (state.blocked === true) return false;
   const at = Number(state.at);
+  // No attempt yet, or a clock that jumped backwards: a fresh one is allowed.
   if (!Number.isFinite(at) || at <= 0) return true;
-  return now - at > freshMs || now < at - 60_000;
+  if (now < at - CLOCK_SLACK_MS) return true;
+  if (state.ok === true) return now - at > freshMs;
+  if (now - at > freshMs) return true;
+  if (minGapMs > 0 && now - at < minGapMs) return false;
+  const tries = Number(state.tries);
+  return !(Number.isFinite(tries) && tries >= maxTries);
 }
 
 export function isChallengeContentType(contentType) {
@@ -104,23 +133,26 @@ export function requestUnlockNavigation({
   storage,
   now = Date.now(),
   freshMs = 5.5 * 60 * 60 * 1000,
+  maxTries = MAX_TRIES,
+  minGapMs = MIN_GAP_MS,
   splashMs = 700,
   document: doc = globalThis.document,
   navigate = (url) => { globalThis.location.assign(url); },
   setTimeoutImpl = (fn, ms) => setTimeout(fn, ms),
 } = {}) {
-  if (!shouldRequestUnlock({ storage, now, freshMs })) return false;
+  if (!shouldRequestUnlock({ storage, now, freshMs, maxTries, minGapMs })) return false;
   const url = unlockUrl(phpOrigin, href);
   if (!url) return false;
-  markUnlockAttempt(storage, { now });
+  markUnlockAttempt(storage, { now, freshMs });
   showUnlockSplash({ document: doc });
   // Give the splash a frame or two so the visitor never sees a frozen page.
   setTimeoutImpl(() => navigate(url), Math.max(0, splashMs));
   return true;
 }
 
-// On the way back the flag is removed from the address bar and the guard is
-// cleared, so the next six hours are normal direct calls.
+// On the way back the flag is removed from the address bar and the splash goes
+// away. The guard is left alone: only a PHP answer that actually arrived marks
+// the session as confirmed (see confirmUnlockSession).
 export function completeUnlockReturn({
   location: loc = globalThis.location,
   history: hist = globalThis.history,
@@ -128,7 +160,6 @@ export function completeUnlockReturn({
   now = Date.now(),
 } = {}) {
   if (!loc?.search?.includes(UNLOCK_QUERY)) return false;
-  markUnlockAttempt(storage, { now });
   const params = new URLSearchParams(loc.search);
   params.delete(UNLOCK_QUERY);
   const search = params.toString();

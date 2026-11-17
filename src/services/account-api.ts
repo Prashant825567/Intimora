@@ -2,7 +2,7 @@ import type { FirebaseUser } from "./firebase";
 import { primeBackendSelection, resolveBackendTarget } from "./api";
 import { AccountRequestError, createAuthenticatedRequest } from "./auth-request.mjs";
 import { readLikeCount } from "./like-counts.mjs";
-import { PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN } from "../config/php-backend.mjs";
+import { PHP_ORIGIN_OVERRIDE } from "../config/php-backend.mjs";
 import { activeTarget, requestPhpUnlock } from "./php-session.mjs";
 
 const request = createAuthenticatedRequest({
@@ -10,7 +10,7 @@ const request = createAuthenticatedRequest({
   // A token is only ever sent to a trusted origin. The build-time allowlist covers
   // the known backends; the host the load balancer names is trusted as well when
   // it flags it as a PHP host (it cannot be known at build time).
-  allowedBackends: [...new Set([...__INTIMORA_AUTH_BACKENDS__, PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN].filter(Boolean))],
+  allowedBackends: [...new Set([...__INTIMORA_AUTH_BACKENDS__, PHP_ORIGIN_OVERRIDE].filter(Boolean))],
   trustedPhpBackend: () => activeTarget().backend,
   resolveTarget: resolveBackendTarget,
   // The host's browser check answers with HTML instead of JSON until its session

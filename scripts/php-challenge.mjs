@@ -1,37 +1,22 @@
-// Intimora API proxy for a PHP backend on free hosting (InfinityFree).
+// The scripted browser check free PHP hosts (InfinityFree and friends) put in
+// front of every request, implemented as a plain-JavaScript client.
 //
-// THE PROBLEM
-// Free hosting puts a scripted JavaScript check in front of every request: the
-// host answers with an HTML page holding three hex blobs and a line like
+// THE CHECK
+// The host answers with an HTML page holding three hex blobs and a line like
 //     document.cookie = "__test=" + toHex(slowAES.decrypt(c, 2, a, b))
 // A browser navigates, the script runs, the cookie is stored and the page
-// reloads. An XHR cannot do any of that: the response has no CORS header, so a
-// page on intimora.new.tg cannot even read the HTML, let alone run it, and the
-// `__test` cookie would not be sent cross-site anyway (SameSite=Lax).
+// reloads.
 //
-// THE FIX
-// This Worker does the browser's part server-side: it decrypts the challenge,
-// keeps the `__test` cookie until it expires, forwards the real API request,
-// retries once when the host hands out a fresh challenge, and adds the CORS
-// headers the site needs. The site never talks to the PHP host at all.
+// WHY THIS FILE EXISTS
+// The site does not use a proxy: a browser on intimora.new.tg talks to the PHP
+// host itself, with the host's own cookie, and `src/services/unlock.mjs` sends
+// the visitor through the host's `/__unlock` page when the check answers
+// instead of JSON. This file is the terminal-side equivalent, used by
+// `scripts/php-api-check.mjs` and the tests to verify a PHP backend without a
+// browser: it decrypts the challenge, keeps the cookie and replays the request.
 //
-// DEPLOY (one paste, no local tooling)
-// 1. Cloudflare dashboard → Workers → Edit code → replace everything with this
-//    file → Deploy.
-// 2. Settings → Variables: PHP_ORIGINS = https://intimora-api2.site.je (comma
-//    separated list allowed, the next origin is used when one fails).
-//    Optional: ALLOWED_ORIGINS = https://intimora.new.tg,https://www.intimora.new.tg
-// 3. Open https://<worker-host>/__proxy-health in a browser: it prints whether
-//    the challenge was solved, whether the catalogue answered and how many
-//    videos came back. That is the whole test — nothing to run locally.
-// 4. Point the discovery endpoint at the Worker, i.e. /api/get-server answers
-//    { ok: true, data: { server: "<worker origin>" } } — this file already does
-//    that by itself. Best deployment: a Worker route on `intimora.new.tg/api/*`,
-//    which makes every call same-origin (no CORS at all). The workers.dev URL
-//    works too; this file then adds the CORS headers.
-//
-// This file has no imports on purpose: it is the complete Worker source.
-
+// There is no import in this file so it can also be run as a single-file
+// helper; nothing in `src/` imports it.
 /* ------------------------------------------------------------------ *
  * AES-128-CBC decryption, no padding
  *

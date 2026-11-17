@@ -19,7 +19,7 @@ import type { LiveLikes } from "./hooks/useLiveLikes";
 import type { Video } from "./data/mockVideos";
 import type { BrowseView } from "./types/navigation";
 import { TrendingUp, Flame, Sparkles, ChevronRight, Loader2, Upload, Wifi, WifiOff, Grid2X2 } from "lucide-react";
-import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoToVideo, primeBackendSelection } from "./services/api";
+import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, retryPhpSession } from "./services/api";
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
@@ -345,6 +345,9 @@ function App() {
   }, [ageVerified, initialLoading, apiError, submittedQuery, activeView, catalogStatus, hasMoreVisible, visibleCount, currentFeed.length]);
 
   const retryCatalog = () => {
+    // A PHP host that never confirmed its cookie gets its unlock budget back,
+    // so "Retry Connection" is a real retry and not a dead end for six hours.
+    retryPhpSession();
     firstPageRequest.current = null;
     setCatalogStatus("loading");
     setInitialLoading(true);
@@ -509,7 +512,11 @@ function App() {
           <div className="flex flex-col items-center justify-center py-32">
             <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6" style={{ background: "rgba(239,68,68,0.1)", border: "2px solid rgba(239,68,68,0.3)" }}><WifiOff className="w-10 h-10 text-red-500" /></div>
             <h2 className="text-white text-2xl font-bold mb-2">Content Unavailable</h2>
-            <p className="text-gray-500 text-sm mb-6 text-center">We could not load content right now. Please try again.</p>
+            <p className="text-gray-500 text-sm mb-6 text-center">
+              {phpConnectionBlocked()
+                ? "This server could not complete its connection check. Tap retry to ask once more."
+                : "We could not load content right now. Please try again."}
+            </p>
             <button type="button" onClick={retryCatalog} className="px-6 py-3 rounded-full font-bold text-sm transition-all hover:scale-105" style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}>🔄 Retry Connection</button>
           </div>
         ) : activeView === "Home" && videos.length === 0 && catalogStatus === "complete" ? (
