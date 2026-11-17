@@ -60,7 +60,11 @@ export function createVisitorRequest(options = {}) {
   // Called when a direct call hits the host's HTML check. Returns true when the
   // browser was sent to the unlock page and this request should stop waiting.
   const requestUnlock = typeof options.requestUnlock === "function" ? options.requestUnlock : null;
-  const credentials = backendOverride ? "include" : "omit";
+  // Told whenever the visitor's target is (re)selected, so media and the unlock
+  // flow know whether this backend is the kind behind a browser check.
+  const onTarget = typeof options.onTarget === "function" ? options.onTarget : null;
+  // A pinned origin is treated as PHP, because that is what it is used for.
+  const pinnedPhp = Boolean(backendOverride);
   const fetcher = options.fetcher ?? ((url, init) => fetch(url, init));
   const now = options.now ?? Date.now;
   const monotonicNow = options.monotonicNow ?? (() => globalThis.performance?.now?.() ?? now());
@@ -92,7 +96,7 @@ export function createVisitorRequest(options = {}) {
           if (backend && backend === entry.backend && Number.isFinite(entry.selectedAt)
             && Number.isFinite(entry.expiresAt) && entry.selectedAt <= timestamp
             && entry.expiresAt <= entry.selectedAt + MAX_TTL_MS && entry.expiresAt > timestamp) {
-            cached = { backend, selectedAt: entry.selectedAt, expiresAt: entry.expiresAt };
+            cached = { backend, php: entry.php === true, selectedAt: entry.selectedAt, expiresAt: entry.expiresAt };
             monotonicDeadline = monotonicNow() + Math.min(entry.expiresAt - timestamp, MAX_TTL_MS);
           }
         } catch { /* Keep an in-memory cache when storage is unavailable. */ }
@@ -105,17 +109,17 @@ export function createVisitorRequest(options = {}) {
     return cached;
   }
 
-  function save(backend, selectedAt) {
+  function save(backend, selectedAt, php = false) {
     const timestamp = now();
     const expiresAt = selectedAt + MAX_TTL_MS;
     if (!Number.isFinite(timestamp) || timestamp < selectedAt || timestamp >= expiresAt) throw new Error(UNAVAILABLE);
-    cached = { backend, selectedAt, expiresAt };
+    cached = { backend, php: php === true, selectedAt, expiresAt };
     monotonicDeadline = monotonicNow() + (expiresAt - timestamp);
     generation += 1;
     try { getStorage()?.setItem(STORAGE_KEY, JSON.stringify(cached)); } catch { /* In-memory selection still works. */ }
   }
 
-  async function readJson(url, method, { signal, counts = false } = {}) {
+  async function readJson(url, method, { signal, counts = false, php = false } = {}) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) abort();
@@ -129,9 +133,9 @@ export function createVisitorRequest(options = {}) {
         // without cookies with its HTML check instead of JSON.
         ...(method === "POST" ? { headers: { "Content-Type": "text/plain" }, body: "{}" } : {}),
         mode: "cors",
-        // Cookies only travel to a pinned PHP host; discovery backends stay
-        // credential-free exactly as before.
-        credentials,
+        // Cookies travel only to a backend the load balancer flagged as PHP; an
+        // ordinary backend stays credential-free exactly as before.
+        credentials: php ? "include" : "omit",
         referrerPolicy: "no-referrer",
         cache: "no-store",
         redirect: "error",
@@ -183,12 +187,20 @@ export function createVisitorRequest(options = {}) {
     }
   }
 
-  async function selectBackend() {
+  function announce(target) {
+    if (onTarget) onTarget(target);
+    return target;
+  }
+
+  // The load balancer decides the transport: `php: true` means the server hides
+  // its API behind a cookie-based browser check, so only that case needs
+  // credentials, the one-time unlock and the proxy fallback.
+  async function selectTarget() {
     // A pinned origin skips discovery entirely (and never caches a selection).
-    if (backendOverride) return backendOverride;
+    if (backendOverride) return announce({ backend: backendOverride, php: pinnedPhp });
     const selection = current();
-    if (selection) return selection.backend;
-    if (bootstrap) return bootstrap;
+    if (selection) return announce({ backend: selection.backend, php: selection.php === true });
+    if (bootstrap) return announce(await bootstrap);
     if (!discoveryUrl) throw new Error(UNAVAILABLE);
 
     const selectedAt = now();
@@ -196,37 +208,49 @@ export function createVisitorRequest(options = {}) {
     const request = (async () => {
       const result = await readJson(discoveryUrl, "GET");
       const backend = publicBackendBase(result.body?.data?.server);
+      const php = result.body?.data?.php === true;
       if (result.failed || !backend || !Number.isFinite(selectedAt)) throw new Error(UNAVAILABLE);
       if (generation !== startedGeneration) {
         const latest = current();
-        if (latest) return latest.backend;
+        if (latest) return { backend: latest.backend, php: latest.php === true };
         throw new Error(UNAVAILABLE);
       }
-      save(backend, selectedAt);
-      return backend;
+      save(backend, selectedAt, php);
+      return { backend, php };
     })();
     bootstrap = request;
-    try { return await request; }
+    try { return announce(await request); }
     finally { if (bootstrap === request) bootstrap = undefined; }
+  }
+
+  async function selectBackend() {
+    return (await selectTarget()).backend;
+  }
+
+  // Resolves the transport for one request: the visitor's target, or a backend
+  // pinned with a video so its playback and actions keep working after a switch.
+  async function resolveTarget(pinnedBackend) {
+    if (pinnedBackend === undefined) return selectTarget();
+    const backend = publicBackendBase(pinnedBackend);
+    if (!backend) throw new Error(UNAVAILABLE);
+    const selection = current();
+    const php = pinnedPhp || (selection?.backend === backend && selection.php === true);
+    // Refresh the visitor's expired selection independently, but do not make an
+    // existing video's playback or actions depend on discovery succeeding.
+    if (!current()) void selectTarget().catch(() => {});
+    return { backend, php };
   }
 
   async function requestJson(path, init = {}, pinnedBackend) {
     const method = init.method || "GET";
-    let backend;
-    if (pinnedBackend !== undefined) {
-      backend = publicBackendBase(pinnedBackend);
-      if (!backend) throw new Error(UNAVAILABLE);
-      // Refresh the visitor's expired selection independently, but do not make
-      // an existing video's playback or actions depend on discovery succeeding.
-      if (!current()) void selectBackend().catch(() => {});
-    } else {
-      backend = await selectBackend();
-    }
+    const target = await resolveTarget(pinnedBackend);
+    const backend = target.backend;
+    const php = target.php;
     const url = apiUrl(backend, path, method);
     if (!url) throw new Error(UNAVAILABLE);
     const requestGeneration = generation;
     const counts = new URL(path, "https://route.invalid").pathname === "/api/likes/counts";
-    const result = await readJson(url, method, { signal: init.signal, counts });
+    const result = await readJson(url, method, { signal: init.signal, counts, php });
     if (result.failed) {
       // Optional count polling must not disrupt catalog routing. A stale
       // response for an older backend must not erase a newer selection either.
@@ -234,13 +258,14 @@ export function createVisitorRequest(options = {}) {
       // Pinned PHP mode: the host answered with its own HTML check (or the call
       // never left the browser). Ask for the one-time unlock navigation; if this
       // window already used it, try the proxy instead of failing outright.
-      if (!counts && backendOverride && requestUnlock && (result.challenge || result.network)) {
+      if (!counts && php && requestUnlock && (result.challenge || result.network)) {
         if (requestUnlock({ path, challenge: Boolean(result.challenge) })) throw new Error(UNAVAILABLE);
       }
-      if (!counts && proxyBackend && backend !== proxyBackend) {
+      if (!counts && php && proxyBackend && backend !== proxyBackend) {
         const proxyUrl = apiUrl(proxyBackend, path, method);
         if (proxyUrl) {
-          const retry = await readJson(proxyUrl, method, { signal: init.signal, counts });
+          // The proxy solves the host's check itself, so no further retries.
+          const retry = await readJson(proxyUrl, method, { signal: init.signal, counts, php: false });
           if (!retry.failed) {
             return { body: retry.body, backend: proxyBackend, invalidate() {} };
           }
@@ -257,5 +282,5 @@ export function createVisitorRequest(options = {}) {
     };
   }
 
-  return { selectBackend, requestJson };
+  return { selectBackend, selectTarget, resolveTarget, requestJson };
 }

@@ -8,6 +8,8 @@ export function createAuthenticatedRequest(options: {
   allowedBackends: string[];
   fetcher?: typeof fetch;
   requestUnlock?: (context: { path: string }) => void;
+  resolveTarget?: (pinnedBackend?: string) => Promise<{ backend: string; php: boolean }>;
+  trustedPhpBackend?: () => string | null;
 }): (path: string, options: {
   method?: "GET" | "POST";
   token: string;

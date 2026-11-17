@@ -8,10 +8,18 @@ export interface VisitorRequestOptions {
   backendOverride?: string;
   proxyBackend?: string;
   requestUnlock?: (context: { path: string; challenge: boolean }) => boolean;
+  onTarget?: (target: { backend: string; php: boolean }) => void;
+}
+
+export interface VisitorTarget {
+  backend: string;
+  php: boolean;
 }
 
 export interface VisitorRequest {
   selectBackend(): Promise<string>;
+  selectTarget(): Promise<VisitorTarget>;
+  resolveTarget(pinnedBackend?: string): Promise<VisitorTarget>;
   requestJson(path: string, init?: Pick<RequestInit, "method" | "signal">, pinnedBackend?: string): Promise<{ body: any; backend: string; invalidate(): void }>;
 }
 

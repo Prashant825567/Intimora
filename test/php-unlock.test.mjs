@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PHP_ORIGIN_OVERRIDE, UNLOCK_FRESH_MS } from "../src/config/php-backend.mjs";
+import { setPhpMediaOrigin } from "../src/services/media-credentials.mjs";
 import { mediaCrossOrigin } from "../src/services/media-credentials.mjs";
 import {
   completeUnlockReturn,
@@ -14,7 +15,7 @@ import {
 import { createVisitorRequest } from "../src/services/visitor-route.mjs";
 
 const discoveryUrl = "https://discovery.example/api/get-server";
-const php = PHP_ORIGIN_OVERRIDE;
+const php = "https://intimora-api3.site.je";
 const proxy = "https://proxy.example";
 
 function memoryStorage() {
@@ -121,34 +122,75 @@ test("an HTML answer is the host's check, not an error to hide", () => {
   assert.equal(isChallengeContentType(null), false);
 });
 
-test("the pinned PHP host is called directly, with cookies, and no discovery", async () => {
+test("the load balancer decides the transport: a PHP host is called with cookies", async () => {
   const calls = [];
   const visitor = createVisitorRequest({
     discoveryUrl,
-    backendOverride: php,
     fetcher: async (url, init) => {
       calls.push({ url, init });
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: php, php: true } });
       return Response.json({ ok: true, data: { videos: [] } });
     },
     storage: null,
     reuseStoredSelection: false,
   });
   const result = await visitor.requestJson("/api/videos?limit=5");
-  assert.equal(result.backend, new URL(php).origin);
-  assert.equal(calls.length, 1, "discovery is not asked for a server");
-  assert.ok(calls[0].url.startsWith(new URL(php).origin), "the browser talks to the PHP host itself");
-  assert.equal(calls[0].init.credentials, "include", "the session cookie must be allowed to travel");
+  assert.equal(result.backend, php);
+  assert.equal(calls.length, 2, "one discovery call, then the API call");
+  assert.equal(calls[1].url, `${php}/api/videos?limit=5`, "the browser talks to the PHP host itself");
+  assert.equal(calls[1].init.credentials, "include", "the session cookie must be allowed to travel");
+});
+
+test("an ordinary backend is untouched: no cookies, no unlock, no proxy", async () => {
+  const calls = [];
+  const unlocks = [];
+  const plain = "https://api-intimora.vercel.app";
+  const visitor = createVisitorRequest({
+    discoveryUrl,
+    proxyBackend: proxy,
+    requestUnlock: (context) => { unlocks.push(context); return true; },
+    fetcher: async (url, init) => {
+      calls.push({ url, init });
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: plain, php: false } });
+      if (url.startsWith(plain)) return new Response("nope", { status: 500 });
+      return Response.json({ ok: true, data: { videos: [] } });
+    },
+    storage: null,
+    reuseStoredSelection: false,
+  });
+  await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
+  assert.equal(calls[1].init.credentials, "omit", "an ordinary API stays credential-free");
+  assert.equal(unlocks.length, 0, "no redirect for a backend that has no browser check");
+  assert.ok(!calls.some((call) => call.url.startsWith(proxy)), "and no proxy hop either");
+});
+
+test("a discovery answer without the flag is treated as an ordinary backend", async () => {
+  const calls = [];
+  const visitor = createVisitorRequest({
+    discoveryUrl,
+    fetcher: async (url, init) => {
+      calls.push({ url, init });
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: php } });
+      return Response.json({ ok: true, data: { videos: [] } });
+    },
+    storage: null,
+    reuseStoredSelection: false,
+  });
+  await visitor.requestJson("/api/videos?limit=5");
+  assert.equal(calls[1].init.credentials, "omit");
 });
 
 test("a direct call that hits the check triggers one unlock instead of an error page", async () => {
   const unlocks = [];
   const visitor = createVisitorRequest({
     discoveryUrl,
-    backendOverride: php,
-    fetcher: async () => new Response("<html><script>toNumbers('00')</script></html>", {
-      status: 200,
-      headers: { "content-type": "text/html; charset=utf-8" },
-    }),
+    fetcher: async (url) => {
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: php, php: true } });
+      return new Response("<html><script>toNumbers('00')</script></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    },
     requestUnlock: (context) => { unlocks.push(context); return true; },
     storage: null,
     reuseStoredSelection: false,
@@ -163,11 +205,11 @@ test("when the unlock window is spent, the proxy answers instead", async () => {
   const seen = [];
   const visitor = createVisitorRequest({
     discoveryUrl,
-    backendOverride: php,
     proxyBackend: proxy,
     fetcher: async (url) => {
       seen.push(url);
-      if (url.startsWith(new URL(php).origin)) throw new Error("CORS");
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: php, php: true } });
+      if (url.startsWith(php)) throw new Error("CORS");
       return Response.json({ ok: true, data: { videos: [{ id: "via-proxy" }] } });
     },
     requestUnlock: () => false,
@@ -177,12 +219,20 @@ test("when the unlock window is spent, the proxy answers instead", async () => {
   const result = await visitor.requestJson("/api/videos?limit=5");
   assert.equal(result.backend, proxy);
   assert.equal(result.body.data.videos[0].id, "via-proxy");
-  assert.equal(seen.length, 2, "the direct call was tried first");
+  assert.ok(seen.some((url) => url.startsWith(php)), "the direct call was tried first");
 });
 
 test("media from the PHP host drops the CORS attribute so the cookie still goes", () => {
-  assert.equal(mediaCrossOrigin(`${new URL(php).origin}/api/videos/local-1/thumbnail`), undefined);
+  setPhpMediaOrigin(php);
+  assert.equal(mediaCrossOrigin(`${php}/api/videos/local-1/thumbnail`), undefined);
   assert.equal(mediaCrossOrigin("https://api-intimora.vercel.app/api/videos/local-1/thumbnail"), "anonymous");
   assert.equal(mediaCrossOrigin(undefined), "anonymous");
   assert.equal(mediaCrossOrigin("not a url"), "anonymous");
+  // A later discovery says the backend is ordinary: the attribute comes back.
+  setPhpMediaOrigin(null);
+  assert.equal(mediaCrossOrigin(`${php}/api/videos/local-1/thumbnail`), "anonymous");
+});
+
+test("the PHP origin is no longer hardcoded", () => {
+  assert.equal(PHP_ORIGIN_OVERRIDE, "", "the load balancer names the server in normal use");
 });

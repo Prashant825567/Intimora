@@ -1,22 +1,20 @@
 import type { Video } from "../data/mockVideos";
 import { createVisitorRequest } from "./visitor-route.mjs";
-import { PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN, UNLOCK_FRESH_MS, UNLOCK_SPLASH_MS } from "../config/php-backend.mjs";
-import { requestUnlockNavigation } from "./unlock.mjs";
+import { PHP_ORIGIN_OVERRIDE, PHP_PROXY_ORIGIN } from "../config/php-backend.mjs";
+import { requestPhpUnlock, setActiveTarget } from "./php-session.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
 const visitor = createVisitorRequest({
   discoveryUrl: __INTIMORA_DISCOVERY_URL__,
-  // TEMPORARY (src/config/php-backend.mjs): a pinned PHP origin, called directly
-  // by the browser with cookies. Empty the constant to return to discovery.
+  // The load balancer decides everything: its `php` flag selects the transport.
+  // PHP_ORIGIN_OVERRIDE is empty in normal use; it only pins a host for testing.
   backendOverride: PHP_ORIGIN_OVERRIDE,
   proxyBackend: PHP_PROXY_ORIGIN,
-  // When the host answers a direct call with its own HTML check, the visitor is
-  // sent once to its unlock page, which returns them to the same address.
-  requestUnlock: () => requestUnlockNavigation({
-    phpOrigin: PHP_ORIGIN_OVERRIDE,
-    freshMs: UNLOCK_FRESH_MS,
-    splashMs: UNLOCK_SPLASH_MS,
-  }),
+  // Remembers which backend the visitor is on, including whether it is a PHP
+  // host, so media and account calls follow the same rules.
+  onTarget: setActiveTarget,
+  // Only a PHP host can ask for this: one navigation through its check page.
+  requestUnlock: requestPhpUnlock,
 });
 const unavailable = () => new Error("Content is temporarily unavailable");
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -193,6 +191,9 @@ async function catalog(path: string, pinnedBackend?: string): Promise<CatalogRes
 
 // Start discovery when the visitor arrives, including while the age gate is open.
 export const primeBackendSelection = () => visitor.selectBackend();
+// The transport (backend + `php` flag) for the account calls.
+export const primeBackendTarget = () => visitor.selectTarget();
+export const resolveBackendTarget = (pinned?: string) => visitor.resolveTarget(pinned);
 
 export const fetchVideos = (cursor?: BackendCursor | null, limit?: number) => {
   const params = new URLSearchParams();
