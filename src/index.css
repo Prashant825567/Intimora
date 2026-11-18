@@ -125,6 +125,28 @@ img {
 }
 
 /* Leave room below the fixed desktop navigation so it cannot cover images. */
+/* The browse tabs are one scrollable row on every screen size. On a phone the
+   row is wider than the screen, so it scrolls sideways instead of pushing the
+   next tab out of the layout. */
+.site-nav__tabs {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.site-nav__tabs::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.site-nav__tabs > * {
+  flex: 0 0 auto;
+}
+
 .site-main {
   padding-top: 7rem;
 }
@@ -351,9 +373,23 @@ img {
     font-size: 1.45rem;
   }
 
-  .site-nav__desktop-action,
-  .site-nav__desktop-links {
+  .site-nav__desktop-action {
     display: none;
+  }
+
+  /* Edge-to-edge scrolling strip: the first and last tab can be reached
+     without the row sitting inside the container's padding. */
+  .site-nav__tabs {
+    margin-inline: -0.75rem;
+    padding-inline: 0.75rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .site-nav__tabs > * {
+    padding-inline: 0.85rem;
+    min-height: 2.25rem;
+    display: inline-flex;
+    align-items: center;
   }
 
   .site-nav__search {
@@ -436,9 +472,10 @@ img {
     font-size: 0.75rem;
   }
 
+  /* The bar carries the tabs on a phone too: 4rem bar + 2.75rem tab row. */
   .site-main {
     padding-inline: 0.75rem;
-    padding-top: 5rem;
+    padding-top: 8rem;
   }
 
   .mobile-break-words {

@@ -38,7 +38,7 @@ async function availablePort() {
   return port;
 }
 
-async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm" } = {}) {
+async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null } = {}) {
   const clip = clips[format];
   const video = { ...fixtureVideo, duration: format === "mp4" ? 30 : 20 };
   const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "intimora-stream-test-"));
@@ -88,6 +88,19 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         res.end(image);
         return;
       }
+      if (url.pathname === "/cdn-clip.mp4") {
+        // "broken" is a file host answering with a download page instead of a
+        // video (what an unresolved bestfile link returns); "playable" is a CDN
+        // that really serves the file.
+        if (cdn === "broken") {
+          res.writeHead(200, { ...cors, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+          res.end("<html><body>Please wait 24 seconds</body></html>");
+          return;
+        }
+        res.writeHead(200, { ...cors, "Content-Type": `video/${format}`, "Accept-Ranges": "bytes", "Content-Length": clip.length });
+        res.end(clip);
+        return;
+      }
       if (url.pathname === "/api/videos/sample-1/stream") {
         if (state.failMedia > 0) {
           state.failMedia -= 1;
@@ -123,6 +136,7 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
     await new Promise((resolve, reject) => { backendServer.once("error", reject); backendServer.listen(0, "127.0.0.1", resolve); });
     const port = backendServer.address().port;
     backend = `https://media-backend.example:${port}`;
+    if (cdn) video.cdnUrl = `https://cdn-media.example:${port}/cdn-clip.mp4`;
     const discovery = `https://media-discovery.example:${port}/api/get-server`;
     process.env.INTIMORA_PUBLIC_API_DISCOVERY_URL = discovery;
     vite = await createViteServer({
@@ -132,11 +146,12 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
     await vite.listen();
     browser = await chromium.launch({
       executablePath: browserPath, headless: true,
-      args: ["--no-sandbox", "--disable-dev-shm-usage", "--no-proxy-server", "--ignore-certificate-errors", "--autoplay-policy=user-gesture-required", "--host-resolver-rules=MAP media-backend.example 127.0.0.1, MAP media-discovery.example 127.0.0.1"],
+      args: ["--no-sandbox", "--disable-dev-shm-usage", "--no-proxy-server", "--ignore-certificate-errors", "--autoplay-policy=user-gesture-required", "--host-resolver-rules=MAP media-backend.example 127.0.0.1, MAP media-discovery.example 127.0.0.1, MAP cdn-media.example 127.0.0.1"],
     });
     const base = `http://127.0.0.1:${vite.httpServer.address().port}`;
     return {
       state, browser, base, backend, discovery, clip,
+      cdnUrl: video.cdnUrl, bytesUrl: `${backend}/api/videos/sample-1/stream`,
       releaseMedia() {
         state.holdMedia = false;
         for (const { res, body } of state.pending.splice(0)) if (!res.destroyed) res.end(body);
@@ -545,6 +560,74 @@ test("clicking the picture toggles the controls and never pauses", options, asyn
     // While paused the large play button covers the picture, so a tap there is
     // the play action; the timeline is only paused by its own button.
     assert.equal(await media.evaluate((video) => video.paused), true);
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// Newer uploads are stored on a CDN host; the backend keeps streaming the bytes
+// of the older ones. A CDN link that cannot play (expired, hotlink-blocked, or a
+// download page instead of a file) must not stop the video: the player switches
+// to the backend's own stream and keeps playing.
+test("a CDN source that cannot play falls back to the byte stream", options, async () => {
+  const fixture = await createFixture({ cdn: "broken" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    await watch.waitFor();
+    await watch.click();
+    const media = page.locator("#player-container video");
+    await media.waitFor();
+
+    // The catalog's CDN URL is what the media element asks for first; this file
+    // host answers with a download page, so it fails and the byte stream takes
+    // over. The switch can happen before the first poll, so the request log is
+    // the evidence that the CDN link was tried.
+    const until = async (check, timeoutMs = 20_000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (check()) return;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("timed out waiting for the condition");
+    };
+    await until(() => fixture.state.calls.some((call) => call.path === "/cdn-clip.mp4"));
+    await page.waitForFunction(
+      (bytes) => document.querySelector("#player-container video")?.getAttribute("src") === bytes,
+      fixture.bytesUrl, { timeout: 20_000 },
+    );
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+    assert.ok(fixture.state.calls.some((call) => call.path === "/api/videos/sample-1/stream"), "the bytes were used");
+    assert.equal(await page.getByText(/could not be played|could not be loaded/i).count(), 0, "no error is shown to the visitor");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a playable CDN source is used and the byte stream stays untouched", options, async () => {
+  const fixture = await createFixture({ cdn: "playable" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    await watch.waitFor();
+    await watch.click();
+    const media = page.locator("#player-container video");
+    await media.waitFor();
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+    assert.equal(await media.getAttribute("src"), fixture.cdnUrl, "the CDN file is what plays");
+    assert.equal(await media.getAttribute("crossorigin"), null, "a CDN source is not asked for CORS");
+    assert.ok(fixture.state.calls.some((call) => call.path === "/cdn-clip.mp4"));
+    assert.ok(!fixture.state.calls.some((call) => call.path === "/api/videos/sample-1/stream"), "no bytes are downloaded");
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }

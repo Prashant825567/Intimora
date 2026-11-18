@@ -77,6 +77,18 @@ async function makePage(browser, base, scenario, mobile = false) {
 
 const titleList = async (page) => page.locator("main .video-card__title").allTextContents();
 
+// Home renders the catalogue as soon as the first page arrives, while the rest
+// of the pages are still being collected for ranking. Wait for that collection
+// instead of for a heading that no longer marks its end.
+async function until(check, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("timed out waiting for the catalogue to finish collecting");
+}
+
 test("browser feeds use the full paginated catalog and Categories shows only Coming Soon", {
   skip: existsSync(browserPath) ? false : "Install Chromium or set CHROMIUM_PATH", timeout: 120_000,
 }, async () => {
@@ -92,9 +104,10 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
       "next-2": { videos: [normal], nextCursor: "next-2" },
     } };
     const { page, context, calls } = await makePage(browser, base, scenario);
-    await page.getByRole("heading", { name: "Trending Now" }).waitFor();
+    await page.getByRole("heading", { name: "All Videos" }).waitFor();
+    await until(() => calls.filter((call) => call.path === "/api/videos").length === 3);
     assert.deepEqual(calls.filter((call) => call.path === "/api/videos").map((call) => [call.cursor, call.limit]), [[null, "50"], ["next-1", "50"], ["next-2", "50"]]);
-    const nav = page.locator(".site-nav__desktop-links");
+    const nav = page.locator(".site-nav__tabs");
 
     await nav.getByRole("link", { name: "Trending", exact: true }).click();
     await page.getByRole("heading", { name: "Trending Now" }).waitFor();
@@ -151,13 +164,11 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
       first: { videos: liveShapeVideos, nextCursor: "end" },
       end: { videos: [liveShapeVideos.at(-1)], nextCursor: "end" },
     } });
-    await liveShape.page.getByRole("heading", { name: "Trending Now" }).waitFor();
+    await liveShape.page.getByRole("heading", { name: "All Videos" }).waitFor();
     assert.deepEqual(await liveShape.page.locator('section[aria-label="All Videos"] .video-card__title').allTextContents(),
       ["Latest exclusive one", "Latest exclusive two", "Regular upload one", "Regular upload two"]);
-    assert.deepEqual(await liveShape.page.locator('section[aria-label="Exclusive"] .video-card__title').allTextContents(),
-      ["Latest exclusive one", "Latest exclusive two"]);
     assert.equal(await liveShape.page.locator(".hero-banner__title").textContent(), "Latest exclusive one");
-    const liveNav = liveShape.page.locator(".site-nav__desktop-links");
+    const liveNav = liveShape.page.locator(".site-nav__tabs");
     await liveNav.getByRole("link", { name: "Exclusive", exact: true }).click();
     await liveShape.page.getByRole("heading", { name: "Exclusive", exact: true }).waitFor();
     assert.deepEqual(await titleList(liveShape.page), ["Latest exclusive one", "Latest exclusive two"]);
@@ -168,19 +179,25 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
 
     const yesterdayScenario = { pages: { first: { videos: [yesterday, yesterdayTwo, older], nextCursor: null } } };
     const mobile = await makePage(browser, base, yesterdayScenario, true);
-    await mobile.page.getByRole("button", { name: "Open navigation menu" }).click();
-    await mobile.page.locator("#mobile-navigation").getByRole("link", { name: "New", exact: true }).click();
+    // The browse tabs are always on screen on a phone; nothing needs the menu.
+    const mobileTabs = mobile.page.locator(".site-nav__tabs");
+    assert.equal(await mobileTabs.isVisible(), true, "the browse tabs are visible on a phone");
+    await mobileTabs.getByRole("link", { name: "New", exact: true }).click();
     await mobile.page.getByRole("heading", { name: "New Releases" }).waitFor();
     assert.deepEqual(await titleList(mobile.page), ["Yesterday", "Yesterday early"]);
-    await mobile.page.getByRole("button", { name: "Open navigation menu" }).click();
-    await mobile.page.locator("#mobile-navigation").getByRole("link", { name: "Categories", exact: true }).click();
+    await mobileTabs.getByRole("link", { name: "Categories", exact: true }).click();
     await mobile.page.getByRole("heading", { name: "Coming Soon" }).waitFor();
     assert.equal(await mobile.page.locator("main .video-card, main .hero-banner").count(), 0);
-    assert.equal(await mobile.page.getByRole("button", { name: "Open navigation menu" }).getAttribute("aria-expanded"), "false");
+    // Home shows the catalogue only: no Trending / New / Exclusive rows.
+    await mobileTabs.getByRole("link", { name: "Home", exact: true }).click();
+    await mobile.page.getByRole("heading", { name: "All Videos" }).waitFor();
+    assert.equal(await mobile.page.getByRole("heading", { name: "Trending Now" }).count(), 0, "Home has no Trending row");
+    assert.equal(await mobile.page.getByRole("heading", { name: "New Releases" }).count(), 0, "Home has no New row");
+    assert.equal(await mobile.page.locator('section[aria-label="Exclusive"]').count(), 0, "Home has no Exclusive row");
     await mobile.context.close();
 
     const none = await makePage(browser, base, { pages: { first: { videos: [older, unknown], nextCursor: null } } });
-    await none.page.locator(".site-nav__desktop-links").getByRole("link", { name: "New", exact: true }).click();
+    await none.page.locator(".site-nav__tabs").getByRole("link", { name: "New", exact: true }).click();
     await none.page.getByText("No videos were uploaded today or yesterday.").waitFor();
     assert.equal(await none.page.locator("main .video-card").count(), 0);
     await none.context.close();
@@ -190,12 +207,14 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
       first: { videos: manyVideos.slice(0, 10), nextCursor: "more" },
       more: { videos: manyVideos.slice(9), nextCursor: null },
     } });
-    await paged.page.getByRole("heading", { name: "Trending Now" }).waitFor();
+    await paged.page.getByRole("heading", { name: "All Videos" }).waitFor();
     const allSection = paged.page.locator('section[aria-label="All Videos"]');
+    // One page of 12 cards out of the 16 collected videos.
+    await paged.page.waitForFunction(() => document.querySelectorAll('section[aria-label="All Videos"] .video-card').length === 12);
     assert.equal(await allSection.locator(".video-card").count(), 12, "the full catalog is not rendered all at once");
     await allSection.locator('[aria-live="polite"]').scrollIntoViewIfNeeded();
     await paged.page.waitForFunction(() => document.querySelectorAll('section[aria-label="All Videos"] .video-card').length === 16);
-    await paged.page.locator(".site-nav__desktop-links").getByRole("link", { name: "Trending", exact: true }).click();
+    await paged.page.locator(".site-nav__tabs").getByRole("link", { name: "Trending", exact: true }).click();
     await paged.page.getByRole("heading", { name: "Trending Now" }).waitFor();
     assert.ok(await paged.page.locator("main .video-card").count() >= 12);
     await paged.page.locator('main [aria-live="polite"]').scrollIntoViewIfNeeded();
@@ -205,7 +224,7 @@ test("browser feeds use the full paginated catalog and Categories shows only Com
     const failureScenario = { ...scenario, waitForSearch: null, failCursor: "next-1" };
     const failure = await makePage(browser, base, failureScenario);
     await failure.page.getByRole("alert").waitFor();
-    await failure.page.locator(".site-nav__desktop-links").getByRole("link", { name: "Trending", exact: true }).click();
+    await failure.page.locator(".site-nav__tabs").getByRole("link", { name: "Trending", exact: true }).click();
     assert.equal(await failure.page.locator("main .video-card").count(), 0, "incomplete results are not presented as a full ranking");
     assert.doesNotMatch(await failure.page.locator("body").innerText(), /secret-marker|catalog-backend\.example/i);
     failureScenario.failCursor = null;

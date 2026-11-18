@@ -13,6 +13,9 @@ export interface Video {
   category: string;
   tags: string[];
   videoUrl: string;
+  // The backend's own byte stream, kept behind a CDN URL so a dead or expired
+  // CDN link still plays instead of showing an error.
+  fallbackVideoUrl?: string;
   // Source of this public video; retained when the visitor's selection changes.
   backendBase?: string;
   creator: string;

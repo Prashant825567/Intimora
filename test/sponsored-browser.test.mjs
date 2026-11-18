@@ -139,6 +139,10 @@ test("sponsored partner videos sit between ours and open in our own player", {
 
     // A partner item without a thumbnail is not left as a hole: the card derives
     // the partner's own screenshot from the embed id.
+    // Home is one long catalogue grid now, so the second page of cards arrives
+    // when the list footer is reached.
+    await page.locator('main [aria-live="polite"]').scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => document.querySelectorAll("section[aria-label='All Videos'] .video-card").length >= 16);
     const withoutPoster = page.locator(".video-card--sponsored").nth(2);
     await withoutPoster.scrollIntoViewIfNeeded();
     const derived = await withoutPoster.locator("img.video-card__image").getAttribute("src");

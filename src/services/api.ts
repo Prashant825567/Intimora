@@ -12,6 +12,7 @@ import {
   setActiveTarget,
 } from "./php-session.mjs";
 import { recordDiagnostic } from "./diagnostics.mjs";
+import { playbackSources } from "./media-source.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
 const visitor = createVisitorRequest({
@@ -54,6 +55,10 @@ export interface ApiVideo {
   createdAt?: number;
   thumbnailUrl?: string;
   streamUrl?: string;
+  // The server pointing at the file on its CDN host. Newer uploads are stored
+  // there; older ones still stream their bytes from the backend.
+  cdnUrl?: string;
+  bestfile?: { download_link?: string };
 }
 
 // Cursors and videos retain their source even after this tab discovers a new
@@ -78,6 +83,14 @@ function nonnegativeNumber(value: unknown): number | undefined {
   const number = typeof value === "number" ? value
     : typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : NaN;
   return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+// A media link is a URL, not prose: safeText would strip it. Only the shape is
+// checked here; whether it is playable is decided by media-source.mjs.
+function mediaLink(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  return text && text === value && text.length <= 2048 ? text : undefined;
 }
 
 function timestampMs(value: unknown): number | undefined {
@@ -146,6 +159,10 @@ function publicVideo(input: unknown): ApiVideo | null {
       .map((tag: unknown) => safeText(tag, 80)).filter((tag: string | undefined): tag is string => tag !== undefined) : undefined,
     thumbnailUrl: typeof video.thumbnailUrl === "string" ? video.thumbnailUrl : undefined,
     streamUrl: typeof video.streamUrl === "string" ? video.streamUrl : undefined,
+    cdnUrl: mediaLink(video.cdnUrl),
+    bestfile: mediaLink((video.bestfile as Record<string, unknown> | undefined)?.download_link)
+      ? { download_link: mediaLink((video.bestfile as Record<string, unknown>).download_link) as string }
+      : undefined,
   };
 }
 
@@ -261,22 +278,30 @@ export async function shareVideo(id: string, backend?: string) {
 export const getThumbnailUrl = (id: string, backend: string) => `${backend}${videoPath(id)}/thumbnail`;
 export const getStreamUrl = (id: string, backend: string) => `${backend}${videoPath(id)}/stream`;
 
-export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video => ({
-  id: apiVideo.id,
-  title: apiVideo.title || "Untitled Video",
-  thumbnail: safeMediaUrl(apiVideo.thumbnailUrl, apiVideo.id, "thumbnail", backend),
-  duration: formatDuration(apiVideo.duration),
-  views: formatViews(apiVideo.views),
-  viewCount: apiVideo.views ?? 0,
-  createdAt: apiVideo.createdAt ?? null,
-  isExclusive: apiVideo.exclusive === true,
-  likes: apiVideo.likes ?? null,
-  category: apiVideo.category || (apiVideo.exclusive ? "Exclusive" : ""),
-  tags: apiVideo.tags || [],
-  videoUrl: safeMediaUrl(apiVideo.streamUrl, apiVideo.id, "stream", backend),
-  backendBase: backend,
-  creator: apiVideo.creator || "Intimora",
-  creatorAvatar: "/logo.png",
-  uploadedAt: apiVideo.uploadedAt || formatDate(apiVideo.createdAt),
-  description: apiVideo.description || "",
-});
+export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video => {
+  // Validate the id the same way every other media URL does before it is used.
+  videoPath(apiVideo.id);
+  const playback = playbackSources(apiVideo, backend, apiVideo.id);
+  return {
+    id: apiVideo.id,
+    title: apiVideo.title || "Untitled Video",
+    thumbnail: safeMediaUrl(apiVideo.thumbnailUrl, apiVideo.id, "thumbnail", backend),
+    duration: formatDuration(apiVideo.duration),
+    views: formatViews(apiVideo.views),
+    viewCount: apiVideo.views ?? 0,
+    createdAt: apiVideo.createdAt ?? null,
+    isExclusive: apiVideo.exclusive === true,
+    likes: apiVideo.likes ?? null,
+    category: apiVideo.category || (apiVideo.exclusive ? "Exclusive" : ""),
+    tags: apiVideo.tags || [],
+    // The CDN file when the server offered one, otherwise the byte stream; the
+    // byte stream also stays behind a CDN URL so a dead link cannot stop playback.
+    videoUrl: playback.videoUrl,
+    fallbackVideoUrl: playback.fallbackVideoUrl,
+    backendBase: backend,
+    creator: apiVideo.creator || "Intimora",
+    creatorAvatar: "/logo.png",
+    uploadedAt: apiVideo.uploadedAt || formatDate(apiVideo.createdAt),
+    description: apiVideo.description || "",
+  };
+};
