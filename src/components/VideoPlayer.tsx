@@ -32,6 +32,13 @@ interface VideoPlayerProps {
 
 type BufferedRange = { start: number; end: number };
 
+// A third-party CDN rarely sends CORS headers, and `anonymous` would turn that
+// into a hard load error. Only our own byte route keeps the attribute; a CDN
+// source is requested as a plain media load.
+function sourceCrossOrigin(url: string, fallback?: string) {
+  return fallback && url !== fallback ? undefined : mediaCrossOrigin(url);
+}
+
 // Only the selected player is preloaded, after the age gate. This is a browser
 // hint rather than a byte limit; honor data-saver and very slow connections.
 function preloadHint(): "auto" | "metadata" {
@@ -47,10 +54,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const playAttempt = useRef(0);
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [preload] = useState(preloadHint);
+  // The URL a media element is actually loading. It is the CDN file when the
+  // backend offered one, and it moves to the byte stream if that link fails.
+  const [source, setSource] = useState(video.videoUrl);
+  const sourceSwapped = useRef(false);
+  const resumeAt = useRef(0);
   // The CORS attribute is read once: changing it makes the browser throw away
   // the media load in progress, which showed up as a playback error. It follows
   // a different video only while nothing is being loaded.
-  const [crossOrigin, setCrossOrigin] = useState(() => mediaCrossOrigin(video.videoUrl));
+  const [crossOrigin, setCrossOrigin] = useState(() => sourceCrossOrigin(video.videoUrl, video.fallbackVideoUrl));
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
@@ -86,9 +98,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   useEffect(() => {
     recoveries.current = 0;
     pendingReload.current = false;
+    sourceSwapped.current = false;
+    resumeAt.current = 0;
+    setSource(video.videoUrl);
     const element = videoRef.current;
     if (!element || element.networkState === HTMLMediaElement.NETWORK_EMPTY) {
-      setCrossOrigin(mediaCrossOrigin(video.videoUrl));
+      setCrossOrigin(sourceCrossOrigin(video.videoUrl, video.fallbackVideoUrl));
     }
   }, [video.videoUrl]);
 
@@ -157,6 +172,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
       else if (controlsTimer.current) { clearTimeout(controlsTimer.current); controlsTimer.current = null; }
       return next;
     });
+  };
+
+  // A CDN link can be dead, expired or hotlink-blocked. The byte stream behind
+  // it is the same video, so one silent switch keeps playback going; the position
+  // is kept and playback resumes from metadata without another click. Only one
+  // switch is ever made, so a broken pair can never loop.
+  const swapToFallback = (element: HTMLVideoElement) => {
+    const fallback = video.fallbackVideoUrl;
+    if (!fallback || sourceSwapped.current || source === fallback) return false;
+    sourceSwapped.current = true;
+    resumeAt.current = Number.isFinite(element.currentTime) && element.currentTime > 0 ? element.currentTime : 0;
+    recoveries.current = 0;
+    setSource(fallback);
+    setCrossOrigin(sourceCrossOrigin(fallback, video.fallbackVideoUrl));
+    return true;
   };
 
   // The recovery is exactly what the "Try again" button does — load(), then play
@@ -361,7 +391,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
         >
           <video
             ref={videoRef}
-            src={video.videoUrl}
+            src={source}
             poster={video.thumbnail}
             crossOrigin={crossOrigin}
             preload={preload}
@@ -389,11 +419,27 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
                 pendingReload.current = true;
                 return;
               }
+              // A failed CDN source is answered by the byte stream first; the
+              // ordinary reload only runs when there is nothing to switch to.
+              if (swapToFallback(element)) return;
               if (recoverContent(element, false)) return;
               setPlaybackError(playbackFailureMessage({ code }));
             }}
             onTimeUpdate={(e) => setCurrentTime(Number.isFinite(e.currentTarget.currentTime) ? e.currentTarget.currentTime : 0)}
-            onLoadedMetadata={(e) => updateDuration(e.currentTarget)}
+            onLoadedMetadata={(e) => {
+              const element = e.currentTarget;
+              updateDuration(element);
+              // After a CDN → bytes switch: keep the position and, when the
+              // visitor was already watching, continue without a second click.
+              if (resumeAt.current > 0) {
+                const at = resumeAt.current;
+                resumeAt.current = 0;
+                try { element.currentTime = at; } catch { /* Start from the beginning instead. */ }
+              }
+              if (sourceSwapped.current && wantsPlay.current && element.paused) {
+                playContent(element, false, ++playAttempt.current);
+              }
+            }}
             onDurationChange={(e) => updateDuration(e.currentTarget)}
             onProgress={(e) => updateBuffered(e.currentTarget)}
             onSeeked={(e) => updateBuffered(e.currentTarget)}
