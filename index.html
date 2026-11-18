@@ -15,6 +15,8 @@
       content="Intimora is an 18+ adult video streaming platform with a searchable catalog and online playback."
     />
     <meta name="robots" content="index, follow" />
+    <meta name="rating" content="adult" />
+    <link rel="canonical" href="https://intimora.new.tg/" />
     <meta name="theme-color" content="#080808" />
     <meta name="application-name" content="Intimora" />
     <meta name="apple-mobile-web-app-title" content="Intimora" />
@@ -22,6 +24,13 @@
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Intimora | 18+ Adult Video Streaming" />
     <meta property="og:description" content="Intimora is an 18+ adult video streaming platform with a searchable catalog and online playback." />
+    <meta property="og:url" content="https://intimora.new.tg/" />
+    <meta property="og:image" content="https://intimora.new.tg/logo.png" />
+    <meta property="og:image:alt" content="Intimora" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Intimora | 18+ Adult Video Streaming" />
+    <meta name="twitter:description" content="Intimora is an 18+ adult video streaming platform with a searchable catalog and online playback." />
+    <meta name="twitter:image" content="https://intimora.new.tg/logo.png" />
 
     <link rel="icon" type="image/x-icon" sizes="16x16 32x32 48x48 64x64" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
@@ -39,12 +48,34 @@
     ></script>
     <!-- End Cloudflare Web Analytics -->
 
+    <!-- The site name Google shows above a result comes from this WebSite node
+         together with og:site_name; alternateName matches how people type it. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "WebSite",
         "name": "Intimora",
-        "url": "https://intimora.new.tg/"
+        "alternateName": ["Intimora.new.tg", "Intimora adult videos"],
+        "url": "https://intimora.new.tg/",
+        "inLanguage": "en",
+        "isFamilyFriendly": false,
+        "publisher": {
+          "@type": "Organization",
+          "name": "Intimora",
+          "url": "https://intimora.new.tg/",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://intimora.new.tg/logo.png"
+          }
+        },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://intimora.new.tg/search?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        }
       }
     </script>
   </head>

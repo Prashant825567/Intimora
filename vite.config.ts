@@ -53,6 +53,26 @@ export default defineConfig(({ mode }) => {
       return url.origin;
     });
   if (!authBackends.length || new Set(authBackends).size !== authBackends.length) throw new Error("Invalid trusted auth backend configuration.");
+  // Google Search Console verifies the site with a meta tag. The token is public
+  // and is read from the environment so it never has to be committed; an empty
+  // value simply leaves the tag out.
+  const googleSiteVerification = (env.INTIMORA_PUBLIC_GOOGLE_SITE_VERIFICATION || "").trim();
+  if (googleSiteVerification && !/^[A-Za-z0-9_-]{20,80}$/.test(googleSiteVerification)) {
+    throw new Error("Invalid Google site verification token: use the meta-tag value from Search Console.");
+  }
+  const searchConsoleTag: Plugin = {
+    name: "intimora-search-console",
+    transformIndexHtml(html: string) {
+      if (!googleSiteVerification) return html;
+      const tag = `    <meta name="google-site-verification" content="${googleSiteVerification}" />\n`;
+      return html.replace(/<\/head>/i, `${tag}  </head>`);
+    },
+  };
+
+  // The sitemap scan is the only place that reads the catalogue at build time.
+  // Its titles are handed to the route shells for their per-page <title>.
+  const buildState: { videos?: Array<{ id: string; title: string }> } = {};
+
   const developmentSecurity: Plugin = {
     name: "development-security",
     configureServer(server) {
@@ -119,10 +139,11 @@ export default defineConfig(({ mode }) => {
       developmentSecurity,
       react(),
       tailwindcss(),
-      sitemapPlugin({ discoveryUrl }),
+      searchConsoleTag,
+      sitemapPlugin({ discoveryUrl, state: buildState }),
       // Direct links must work on a static host that has no SPA rewrite, so
       // publish a real HTML file for every page the app can serve.
-      routeShellsPlugin({ snapshotSitemap: path.join(__dirname, "public", "sitemap.xml") }),
+      routeShellsPlugin({ snapshotSitemap: path.join(__dirname, "public", "sitemap.xml"), state: buildState }),
       // A campaign feed becomes same-origin JSON at build time, so the client
       // never needs CORS from the feed host.
       ...(partner.mode === "feed" ? [partnerFeedPlugin({ feedUrl: partner.url, timeoutMs: partnerFeedTimeout, offline: partnerFeedOffline })] : []),
