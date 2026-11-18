@@ -3,7 +3,9 @@
 export function applySecurityHeaders(res, { development = false, allowPreviewEmbed = false } = {}) {
   const policy = [
     "default-src 'self'",
-    `script-src 'self' https://apis.google.com${development ? " 'unsafe-inline'" : ""}`,
+    // The only third-party script is Cloudflare Web Analytics (cookie-less
+    // visitor counts, see index.html), plus Google's sign-in helper.
+    `script-src 'self' https://apis.google.com https://static.cloudflareinsights.com${development ? " 'unsafe-inline'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     // Firebase's Google sign-in uses its hosted auth iframe and Google APIs.
     // The sponsored TubeCorporate campaign frames are the only partner frames.

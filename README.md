@@ -135,6 +135,18 @@ Render is a Static Site: the sitemap is a **build-time snapshot**, not a live en
 
 After the changed branch is merged and deployed, open `/sitemap.xml` and `/robots.txt` to confirm they return the expected files. In the verified Google Search Console property for `https://intimora.new.tg/`, open **Indexing → Sitemaps**, enter `sitemap.xml`, and select **Submit**. A sitemap is a discovery hint, not an indexing or ranking guarantee. The age gate remains in place and the watch content loads only after a visitor confirms their age; Google may therefore be unable to see or index individual videos. Use URL Inspection and Google's [video SEO guidance](https://developers.google.com/search/docs/appearance/video) to diagnose this without weakening the gate.
 
+## Visitors and page views
+
+The site counts visits with **Cloudflare Web Analytics**, embedded as a single module tag in `index.html` with the site token. It is cookie-less and sends no personal data, so an 18+ site needs no consent banner for it, and it reports page views, unique visitors, top pages, countries and referrers. Where to read it: Cloudflare dashboard → **Analytics & Logs → Web Analytics → intimora.new.tg**.
+
+Three things worth knowing:
+
+- If the dashboard's **Automatic setup** is enabled for the same site, Cloudflare injects its own copy of the beacon and every visit is counted twice. Keep one: either turn Automatic off and keep the tag in `index.html`, or remove the tag and rely on Automatic. `test/analytics.test.mjs` fails if the document ever carries two beacons.
+- The tag lives in `index.html`, not in the bundle, so a Content-Security-Policy change or a third-party-script review sees it. Both production policies (`server/security.mjs` and the `render.yaml` header) list `https://static.cloudflareinsights.com` in `script-src` — without that the beacon is blocked and the dashboard stays empty. No other analytics or advertising tracker ships with the page; the test also pins that (`googletagmanager.com`, `google-analytics.com`, `connect.facebook.net`, `plausible.io` must stay absent, since any of them would need consent handling this site does not have).
+- Registered accounts are a different number: **Firebase console → Authentication → Users** for that project, and the backend store for anything beyond the count. Page views include everyone who merely opened the site.
+
+Render's dashboard does not report traffic for a static site; the Cloudflare worker's own analytics count `get-server` calls, not visitors.
+
 ## Sponsored partner videos (TubeCorporate)
 
 Partner videos are **part of the catalogue layout**: every fourth card is followed by one sponsored card ("four of ours, then one of theirs") on Home, Trending, New and Exclusive. Each sponsored card uses the site's own card markup, outline, hover and typography, and the badge slot that shows `EXCLUSIVE` on our videos shows `SPONSORED` on theirs. Titles and posters come from the partner page itself (`og:title`, `og:image`), so a sponsored card looks like one of our own.
