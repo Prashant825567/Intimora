@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { BROWSE_PATHS } from "../src/services/page-routes.mjs";
 import { SITE_ORIGIN } from "./sitemap.mjs";
+import { applyPageHead, pageMetaFor } from "./page-head.mjs";
 
 const WATCH_ID = /^[A-Za-z0-9_-]{1,128}$/;
 export const MAX_WATCH_SHELLS = 500;
@@ -49,7 +50,7 @@ async function readWatchIds(directory, snapshotPath) {
   return [];
 }
 
-export function routeShellsPlugin({ snapshotSitemap } = {}) {
+export function routeShellsPlugin({ snapshotSitemap, state } = {}) {
   return {
     name: "intimora-route-shells",
     apply: "build",
@@ -64,22 +65,31 @@ export function routeShellsPlugin({ snapshotSitemap } = {}) {
       }
       let html;
       try {
-        html = await readFile(path.join(directory, "index.html"));
+        html = await readFile(path.join(directory, "index.html"), "utf8");
       } catch {
         this.warn("Route shells were skipped; the built index.html was unavailable.");
         return;
       }
 
       const ids = await readWatchIds(directory, snapshotSitemap);
-      const files = [];
+      // Titles come from the catalogue scan that produced this build's sitemap;
+      // a video without one still gets a plain, unique watch page.
+      const titles = new Map();
+      for (const video of Array.isArray(state?.videos) ? state.videos : []) {
+        if (typeof video?.id === "string" && typeof video?.title === "string") titles.set(video.id, video.title);
+      }
+      const shell = (route, videoTitle, options) => applyPageHead(html, pageMetaFor(route, { videoTitle }), options);
+      const files = [["index.html", shell("/")]];
       for (const route of ROUTE_SHELL_PATHS) {
         const name = route.slice(1);
-        files.push([`${name}/index.html`, html], [`${name}.html`, html]);
+        const page = shell(route);
+        files.push([`${name}/index.html`, page], [`${name}.html`, page]);
       }
       for (const id of ids) {
-        files.push([`watch/${id}/index.html`, html], [`watch/${id}.html`, html]);
+        const page = shell(`/watch/${id}`, titles.get(id));
+        files.push([`watch/${id}/index.html`, page], [`watch/${id}.html`, page]);
       }
-      files.push(["404.html", html]);
+      files.push(["404.html", shell("/", undefined, { noindex: true })]);
 
       try {
         for (const [file, content] of files) {

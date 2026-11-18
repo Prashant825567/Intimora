@@ -4,7 +4,7 @@ import { buildSitemap } from "./sitemap.mjs";
 
 // Vite copies the checked-in sitemap snapshot before this hook runs. Only a
 // complete scan replaces it, and the replacement is atomic.
-export function sitemapPlugin({ discoveryUrl, generate = buildSitemap }) {
+export function sitemapPlugin({ discoveryUrl, generate = buildSitemap, state }) {
   return {
     name: "intimora-sitemap",
     apply: "build",
@@ -21,6 +21,8 @@ export function sitemapPlugin({ discoveryUrl, generate = buildSitemap }) {
           this.warn("Sitemap catalog was incomplete; using the checked-in snapshot until a successful rebuild.");
           return;
         }
+        // Titles are reused by the route shells for their per-page <title>.
+        if (state && Array.isArray(result.videos)) state.videos = result.videos;
         await writeFile(temp, result.xml, "utf8");
         await rename(temp, path.join(directory, "sitemap.xml"));
         console.info(`Sitemap generated with ${result.videoCount} video page(s).`);

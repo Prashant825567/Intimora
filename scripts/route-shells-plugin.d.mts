@@ -7,4 +7,5 @@ export function watchIdsFromSitemap(xml: string, limit?: number): string[];
 
 export function routeShellsPlugin(options?: {
   snapshotSitemap?: string;
+  state?: { videos?: Array<{ id: string; title: string }> };
 }): Plugin;

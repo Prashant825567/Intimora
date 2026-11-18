@@ -125,6 +125,20 @@ Opening a page this way still runs the identical app: the age gate, account redi
 
 Local changes and tests do not configure or deploy the existing Render service. Rotate any credentials that were previously exposed or committed and review the backend's public responses before deployment.
 
+## Ranking for the brand name ("Intimora")
+
+Search rankings are decided by Google, not by the repository, so nobody can promise first place for a query. What the build now does is remove every technical reason for a page to be ignored:
+
+- **Head of the home page.** `<title>Intimora | 18+ Adult Video Streaming</title>`, its own description, `og:`/`twitter:` cards, one `<link rel="canonical" href="https://intimora.new.tg/">`, `og:url`, `og:image` (`/logo.png`) and `<meta name="rating" content="adult">`.
+- **Structured data.** The `WebSite` node carries `name`, `alternateName` (`Intimora.new.tg`, `Intimora adult videos`), `inLanguage`, `publisher` (`Organization` + logo) and a `SearchAction` for `https://intimora.new.tg/search?q={search_term_string}` — the two things Google uses for the site name above a result and the sitelinks searchbox.
+- **A real heading.** The home page had no `h1` (the hero shows a video title); it now starts with a visually hidden `Intimora — free 18+ video streaming`.
+- **One head per page.** Every generated shell (`/trending`, `/new`, `/exclusive`, `/categories`, `/search`, `/login`, `/profile`, `/referral`, `/dashboard`, `/watch/<id>`) gets its own title, description, canonical and `og:url`; the watch pages also carry a `WebPage` node with `contentRating: 18+`. `404.html` is `noindex, follow` and has no canonical. Catalogue titles are escaped and cut at 70 characters before they reach the HTML.
+- **Sitemap and robots.** `sitemap.xml` lists the site pages and up to 500 `/watch/<id>` URLs; `robots.txt` allows everything and points at it.
+
+**Verification tag (one step for you).** In Search Console add a property for `https://intimora.new.tg/`, choose **HTML tag**, copy only the `content` value, and set it as `INTIMORA_PUBLIC_GOOGLE_SITE_VERIFICATION` on the Render service. The build injects `<meta name="google-site-verification" …>` only when the value looks like a token (`[A-Za-z0-9_-]{20,80}`), so an empty variable changes nothing.
+
+**Realistic expectations.** A brand-new domain needs (1) Google to crawl it, days to weeks after the sitemap is submitted, (2) SafeSearch to be off in the searcher's browser — adult sites are filtered by default, (3) some backlinks from pages that mention "Intimora", which no build step can create, and (4) the age gate stays in front of the catalogue, so Google may index the pages but not their video content. Search Console → **URL Inspection** shows exactly what Google saw; if it reports the age gate, that is the gate doing its job, not a bug.
+
 ## Sitemap and Google Search Console
 
 The site publishes one XML sitemap at `https://intimora.new.tg/sitemap.xml` and advertises it in `/robots.txt`. Every sitemap lists the site's own pages first — `/`, `/trending`, `/new`, `/exclusive` and `/categories` — followed by the public video pages (`/watch/<id>`), so a crawler always finds the real Intimora pages even when the catalog scan fails. The checked-in fallback is a snapshot of those pages and the public video links available when this change was prepared. During a production build, Vite reads the **public** discovery endpoint and its selected backend's catalog, replacing that snapshot with valid `/watch/<id>` URLs for normal and exclusive videos. It follows overlapping pages, deduplicates IDs, and caps the scan at 120 pages of 50 with a 60-second overall deadline. The sitemap contains site URLs only, not backend addresses, titles, or private data. If discovery, a page, or the scan fails, the build logs a generic warning and retains the checked-in snapshot, which may be out of date; check the published XML and build log after deployment. A repeated full page is treated as incomplete because the backend's cursor can conceal items with the same timestamp.

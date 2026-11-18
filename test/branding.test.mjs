@@ -24,12 +24,13 @@ test("the static home page provides a consistent Google site name and crawlable 
   const match = html.match(/<script\s+type="application\/ld\+json">([\s\S]*?)<\/script>/);
   assert.ok(match, "WebSite structured data is present without executing JavaScript");
   const schema = JSON.parse(match[1]);
-  assert.deepEqual(schema, {
-    "@context": "https://schema.org",
-    "@type": "WebSite",
-    name: "Intimora",
-    url: "https://intimora.new.tg/",
-  });
+  // The same WebSite node Google uses for the site name, now with the brand
+  // signals (alternate names, publisher logo) and the sitelinks searchbox.
+  assert.equal(schema["@context"], "https://schema.org");
+  assert.equal(schema["@type"], "WebSite");
+  assert.equal(schema.name, "Intimora");
+  assert.equal(schema.url, "https://intimora.new.tg/");
+  assert.deepEqual(schema.alternateName, ["Intimora.new.tg", "Intimora adult videos"]);
   assert.match(html, /<title>Intimora\s*\|/);
   assert.match(html, /property="og:site_name"\s+content="Intimora"/);
   assert.match(html, /rel="icon"[^>]*type="image\/png"[^>]*sizes="16x16"[^>]*href="\/favicon-16\.png"/);

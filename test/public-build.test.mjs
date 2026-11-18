@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { ROUTE_SHELL_PATHS, watchIdsFromSitemap } from "../scripts/route-shells-plugin.mjs";
+import { pageMetaFor } from "../scripts/page-head.mjs";
 import { createStaticHost } from "./fixtures/static-host.mjs";
 
 const run = promisify(execFile);
@@ -60,18 +61,34 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
 
     // Every page is published as a real file, so direct links and refreshes
     // work on a static host without any rewrite rule.
+    const shellTitle = (body) => body.match(/<title>([^<]*)<\/title>/)?.[1];
     for (const route of ROUTE_SHELL_PATHS) {
       const name = route.slice(1);
-      assert.deepEqual(await readFile(path.join(output, `${name}.html`)), Buffer.from(html), `${route} has a page file`);
-      assert.deepEqual(await readFile(path.join(output, name, "index.html")), Buffer.from(html), `${route} has a directory index`);
+      const meta = pageMetaFor(route);
+      for (const file of [`${name}.html`, path.join(name, "index.html")]) {
+        const body = await readFile(path.join(output, file), "utf8");
+        assert.match(body, /<div id="root"><\/div>/, `${route} still boots the app`);
+        // One title and one canonical per page: no duplicate home pages.
+        assert.equal(shellTitle(body), meta.title, `${route} has its own title`);
+        assert.match(body, new RegExp(`rel="canonical" href="${meta.canonical.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), `${route} has its own canonical`);
+        assert.equal((body.match(/rel="canonical"/g) || []).length, 1, `${route} has exactly one canonical`);
+      }
     }
-    assert.deepEqual(await readFile(path.join(output, "404.html")), Buffer.from(html), "unknown paths get the app shell");
+    const notFound = await readFile(path.join(output, "404.html"), "utf8");
+    assert.match(notFound, /<div id="root"><\/div>/, "unknown paths get the app shell");
+    assert.match(notFound, /name="robots" content="noindex, follow"/, "the 404 shell is never indexed");
+    assert.doesNotMatch(notFound, /rel="canonical"/, "the 404 shell does not claim the home canonical");
     const sitemap = await readFile(path.join(output, "sitemap.xml"), "utf8");
     const videoIds = watchIdsFromSitemap(sitemap);
     assert.ok(videoIds.length > 0, "the published sitemap lists video pages");
     for (const id of videoIds) {
-      assert.deepEqual(await readFile(path.join(output, "watch", id, "index.html")), Buffer.from(html), `/watch/${id} has a directory index`);
-      assert.deepEqual(await readFile(path.join(output, "watch", `${id}.html`)), Buffer.from(html), `/watch/${id} has a page file`);
+      const meta = pageMetaFor(`/watch/${id}`);
+      for (const file of [path.join("watch", id, "index.html"), path.join("watch", `${id}.html`)]) {
+        const body = await readFile(path.join(output, file), "utf8");
+        assert.match(body, /<div id="root"><\/div>/, `/watch/${id} still boots the app`);
+        assert.equal(shellTitle(body), meta.title, `/watch/${id} has its own title`);
+        assert.match(body, new RegExp(`rel="canonical" href="${meta.canonical.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), `/watch/${id} has its own canonical`);
+      }
     }
 
     await withStaticSite(output, async (origin) => {

@@ -527,6 +527,10 @@ function App() {
           </div>
         ) : activeView === "Home" ? (
           <>
+            {/* Home had no h1 at all: the hero title is the video's name, so the
+                page never said what the site is. This one is for the crawler and
+                for a screen reader, and it stays out of the layout. */}
+            <h1 className="sr-only">Intimora — free 18+ video streaming</h1>
             {videos.length > 0 && <div className="mb-10"><HeroBanner videos={videos} onPlay={handlePlayVideo} /></div>}
             {catalogMessage}
             {/* Home is the whole catalogue. Trending, New and Exclusive have

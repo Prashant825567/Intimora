@@ -65,6 +65,7 @@ export async function buildSitemap({
   now = Date.now,
 } = {}) {
   const ids = [];
+  const videos = [];
   const seenIds = new Set();
   const seenCursors = new Set();
   let pages = 0;
@@ -100,6 +101,8 @@ export async function buildSitemap({
         if (typeof id === "string" && VIDEO_ID.test(id) && !seenIds.has(id)) {
           seenIds.add(id);
           ids.push(id);
+          // The title is kept for the page's own <title>, never for the sitemap.
+          videos.push({ id, title: typeof video?.title === "string" ? video.title : "" });
           fresh += 1;
         }
       }
@@ -123,5 +126,5 @@ export async function buildSitemap({
     // build plugin retains its checked-in snapshot unless the scan completes.
   }
 
-  return { xml: renderSitemap(ids), videoCount: ids.length, pages, complete };
+  return { xml: renderSitemap(ids), videoCount: ids.length, videos, pages, complete };
 }
