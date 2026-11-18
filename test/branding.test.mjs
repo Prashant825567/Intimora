@@ -28,11 +28,11 @@ test("the static home page provides a consistent Google site name and crawlable 
   // signals (alternate names, publisher logo) and the sitelinks searchbox.
   assert.equal(schema["@context"], "https://schema.org");
   assert.equal(schema["@type"], "WebSite");
-  assert.equal(schema.name, "Intimora");
+  assert.equal(schema.name, "Intivora");
   assert.equal(schema.url, "https://intimora.new.tg/");
-  assert.deepEqual(schema.alternateName, ["Intimora.new.tg", "Intimora adult videos"]);
-  assert.match(html, /<title>Intimora\s*\|/);
-  assert.match(html, /property="og:site_name"\s+content="Intimora"/);
+  assert.deepEqual(schema.alternateName, ["Intivora.new.tg", "Intivora adult videos"]);
+  assert.match(html, /<title>Intivora\s*\|/);
+  assert.match(html, /property="og:site_name"\s+content="Intivora"/);
   assert.match(html, /rel="icon"[^>]*type="image\/png"[^>]*sizes="16x16"[^>]*href="\/favicon-16\.png"/);
   assert.match(html, /rel="icon"[^>]*type="image\/png"[^>]*sizes="32x32"[^>]*href="\/favicon-32\.png"/);
   assert.match(html, /rel="icon"[^>]*type="image\/png"[^>]*sizes="192x192"[^>]*href="\/favicon-192\.png"/);
@@ -101,7 +101,7 @@ test("favicons have the expected square dimensions and a safe vector master", as
 
   const svg = await readFile(path.join(root, "public/logo.svg"), "utf8");
   assert.match(svg, /viewBox="0 0 128 128"/);
-  assert.match(svg, /Intimora diamond/);
+  assert.match(svg, /Intivora diamond/);
   assert.doesNotMatch(svg, /<script\b|<foreignObject\b/i);
   assert.doesNotMatch(svg.replace("http://www.w3.org/2000/svg", ""), /https?:\/\//i);
 });
@@ -159,7 +159,7 @@ test("production CSP preserves the static site-name data block", { skip: !exists
     await page.route("**/src/main.tsx", (route) => route.fulfill({ contentType: "text/javascript", body: "// Site-name metadata is static." }));
     await page.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: "load" });
     const content = await page.locator('script[type="application/ld+json"]').textContent();
-    assert.equal(JSON.parse(content).name, "Intimora");
+    assert.equal(JSON.parse(content).name, "Intivora");
     assert.deepEqual(await page.evaluate(() => window.brandCspViolations), []);
   } finally {
     await browser?.close();

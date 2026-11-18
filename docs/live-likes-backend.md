@@ -4,7 +4,7 @@ This frontend cannot make a public count correct by incrementing a browser-local
 
 ## Findings in the inspected backend
 
-The inspected `Prashant825567/-Intimora-backend` `main` commit `c30e2712d25300ee798a9092228a5c559e287aa0` has:
+The inspected `Prashant825567/-Intivora-backend` `main` commit `c30e2712d25300ee798a9092228a5c559e287aa0` has:
 
 - `POST /api/videos/:id/like` calling `users.toggleLike`, which edits only the user's `likedVideos`; it does not update the public `likes` on video metadata. The separate `store.toggleLike` exists but is not called by that route. Simply calling both Telegram-based toggles is **not** an atomic solution: concurrent requests or partial failures could desynchronize the two records.
 - A new 60-second in-memory user cache avoids a Telegram scan on a warm cache hit. Cold instances and expired caches still read up to 5,000 messages; each like/save still waits for a Telegram edit and Firebase's `accounts:lookup` REST request. Cache state is per instance, not shared between hosts. No sub-second production latency was measured here.

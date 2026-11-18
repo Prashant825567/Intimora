@@ -26,9 +26,9 @@ test("the static home page tells Google the brand, the site name and the search 
   const html = await read("index.html");
   const schema = schemaOf(html);
   assert.equal(schema["@type"], "WebSite");
-  assert.equal(schema.name, "Intimora");
+  assert.equal(schema.name, "Intivora");
   assert.equal(schema.url, `${SITE_ORIGIN}/`);
-  assert.deepEqual(schema.alternateName, ["Intimora.new.tg", "Intimora adult videos"]);
+  assert.deepEqual(schema.alternateName, ["Intivora.new.tg", "Intivora adult videos"]);
   assert.equal(schema.inLanguage, "en");
   assert.equal(schema.publisher["@type"], "Organization");
   assert.match(schema.publisher.logo.url, /^https:\/\/intimora\.new\.tg\/logo\.png$/);
@@ -36,7 +36,7 @@ test("the static home page tells Google the brand, the site name and the search 
   assert.equal(schema.potentialAction["@type"], "SearchAction");
   assert.equal(schema.potentialAction.target.urlTemplate, `${SITE_ORIGIN}/search?q={search_term_string}`);
 
-  assert.match(html, /<title>Intimora\s*\|/);
+  assert.match(html, /<title>Intivora\s*\|/);
   assert.match(html, /rel="canonical"\s+href="https:\/\/intimora\.new\.tg\/"/);
   assert.match(html, /property="og:url"\s+content="https:\/\/intimora\.new\.tg\/"/);
   assert.match(html, /property="og:image"\s+content="https:\/\/intimora\.new\.tg\/logo\.png"/);
@@ -48,7 +48,7 @@ test("the static home page tells Google the brand, the site name and the search 
 
 test("the home page has a brand heading for the crawler and a screen reader", async () => {
   const app = await read("src/App.tsx");
-  assert.match(app, /<h1 className="sr-only">Intimora — free 18\+ video streaming<\/h1>/);
+  assert.match(app, /<h1 className="sr-only">Intivora — free 18\+ video streaming<\/h1>/);
 });
 
 test("every generated page gets its own title, description and canonical", () => {
@@ -60,14 +60,14 @@ test("every generated page gets its own title, description and canonical", () =>
   for (const route of ["/trending", "/new", "/exclusive", "/categories", "/search", "/login", "/profile", "/referral", "/dashboard"]) {
     const meta = pageMetaFor(route);
     assert.equal(meta.canonical, `${SITE_ORIGIN}${route}`);
-    assert.match(meta.title, /Intimora/);
+    assert.match(meta.title, /Intivora/);
     assert.ok(!seen.has(meta.title), `${route} shares a title with another page`);
     seen.add(meta.title);
     assert.ok(meta.description.length > 10 && meta.description.length <= 160, `${route} description is usable`);
   }
 
   const watch = pageMetaFor("/watch/local-1794995532814", { videoTitle: "2025-09-18-00-42-00" });
-  assert.equal(watch.title, "2025-09-18-00-42-00 | Intimora");
+  assert.equal(watch.title, "2025-09-18-00-42-00 | Intivora");
   assert.equal(watch.canonical, `${SITE_ORIGIN}/watch/local-1794995532814`);
   assert.equal(watch.type, "video.other");
   assert.equal(watch.page["@type"], "WebPage");
@@ -77,7 +77,7 @@ test("every generated page gets its own title, description and canonical", () =>
 
 test("a video without a usable title still gets a unique watch page", () => {
   const plain = pageMetaFor("/watch/local-1", { videoTitle: "" });
-  assert.equal(plain.title, "Watch on Intimora | 18+ Adult Video Streaming");
+  assert.equal(plain.title, "Watch on Intivora | 18+ Adult Video Streaming");
   // An id that could not be one of ours falls back to the home head instead of
   // producing a broken canonical.
   assert.equal(pageMetaFor("/watch/../etc/passwd").canonical, `${SITE_ORIGIN}/`);
@@ -106,15 +106,15 @@ test("catalogue text is escaped and shortened, never injected", () => {
 test("applyPageHead rewrites the copy of index.html the build ships", async () => {
   const html = await read("index.html");
   const watch = applyPageHead(html, pageMetaFor("/watch/local-1794995532814", { videoTitle: "A real title" }));
-  assert.match(watch, /<title>A real title \| Intimora<\/title>/);
-  assert.match(watch, /property="og:title" content="A real title \| Intimora"/);
+  assert.match(watch, /<title>A real title \| Intivora<\/title>/);
+  assert.match(watch, /property="og:title" content="A real title \| Intivora"/);
   assert.match(watch, /property="og:url" content="https:\/\/intimora\.new\.tg\/watch\/local-1794995532814"/);
   assert.match(watch, /property="og:type" content="video\.other"/);
   assert.equal((watch.match(/rel="canonical"/g) || []).length, 1);
-  assert.doesNotMatch(watch, /Intimora is an 18\+ adult video streaming platform/, "the home description is replaced");
+  assert.doesNotMatch(watch, /Intivora is an 18\+ adult video streaming platform/, "the home description is replaced");
 
   const browse = applyPageHead(html, pageMetaFor("/trending"));
-  assert.match(browse, /<title>Trending Videos \| Intimora<\/title>/);
+  assert.match(browse, /<title>Trending Videos \| Intivora<\/title>/);
   assert.equal((browse.match(/rel="canonical"/g) || []).length, 1);
   assert.match(browse, /rel="canonical" href="https:\/\/intimora\.new\.tg\/trending"/);
   // The site-level WebSite block survives; only the page-level one is added.

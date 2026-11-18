@@ -6,9 +6,9 @@
 import { BROWSE_PATHS } from "../src/services/page-routes.mjs";
 
 export const SITE_ORIGIN = "https://intimora.new.tg";
-export const SITE_NAME = "Intimora";
-export const HOME_TITLE = "Intimora | 18+ Adult Video Streaming";
-export const HOME_DESCRIPTION = "Intimora is an 18+ adult video streaming platform with a searchable catalog and online playback.";
+export const SITE_NAME = "Intivora";
+export const HOME_TITLE = "Intivora | 18+ Adult Video Streaming";
+export const HOME_DESCRIPTION = "Intivora is an 18+ adult video streaming platform with a searchable catalog and online playback.";
 
 const MAX_TITLE_CHARS = 70;
 const MAX_DESCRIPTION_CHARS = 160;
@@ -16,29 +16,29 @@ const WATCH_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 const BROWSE_HEADS = {
   Trending: {
-    title: "Trending Videos | Intimora",
-    description: "The most viewed videos on Intimora, ranked by views.",
+    title: "Trending Videos | Intivora",
+    description: "The most viewed videos on Intivora, ranked by views.",
   },
   New: {
-    title: "New Releases | Intimora",
-    description: "Today's newest uploads on Intimora, 18+ only.",
+    title: "New Releases | Intivora",
+    description: "Today's newest uploads on Intivora, 18+ only.",
   },
   Exclusive: {
-    title: "Exclusive Videos | Intimora",
-    description: "Videos marked exclusive in their metadata on Intimora.",
+    title: "Exclusive Videos | Intivora",
+    description: "Videos marked exclusive in their metadata on Intivora.",
   },
   Categories: {
-    title: "Categories | Intimora",
-    description: "Browse Intimora by category.",
+    title: "Categories | Intivora",
+    description: "Browse Intivora by category.",
   },
 };
 
 const OTHER_HEADS = {
-  "/search": { title: "Search Videos | Intimora", description: "Search the Intimora catalogue." },
-  "/login": { title: "Sign In | Intimora", description: "Sign in to Intimora with Google." },
-  "/profile": { title: "Your Profile | Intimora", description: "Your Intimora profile and saved videos." },
-  "/referral": { title: "Referral Program | Intimora", description: "Invite friends to Intimora with your referral code." },
-  "/dashboard": { title: "Account | Intimora", description: "Your Intimora account dashboard." },
+  "/search": { title: "Search Videos | Intivora", description: "Search the Intivora catalogue." },
+  "/login": { title: "Sign In | Intivora", description: "Sign in to Intivora with Google." },
+  "/profile": { title: "Your Profile | Intivora", description: "Your Intivora profile and saved videos." },
+  "/referral": { title: "Referral Program | Intivora", description: "Invite friends to Intivora with your referral code." },
+  "/dashboard": { title: "Account | Intivora", description: "Your Intivora account dashboard." },
 };
 
 // Catalogue text is untrusted: strip control characters, collapse whitespace,
@@ -77,10 +77,10 @@ export function pageMetaFor(route = "/", { videoTitle } = {}) {
     const id = watch[1];
     if (!WATCH_ID.test(id)) return pageMetaFor("/");
     const cleaned = cleanPhrase(videoTitle);
-    const title = cleaned ? `${cleaned} | Intimora` : "Watch on Intimora | 18+ Adult Video Streaming";
+    const title = cleaned ? `${cleaned} | Intivora` : "Watch on Intivora | 18+ Adult Video Streaming";
     const description = cleaned
-      ? `Watch “${cleaned}” on Intimora. 18+ only.`
-      : "Watch this video on Intimora. 18+ only.";
+      ? `Watch “${cleaned}” on Intivora. 18+ only.`
+      : "Watch this video on Intivora. 18+ only.";
     return {
       title: cleanPhrase(title, MAX_TITLE_CHARS + 12),
       description: cleanPhrase(description, MAX_DESCRIPTION_CHARS),
@@ -89,7 +89,7 @@ export function pageMetaFor(route = "/", { videoTitle } = {}) {
       page: {
         "@context": "https://schema.org",
         "@type": "WebPage",
-        name: cleanPhrase(cleaned || "Watch on Intimora", MAX_TITLE_CHARS),
+        name: cleanPhrase(cleaned || "Watch on Intivora", MAX_TITLE_CHARS),
         url: canonicalFor(route),
         isFamilyFriendly: false,
         contentRating: "18+",

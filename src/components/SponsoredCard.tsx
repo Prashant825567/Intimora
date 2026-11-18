@@ -92,7 +92,7 @@ const SponsoredCard: React.FC<SponsoredCardProps> = ({ card, onPlay }) => {
 
         <div className="video-card__metadata flex items-center flex-wrap gap-x-2 gap-y-1 mt-1.5 text-xs text-gray-500">
           <span className="video-card__creator flex items-center gap-1.5 min-w-0">
-            <img src="/logo.png" alt="Intimora" className="video-card__avatar w-4 h-4 rounded-full border border-yellow-800/50 object-contain" />
+            <img src="/logo.png" alt="Intivora" className="video-card__avatar w-4 h-4 rounded-full border border-yellow-800/50 object-contain" />
             <span className="video-card__creator-name break-words">Sponsored</span>
           </span>
           <span className="flex items-center gap-2 whitespace-nowrap">

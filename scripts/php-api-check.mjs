@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Full end-to-end check of a PHP Intimora backend that sits behind the
+// Full end-to-end check of a PHP Intivora backend that sits behind the
 // InfinityFree browser check.
 //
 //   node scripts/php-api-check.mjs                       # default: api2

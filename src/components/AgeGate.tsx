@@ -51,7 +51,7 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
             <img src="/logo.svg" alt="" className="age-gate__logo w-20 h-20 object-contain" />
           </div>
 
-          <h1 className="age-gate__title brand-wordmark mb-1">Intimora</h1>
+          <h1 className="age-gate__title brand-wordmark mb-1">Intivora</h1>
           <p className="age-gate__subtitle text-gray-500 text-xs tracking-widest uppercase mb-8">Adult Entertainment</p>
 
           {/* Age warning */}
