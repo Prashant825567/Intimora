@@ -305,3 +305,39 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     description: apiVideo.description || "",
   };
 };
+
+// Visitor log: one call per browser session, fired after the age gate. It never
+// throws and never blocks the page — a host without the endpoint simply answers
+// 404 and nothing else changes. The request travels through the same visitor
+// route as the catalogue, so a PHP host's unlock/challenge is still handled
+// instead of being bypassed by a raw fetch.
+export async function logVisit() {
+  try {
+    if (sessionStorage.getItem("intimora_visit_logged") === "1") return;
+    sessionStorage.setItem("intimora_visit_logged", "1");
+
+    // Chrome on Android exposes the device model here; Safari and iOS have no
+    // such API, so the field is simply empty there.
+    let model = "";
+    try {
+      const uaData = (navigator as Navigator & {
+        userAgentData?: { getHighEntropyValues?: (hints: string[]) => Promise<{ model?: string }> };
+      }).userAgentData;
+      if (uaData?.getHighEntropyValues) {
+        const high = await uaData.getHighEntropyValues(["model"]);
+        model = typeof high?.model === "string" ? high.model : "";
+      }
+    } catch { /* No client hints: the user agent string is the fallback. */ }
+
+    const params = new URLSearchParams({
+      ua: navigator.userAgent.slice(0, 500),
+      model: model.slice(0, 60),
+      lang: (navigator.language || "").slice(0, 20),
+      tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 40),
+      screen: `${window.screen.width}x${window.screen.height}`,
+      path: location.pathname.slice(0, 250),
+      referer: (document.referrer || "").slice(0, 250),
+    });
+    await visitor.requestJson(`/api/visit?${params}`);
+  } catch { /* Logging never breaks the app. */ }
+}

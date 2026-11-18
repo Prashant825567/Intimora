@@ -18,7 +18,7 @@ import type { LiveLikes } from "./hooks/useLiveLikes";
 import type { Video } from "./data/mockVideos";
 import type { BrowseView } from "./types/navigation";
 import { TrendingUp, Loader2, Upload, Wifi, WifiOff, Grid2X2 } from "lucide-react";
-import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, phpFailure, retryPhpSession } from "./services/api";
+import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, logVisit, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, phpFailure, retryPhpSession } from "./services/api";
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
 import { unlockReturnedThisLoad } from "./services/unlock.mjs";
@@ -199,6 +199,8 @@ function App() {
     try { sessionStorage.setItem(AGE_VERIFIED_KEY, "true"); }
     catch { /* The current page can still be used when storage is disabled. */ }
     setAgeVerified(true);
+    // One visit row per session, after the 18+ confirmation.
+    void logVisit();
   };
 
   // The backend only offers date-ordered pages. Scan them in the background so
