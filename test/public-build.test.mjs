@@ -130,7 +130,7 @@ test("Render Blueprint describes a static site with watch/account rewrites and a
     assert.match(yaml, new RegExp(`source:\\s*\\/${route}\\n\\s*destination:\\s*\\/index\\.html`));
     assert.match(yaml, new RegExp(`source:\\s*\\/${route}\\/\\n\\s*destination:\\s*\\/index\\.html`));
   }
-  assert.match(yaml, /script-src 'self' https:\/\/apis\.google\.com;/);
+  assert.match(yaml, /script-src 'self' https:\/\/apis\.google\.com https:\/\/static\.cloudflareinsights\.com;/);
   assert.match(yaml, /frame-src 'self' https:\/\/intimora-app\.firebaseapp\.com https:\/\/accounts\.google\.com https:\/\/hdzog\.com https:\/\/desi-porntube\.com;/);
   assert.match(yaml, /connect-src 'self' https:/);
   assert.match(yaml, /media-src 'self' blob: https:/);
