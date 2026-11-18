@@ -10,7 +10,7 @@ const Footer: React.FC = () => {
           <div className="flex items-center gap-3">
             <img src="/logo.svg" alt="" className="w-10 h-10 object-contain" />
             <div>
-              <span className="brand-wordmark site-footer__brand-text">Intimora</span>
+              <span className="brand-wordmark site-footer__brand-text">Intivora</span>
               <p className="text-gray-600 text-xs tracking-wider">Adult Entertainment</p>
             </div>
           </div>
@@ -64,7 +64,7 @@ const Footer: React.FC = () => {
           </div>
           <p className="text-gray-700 text-xs leading-relaxed max-w-2xl mx-auto">
             All models on this website were 18+ at the time of filming. All content is fictional and produced legally. 
-            Intimora complies with 18 U.S.C. 2257. © {new Date().getFullYear()} Intimora. All Rights Reserved.
+            Intivora complies with 18 U.S.C. 2257. © {new Date().getFullYear()} Intivora. All Rights Reserved.
           </p>
           <p className="text-gray-800 text-xs mt-3">
             Unauthorized reproduction or distribution of any content on this website is strictly prohibited.

@@ -299,7 +299,7 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     videoUrl: playback.videoUrl,
     fallbackVideoUrl: playback.fallbackVideoUrl,
     backendBase: backend,
-    creator: apiVideo.creator || "Intimora",
+    creator: apiVideo.creator || "Intivora",
     creatorAvatar: "/logo.png",
     uploadedAt: apiVideo.uploadedAt || formatDate(apiVideo.createdAt),
     description: apiVideo.description || "",

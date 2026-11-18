@@ -119,7 +119,7 @@ export function showUnlockSplash({ document: doc = globalThis.document, message 
   splash.setAttribute("aria-live", "polite");
   splash.innerHTML = `
     <div class="unlock-splash__card">
-      <img class="unlock-splash__logo" src="/logo.png" alt="Intimora" />
+      <img class="unlock-splash__logo" src="/logo.png" alt="Intivora" />
       <span class="unlock-splash__ring" aria-hidden="true"></span>
       <p class="unlock-splash__title">${message ?? "Ek second… verifying your connection"}</p>
       <p class="unlock-splash__note">You will be brought back here automatically.</p>

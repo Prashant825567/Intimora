@@ -509,7 +509,7 @@ function App() {
           </section>
         ) : initialLoading ? (
           <div className="flex flex-col items-center justify-center py-40" role="status">
-            <img src="/logo.png" alt="Intimora" className="w-20 h-20 object-contain animate-pulse mb-6" />
+            <img src="/logo.png" alt="Intivora" className="w-20 h-20 object-contain animate-pulse mb-6" />
             <Loader2 className="w-8 h-8 animate-spin mb-4" style={{ color: "#c9a84c" }} />
             <p className="text-gray-500 text-sm tracking-widest uppercase">Loading content...</p>
           </div>
@@ -532,7 +532,7 @@ function App() {
             {/* Home had no h1 at all: the hero title is the video's name, so the
                 page never said what the site is. This one is for the crawler and
                 for a screen reader, and it stays out of the layout. */}
-            <h1 className="sr-only">Intimora — free 18+ video streaming</h1>
+            <h1 className="sr-only">Intivora — free 18+ video streaming</h1>
             {videos.length > 0 && <div className="mb-10"><HeroBanner videos={videos} onPlay={handlePlayVideo} /></div>}
             {catalogMessage}
             {/* Home is the whole catalogue. Trending, New and Exclusive have

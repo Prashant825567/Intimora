@@ -36,7 +36,7 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     assert.ok(js.some((content) => content.includes(publicUrl)), "the endpoint is intentionally public");
     const html = await readFile(path.join(output, "index.html"), "utf8");
     assert.match(html, /"@type":\s*"WebSite"/);
-    assert.match(html, /"name":\s*"Intimora"/);
+    assert.match(html, /"name":\s*"Intivora"/);
     const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1];
     assert.ok(head, "the built HTML has a head");
     assert.match(head, /<meta\s+name="6a97888e-site-verification"\s+content="f4423f712c6f1c15fb7fc4c833c8c020"\s*\/?\s*>/i);

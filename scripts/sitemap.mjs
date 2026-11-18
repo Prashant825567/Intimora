@@ -5,7 +5,7 @@ import { DEFAULT_DISCOVERY_URL, publicBackendBase, publicHttpsUrl } from "../src
 export const SITE_ORIGIN = "https://intimora.new.tg";
 
 // The site's own browsable pages, in the order a visitor meets them. They are
-// listed first so a crawler always finds the real Intimora pages even when the
+// listed first so a crawler always finds the real Intivora pages even when the
 // catalog scan fails and no video page can be enumerated.
 export const SITE_PAGES = Object.freeze(Object.values(BROWSE_PATHS));
 const VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;

@@ -17,7 +17,7 @@ export async function requestTagText(url, timeoutMs = DEFAULT_AD_TIMEOUT_MS, fet
       signal: controller.signal,
       redirect: "follow",
       credentials: "omit",
-      headers: { accept: "text/xml, application/xml;q=0.9, */*;q=0.5", "user-agent": "IntimoraAdProbe/1.0" },
+      headers: { accept: "text/xml, application/xml;q=0.9, */*;q=0.5", "user-agent": "IntivoraAdProbe/1.0" },
     });
     if (!response.ok) throw new Error(`tag responded ${response.status}`);
     const text = await response.text();

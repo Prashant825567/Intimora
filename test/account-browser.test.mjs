@@ -18,8 +18,8 @@ const evil = "https://evil.example";
 const fakeToken = "fixture.header.signature";
 const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const videos = [
-  { id: "video-one", title: "First video", creator: "Intimora", views: 100, likes: 8 },
-  { id: "video-two", title: "Second video", creator: "Intimora", views: 20, likes: 2 },
+  { id: "video-one", title: "First video", creator: "Intivora", views: 100, likes: 8 },
+  { id: "video-two", title: "Second video", creator: "Intivora", views: 20, likes: 2 },
 ];
 
 // Only this test's Vite instance substitutes a deterministic identity provider.
