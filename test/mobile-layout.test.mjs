@@ -180,6 +180,17 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       assert.equal(await brand.locator(".site-nav__brand-mark").evaluate((image) => image.complete && image.naturalWidth > 0), true, `${label}: brand image loaded`);
       assert.equal(await page.evaluate(() => [...document.fonts].some((font) => font.family === "Dancing Script" && font.status === "loaded")), true, `${label}: local wordmark font loaded`);
       await assertPageFits(page, `${label} home`);
+      // Home, Trending, New, Exclusive and Categories sit in the bar itself,
+      // never behind the hamburger, and every one of them is reachable.
+      const tabs = page.locator(".site-nav__tabs");
+      assert.equal(await tabs.isVisible(), true, `${label}: browse tabs are on screen`);
+      for (const name of ["Home", "Trending", "New", "Exclusive", "Categories"]) {
+        await assertInViewport(tabs.getByRole("link", { name, exact: true }), width, height, `${label} ${name} tab`);
+      }
+      // They live inside the bar's own scrolling row, so the page itself never
+      // widens: the strip is allowed to scroll, the document is not.
+      assert.equal(await tabs.evaluate((strip) => getComputedStyle(strip).overflowX), "auto", `${label}: tabs scroll inside the bar`);
+      await assertPageFits(page, `${label} tabs`);
       await assertHeroImagesFit(page, label);
       await assertTextNotClipped(page.locator(".hero-banner__title"), `${label} featured title`);
       await assertTextNotClipped(page.locator(".hero-banner__creator"), `${label} featured creator`);

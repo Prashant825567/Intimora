@@ -80,7 +80,7 @@ test("browse, search, and watch URLs work on direct entry, reload, and browser h
     await page.getByRole("button", { name: /I AM 18/i }).click();
     await page.getByRole("heading", { name: "Trending Now" }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/trending");
-    const nav = page.locator(".site-nav__desktop-links");
+    const nav = page.locator(".site-nav__tabs");
     for (const [label, href] of [["Home", "/"], ["Trending", "/trending"], ["New", "/new"], ["Exclusive", "/exclusive"], ["Categories", "/categories"]]) {
       assert.equal(await nav.getByRole("link", { name: label, exact: true }).getAttribute("href"), href);
     }

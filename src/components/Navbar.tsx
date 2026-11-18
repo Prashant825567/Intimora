@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Search, X, Menu, Bell, User, ChevronDown } from "lucide-react";
 import type { BrowseView } from "../types/navigation";
 import { BROWSE_PATHS } from "../services/page-routes.mjs";
@@ -17,6 +17,7 @@ interface NavbarProps {
 const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSubmit, activeView, onNavigate, accountLabel, accountInitial, onAccountClick }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
 
   const categories: BrowseView[] = ["Home", "Trending", "New", "Exclusive", "Categories"];
   const navigate = (view: BrowseView) => {
@@ -29,6 +30,16 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
     event.preventDefault();
     navigate(view);
   };
+
+  // The tab strip is scrollable on a phone, so the active tab is centred after
+  // every navigation instead of being left off the right edge.
+  useEffect(() => {
+    const strip = tabsRef.current;
+    const active = strip?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!strip || !active) return;
+    const left = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2;
+    strip.scrollTo({ left: Math.max(0, left), behavior: "auto" });
+  }, [activeView]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,8 +130,8 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
           </div>
         </div>
 
-        {/* Category bar */}
-        <div className="site-nav__desktop-links hidden sm:flex items-center gap-1 pb-2 overflow-x-auto scrollbar-hide">
+        {/* Category bar: on every screen size, including phones */}
+        <div ref={tabsRef} className="site-nav__tabs flex items-center gap-1 pb-2 overflow-x-auto" role="navigation" aria-label="Browse">
           {categories.map((cat) => (
             <a
               key={cat}
@@ -144,20 +155,6 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
         {/* Mobile menu */}
         {mobileMenuOpen && (
           <div id="mobile-navigation" className="site-nav__mobile-menu sm:hidden pb-3 border-t border-gray-800 pt-3">
-            <div className="flex flex-wrap gap-2">
-              {categories.map((cat) => (
-                <a
-                  key={cat}
-                  href={BROWSE_PATHS[cat]}
-                  onClick={(event) => follow(event, cat)}
-                  aria-current={activeView === cat ? "page" : undefined}
-                  className="px-3 py-1.5 rounded-full text-xs font-semibold text-gray-400 hover:text-yellow-400 border border-gray-800 hover:border-yellow-800 transition"
-                  style={activeView === cat ? { color: "#f3d58a", borderColor: "#8c6c32" } : undefined}
-                >
-                  {cat}
-                </a>
-              ))}
-            </div>
             <div className="site-nav__mobile-actions">
               <button type="button" className="site-nav__mobile-action"><Bell className="w-4 h-4" /> Notifications</button>
               <button type="button" className="site-nav__mobile-action" onClick={() => { setMobileMenuOpen(false); onAccountClick(); }}><User className="w-4 h-4" /> Account</button>

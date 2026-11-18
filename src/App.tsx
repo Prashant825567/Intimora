@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import type { ReactNode } from "react";
 import AgeGate from "./components/AgeGate";
 import Navbar from "./components/Navbar";
 import HeroBanner from "./components/HeroBanner";
@@ -18,7 +17,7 @@ import { useLiveLikes } from "./hooks/useLiveLikes";
 import type { LiveLikes } from "./hooks/useLiveLikes";
 import type { Video } from "./data/mockVideos";
 import type { BrowseView } from "./types/navigation";
-import { TrendingUp, Flame, Sparkles, ChevronRight, Loader2, Upload, Wifi, WifiOff, Grid2X2 } from "lucide-react";
+import { TrendingUp, Loader2, Upload, Wifi, WifiOff, Grid2X2 } from "lucide-react";
 import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, phpFailure, retryPhpSession } from "./services/api";
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
@@ -41,58 +40,26 @@ const DISPLAY_PAGE_SIZE = 12;
 type CatalogStatus = "loading" | "complete" | "partial";
 type FeedView = Exclude<BrowseView, "Home" | "Categories">;
 
-function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, compact = false, sponsored, onPlaySponsored }: {
+function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, sponsored, onPlaySponsored }: {
   videos: Video[];
   onPlay: (video: Video) => void;
   onShare: (video: Video) => void;
   onSave: (video: Video) => void;
   account: AccountController;
   liveLikes: LiveLikes;
-  compact?: boolean;
   // Sponsored partner videos are mixed in as "four of ours, then one of theirs".
   sponsored?: SponsoredCardData[];
   onPlaySponsored?: (card: SponsoredCardData) => void;
 }) {
   const entries = interleaveSponsored(videos, sponsored ?? []);
   return (
-    <div className={compact
-      ? "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4"
-      : "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4"}>
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
       {entries.map((entry) => entry.kind === "sponsored" ? (
         <SponsoredCard key={entry.card.id} card={entry.card} onPlay={(card) => onPlaySponsored?.(card)} />
       ) : (
         <VideoCard key={entry.video.id} video={liveLikes.withCount(entry.video)} onPlay={onPlay} onShare={onShare} onSave={onSave} saved={account.isSaved(entry.video.id)} savePending={account.pending.has(`save:${entry.video.id}`)} observeLikes={liveLikes.observe} />
       ))}
     </div>
-  );
-}
-
-function FeedSection({ title, icon, videos, emptyMessage, onSeeAll, onPlay, onShare, onSave, account, liveLikes }: {
-  title: string;
-  icon: ReactNode;
-  videos: Video[];
-  emptyMessage: string;
-  onSeeAll: () => void;
-  onPlay: (video: Video) => void;
-  onShare: (video: Video) => void;
-  onSave: (video: Video) => void;
-  account: AccountController;
-  liveLikes: LiveLikes;
-}) {
-  return (
-    <section className="mb-10" aria-label={title}>
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2" style={{ color: "#c9a84c" }}>
-          {icon}
-          <h2 className="text-white font-bold text-lg">{title}</h2>
-        </div>
-        <button type="button" onClick={onSeeAll} aria-label={`See all ${title}`} className="flex items-center gap-1 text-xs text-gray-500 hover:text-yellow-400 transition">
-          See all <ChevronRight className="w-3 h-3" />
-        </button>
-      </div>
-      {videos.length ? <VideoGrid videos={videos.slice(0, 6)} onPlay={onPlay} onShare={onShare} onSave={onSave} account={account} liveLikes={liveLikes} compact />
-        : <p className="text-gray-500 text-sm">{emptyMessage}</p>}
-    </section>
   );
 }
 
@@ -562,13 +529,8 @@ function App() {
           <>
             {videos.length > 0 && <div className="mb-10"><HeroBanner videos={videos} onPlay={handlePlayVideo} /></div>}
             {catalogMessage}
-            {catalogStatus === "complete" && videos.length > 0 && (
-              <>
-                <FeedSection title="Trending Now" icon={<Flame className="w-4 h-4" />} videos={trending} emptyMessage={feedLabels.Trending.empty} onSeeAll={() => navigate("Trending")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
-                <FeedSection title="New Releases" icon={<Sparkles className="w-4 h-4" />} videos={newReleases} emptyMessage={feedLabels.New.empty} onSeeAll={() => navigate("New")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
-                <FeedSection title="Exclusive" icon={<Sparkles className="w-4 h-4" />} videos={exclusive} emptyMessage={feedLabels.Exclusive.empty} onSeeAll={() => navigate("Exclusive")} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
-              </>
-            )}
+            {/* Home is the whole catalogue. Trending, New and Exclusive have
+                their own tabs, so those rows never repeat here. */}
             {videos.length > 0 && (
               <section aria-label="All Videos">
                 <div className="flex items-center gap-2 mb-5" style={{ color: "#c9a84c" }}><TrendingUp className="w-5 h-5" /><h2 className="text-white font-bold text-xl">All Videos</h2><span className="text-gray-600 text-sm ml-1">({videos.length})</span></div>
