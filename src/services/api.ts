@@ -306,38 +306,40 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
   };
 };
 
-// Visitor log: one call per browser session, fired after the age gate. It never
-// throws and never blocks the page — a host without the endpoint simply answers
-// 404 and nothing else changes. The request travels through the same visitor
-// route as the catalogue, so a PHP host's unlock/challenge is still handled
-// instead of being bypassed by a raw fetch.
+// Visitor log: one POST per page load, fired after the 18+ gate. It travels
+// through the same visitor route as the catalogue, so a PHP host's HTML check,
+// its cookie and the one-time unlock are handled instead of being bypassed by a
+// raw fetch. `text/plain` keeps it a "simple" request — no preflight, which a
+// free host answers with its check page instead of JSON. Everything is
+// swallowed: logging never slows down or breaks the catalogue.
+let visitLogged = false;
 export async function logVisit() {
+  if (visitLogged) return;
+  visitLogged = true;
+
+  // Chrome on Android exposes the device model here; Safari and iOS have no
+  // such API, so the field is simply left out there.
+  let model = "";
   try {
-    if (sessionStorage.getItem("intimora_visit_logged") === "1") return;
-    sessionStorage.setItem("intimora_visit_logged", "1");
+    const uaData = (navigator as Navigator & {
+      userAgentData?: { getHighEntropyValues?: (hints: string[]) => Promise<{ model?: string }> };
+    }).userAgentData;
+    if (uaData?.getHighEntropyValues) {
+      const hints = await uaData.getHighEntropyValues(["model"]);
+      if (typeof hints?.model === "string") model = hints.model;
+    }
+  } catch { /* No client hints: the user agent string is the fallback. */ }
 
-    // Chrome on Android exposes the device model here; Safari and iOS have no
-    // such API, so the field is simply empty there.
-    let model = "";
-    try {
-      const uaData = (navigator as Navigator & {
-        userAgentData?: { getHighEntropyValues?: (hints: string[]) => Promise<{ model?: string }> };
-      }).userAgentData;
-      if (uaData?.getHighEntropyValues) {
-        const high = await uaData.getHighEntropyValues(["model"]);
-        model = typeof high?.model === "string" ? high.model : "";
-      }
-    } catch { /* No client hints: the user agent string is the fallback. */ }
-
-    const params = new URLSearchParams({
+  try {
+    const payload = JSON.stringify({
       ua: navigator.userAgent.slice(0, 500),
-      model: model.slice(0, 60),
+      ...(model ? { model: model.slice(0, 60) } : {}),
       lang: (navigator.language || "").slice(0, 20),
       tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 40),
       screen: `${window.screen.width}x${window.screen.height}`,
-      path: location.pathname.slice(0, 250),
+      path: (location.pathname + location.search).slice(0, 250),
       referer: (document.referrer || "").slice(0, 250),
     });
-    await visitor.requestJson(`/api/visit?${params}`);
+    await visitor.requestJson("/api/visit", { method: "POST", body: payload });
   } catch { /* Logging never breaks the app. */ }
 }
