@@ -9,7 +9,8 @@
     "preview": "node server/index.mjs",
     "start": "node server/index.mjs",
     "test": "node --test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "anime:feed": "node scripts/anime-feed.mjs"
   },
   "engines": {
     "node": ">=20.19.0 <25.0.0"

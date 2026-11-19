@@ -62,6 +62,7 @@ test("home shows All, Desi, Anime and Sponsored under the hero and filters the g
       const url = new URL(request.url());
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
+      if (url.pathname === "/anime-feed.json") return route.fulfill({ json: { version: 1, items: [] } });
       if (url.pathname === "/partner-feed.json") {
         return route.fulfill({ json: { version: 2, items: [
           { embedUrl: "https://desi-porntube.com/embed/762647/?source=1", title: "Sponsored one", thumbnail: "https://cdn.example/one.jpg" },

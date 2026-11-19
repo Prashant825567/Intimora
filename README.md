@@ -165,6 +165,17 @@ Three things worth knowing:
 
 Render's dashboard does not report traffic for a static site; the Cloudflare worker's own analytics count `get-server` calls, not visitors.
 
+## Anime titles (baked feed)
+
+Anime cards come from one external source, **hentaicity.com**, and only as a feed: `scripts/anime-feed.mjs` reads their public listing page once (their `robots.txt` allows listings with `Crawl-Delay: 10` and disallows `/embed/` and `/search/`, so only listings are requested) and writes `public/anime-feed.json` — id, title, poster, duration, and the embed URL **derived** from the id. Nothing is proxied at runtime, no media URL is copied, and the browser never talks to them until a visitor clicks a card.
+
+- **Build step:** `npm run anime:feed` (one listing page by default; `ANIME_FEED_PAGES=3` for more, `ANIME_FEED_MAX` caps the items). A failed read keeps the checked-in snapshot, exactly like the sitemap step, so no network never means no site.
+- **Click:** the card opens `https://www.hentaicity.com/embed/<id>` inside our own player overlay (`PartnerPlayer`), sandboxed and `no-referrer`. Their player, their ads, their bandwidth; our design.
+- **Filter:** the anime cards appear under the **Anime** chip only. They never enter **All**, so the home counts stay ours.
+- **Search:** matches are computed on the local feed (`/search` on their host is disallowed to crawlers), so no query leaves our origin.
+- **No like/save on anime cards:** those actions need a video id in our own backend, and an external title has none. Storing them would mean adding external ids (`hc:<id>`) to the backend API first. The cards therefore show no like/save button instead of a button that always fails.
+- **CSP:** `frame-src` lists `https://www.hentaicity.com` in both `server/security.mjs` and `render.yaml`; `img-src https:` already covers their poster CDN.
+
 ## Sponsored partner videos (TubeCorporate)
 
 Partner videos are **part of the catalogue layout**: every fourth card is followed by one sponsored card ("four of ours, then one of theirs") on Home, Trending, New and Exclusive. Each sponsored card uses the site's own card markup, outline, hover and typography, and the badge slot that shows `EXCLUSIVE` on our videos shows `SPONSORED` on theirs. Titles and posters come from the partner page itself (`og:title`, `og:image`), so a sponsored card looks like one of our own.

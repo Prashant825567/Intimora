@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import AgeGate from "./components/AgeGate";
+import AnimeCard from "./components/AnimeCard";
 import CategoryBar, { type HomeFilter } from "./components/CategoryBar";
 import Navbar from "./components/Navbar";
 import HeroBanner from "./components/HeroBanner";
@@ -30,6 +31,7 @@ import {
   UNLOCK_RETRY_DELAYS_MS,
   retryWithDelays,
 } from "./services/retry.mjs";
+import { animeCards, type AnimeCard as AnimeCardData } from "./services/anime-feed.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectHomeFilter, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
@@ -124,6 +126,8 @@ function App() {
   const [sponsored, setSponsored] = useState<SponsoredCardData[]>([]);
   // The home filter lives in the page, not the URL: home stays one address.
   const [homeFilter, setHomeFilter] = useState<HomeFilter>("all");
+  const [anime, setAnime] = useState<AnimeCardData[]>([]);
+  const [activeAnime, setActiveAnime] = useState<AnimeCardData | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus>("loading");
   const [catalogRevision, setCatalogRevision] = useState(0);
@@ -210,6 +214,19 @@ function App() {
   // Discovery starts on arrival; a page behind the front-door gate asks for no
   // catalog or media until the gate is answered.
   useEffect(() => { primeBackendSelection().catch(() => {}); }, []);
+
+  // The anime feed is a same-origin file written by the build: nothing is
+  // proxied at runtime and no third-party media URL is fetched here.
+  useEffect(() => {
+    if (!accessGranted) return;
+    let active = true;
+    const controller = new AbortController();
+    fetch("/anime-feed.json", { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer", signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: unknown) => { if (active) setAnime(animeCards(payload)); })
+      .catch(() => { if (active) setAnime([]); });
+    return () => { active = false; controller.abort(); };
+  }, [accessGranted]);
 
   // A deep-linked visitor never meets the gate, so the single per-session visit
   // row is written on arrival instead of after a confirmation.
@@ -346,6 +363,13 @@ function App() {
     New: { title: "New Releases", subtitle: "Today's uploads, or yesterday's if there are none today.", empty: "No videos were uploaded today or yesterday." },
     Exclusive: { title: "Exclusive", subtitle: "Videos marked exclusive in their metadata.", empty: "No exclusive videos are available yet." },
   };
+  // Anime titles from the feed are matched locally: their source disallows
+  // crawlers on /search/, so no query ever leaves our own origin.
+  const animeMatches = useMemo(() => {
+    const query = (submittedQuery ?? "").trim().toLowerCase();
+    if (!query) return [];
+    return anime.filter((card) => card.title.toLowerCase().includes(query)).slice(0, 24);
+  }, [anime, submittedQuery]);
   const currentFeed = activeView === "Home" ? homeVideos : activeView === "Categories" ? videos : feeds[activeView];
   const hasMoreVisible = visibleCount < currentFeed.length;
 
@@ -517,7 +541,19 @@ function App() {
             </div>
             {searchInProgress ? <div className="catalog-status" role="status"><Loader2 className="w-4 h-4 animate-spin" /> Searching…</div>
               : searchError ? <p role="alert" className="text-gray-400 text-sm">Search is temporarily unavailable. Please try again.</p>
-                : searchResults?.length ? <VideoGrid videos={searchResults} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                : searchResults?.length || animeMatches.length ? (
+                  <>
+                    {searchResults?.length ? <VideoGrid videos={searchResults} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} /> : null}
+                    {animeMatches.length ? (
+                      <section aria-label="Anime results" className="mt-8">
+                        <h2 className="text-white font-bold text-lg mb-4">Anime results <span className="text-gray-600 text-sm">({animeMatches.length})</span></h2>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                          {animeMatches.map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
+                        </div>
+                      </section>
+                    ) : null}
+                  </>
+                )
                   : <div className="text-center py-20"><h3 className="text-white text-xl font-bold mb-2">No results found</h3><p className="text-gray-500">Try searching for something else</p></div>}
           </section>
         ) : isSearchPath(pathname) ? (
@@ -570,7 +606,7 @@ function App() {
                 <div className="flex items-center gap-2 mb-5" style={{ color: "#c9a84c" }}>
                   <TrendingUp className="w-5 h-5" />
                   <h2 className="text-white font-bold text-xl">{homeFilter === "sponsored" ? "Sponsored" : homeFilter === "anime" ? "Anime" : homeFilter === "desi" ? "Desi" : "All Videos"}</h2>
-                  <span className="text-gray-600 text-sm ml-1">({homeFilter === "sponsored" ? sponsored.length : homeVideos.length})</span>
+                  <span className="text-gray-600 text-sm ml-1">({homeFilter === "sponsored" ? sponsored.length : homeFilter === "anime" ? homeVideos.length + anime.length : homeVideos.length})</span>
                 </div>
                 {homeFilter === "sponsored" ? (
                   sponsored.length ? (
@@ -578,9 +614,18 @@ function App() {
                       {sponsored.map((card) => <SponsoredCard key={card.id} card={card} onPlay={setActiveSponsored} />)}
                     </div>
                   ) : <p className="home-empty">No sponsored videos right now.</p>
+                ) : homeFilter === "anime" && anime.length ? (
+                  <>
+                    {homeVideos.length > 0 && (
+                      <VideoGrid videos={homeVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                    )}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 mt-4">
+                      {anime.map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
+                    </div>
+                  </>
                 ) : homeVideos.length ? (
                   <>
-                    <VideoGrid videos={homeVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} sponsored={sponsored} onPlaySponsored={setActiveSponsored} />
+                    <VideoGrid videos={homeVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} sponsored={sponsored} onPlaySponsored={(card) => setActiveSponsored(card)} />
                     {listFooter(homeVideos.length)}
                   </>
                 ) : <p className="home-empty">{homeFilter === "anime" ? "No anime videos yet." : "No videos in this filter yet."}</p>}
@@ -601,6 +646,7 @@ function App() {
       <Footer />
       {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={closeVideo} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
       {activeSponsored && <PartnerPlayer card={activeSponsored} onClose={() => setActiveSponsored(null)} />}
+      {activeAnime && <PartnerPlayer card={activeAnime} label="Anime" onClose={() => setActiveAnime(null)} />}
       {shareVideo && <ShareModal video={shareVideo} onClose={closeShare} />}
     </div>
   );
