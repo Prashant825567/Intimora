@@ -271,3 +271,54 @@ test("aborting an optional like poll cancels its request without changing the ba
   await visitor.requestJson("/api/videos");
   assert.equal(discoveries, 1);
 });
+
+test("the visitor log posts once per page load as a simple text/plain request through the visitor route", async () => {
+  const calls = [];
+  const fetcher = async (url, init) => {
+    calls.push({ url, init });
+    if (url === discoveryUrl) return Response.json({ ok: true, data: { server: backendA } });
+    return Response.json({ ok: true, data: { logged: true } });
+  };
+  const route = client({ fetcher, storage: memoryStorage() });
+  const payload = JSON.stringify({ ua: "agent", path: "/", screen: "390x844" });
+
+  const result = await route.requestJson("/api/visit", { method: "POST", body: payload });
+  assert.equal(result.backend, backendA);
+  const posted = calls.find((call) => call.url === `${backendA}/api/visit`);
+  assert.ok(posted, "the log reaches the backend");
+  assert.equal(posted.init.method, "POST");
+  assert.equal(posted.init.headers["Content-Type"], "text/plain", "no preflight on a free host");
+  assert.equal(posted.init.body, payload);
+  assert.equal(posted.init.credentials, "omit", "an ordinary backend stays credential-free");
+  assert.equal(posted.init.referrerPolicy, "no-referrer");
+  assert.equal(posted.init.cache, "no-store");
+
+  const before = calls.length;
+  await assert.rejects(() => route.requestJson("/api/visit"), /unavailable/i);
+  await assert.rejects(() => route.requestJson("/api/visit?ua=x", { method: "POST", body: payload }), /unavailable/i);
+  await assert.rejects(() => route.requestJson("/api/visit", { method: "POST", body: "x".repeat(2049) }), /unavailable/i);
+  assert.equal(calls.length, before, "a wrong shape never reaches the backend");
+});
+
+test("the visitor log uses the PHP cookie and hands over to the unlock page instead of failing silently", async () => {
+  const calls = [];
+  const unlocks = [];
+  const fetcher = async (url, init) => {
+    calls.push({ url, init });
+    if (url === discoveryUrl) return Response.json({ ok: true, data: { server: backendA, php: true } });
+    return new Response("<html>check</html>", { status: 200, headers: { "Content-Type": "text/html" } });
+  };
+  const route = createVisitorRequest({
+    discoveryUrl,
+    fetcher,
+    storage: memoryStorage(),
+    requestUnlock: ({ path, challenge }) => { unlocks.push({ path, challenge }); return true; },
+  });
+
+  await assert.rejects(() => route.requestJson("/api/visit", { method: "POST", body: "{}" }), /unavailable/i);
+  const posted = calls.find((call) => call.url === `${backendA}/api/visit`);
+  assert.ok(posted, "the log reached the PHP host");
+  assert.equal(posted.init.credentials, "include", "the PHP cookie travels with the log");
+  assert.equal(posted.init.redirect, "follow");
+  assert.deepEqual(unlocks, [{ path: "/api/visit", challenge: true }], "the visitor is sent to the host's own unlock page");
+});

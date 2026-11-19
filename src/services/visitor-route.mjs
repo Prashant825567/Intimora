@@ -4,7 +4,7 @@ const STORAGE_KEY = "intimora_direct_backend_v1";
 const MAX_TTL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const UNAVAILABLE = "Content is temporarily unavailable";
-const ROUTE = /^\/api\/(?:search|likes\/counts|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/share)?)?)$/;
+const ROUTE = /^\/api\/(?:search|likes\/counts|visit|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/share)?)?)$/;
 const VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_LIKE_COUNTS_BYTES = 32_768;
 
@@ -17,13 +17,18 @@ function isReloadOrHistoryNavigation() {
   }
 }
 
-function apiUrl(base, path, method) {
+function apiUrl(base, path, method, body) {
   if (typeof path !== "string" || path.length > 4096 || !path.startsWith("/") || path.startsWith("//")) return null;
   try {
     const route = new URL(path, "https://route.invalid");
     if (route.origin !== "https://route.invalid" || route.hash || !ROUTE.test(route.pathname)) return null;
+    // Only two routes post: a share action and the visitor log. Everything else
+    // is a read, so a stray POST can never reach the backend.
     const action = /\/share$/.test(route.pathname);
-    if ((action && method !== "POST") || (!action && method !== "GET")) return null;
+    const visit = route.pathname === "/api/visit";
+    if (action && method !== "POST") return null;
+    if (visit && method !== "POST") return null;
+    if (!action && !visit && method !== "GET") return null;
     const allowedParams = route.pathname === "/api/videos" ? ["cursor", "limit"]
       : route.pathname === "/api/search" ? ["q"]
         : route.pathname === "/api/likes/counts" ? ["ids"] : [];
@@ -35,6 +40,8 @@ function apiUrl(base, path, method) {
       const ids = (route.searchParams.get("ids") || "").split(",");
       if (ids.length > 20 || ids.some((id) => !VIDEO_ID.test(id)) || new Set(ids).size !== ids.length) return null;
     }
+    if (visit && typeof body !== "string") return null;
+    if (visit && (body.length > 2048 || route.search !== "")) return null;
     if (route.pathname === "/api/videos") {
       if ((route.searchParams.get("cursor") || "").length > 1024) return null;
       const limit = route.searchParams.get("limit");
@@ -124,7 +131,7 @@ export function createVisitorRequest(options = {}) {
     try { getStorage()?.setItem(STORAGE_KEY, JSON.stringify(cached)); } catch { /* In-memory selection still works. */ }
   }
 
-  async function readJson(url, method, { signal, counts = false, php = false } = {}) {
+  async function readJson(url, method, { signal, counts = false, php = false, requestBody } = {}) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) abort();
@@ -136,7 +143,9 @@ export function createVisitorRequest(options = {}) {
         // `text/plain` is a "simple" content type, so a POST is sent without a
         // preflight. A preflight carries no cookies, and a free host answers one
         // without cookies with its HTML check instead of JSON.
-        ...(method === "POST" ? { headers: { "Content-Type": "text/plain" }, body: "{}" } : {}),
+        ...(method === "POST"
+          ? { headers: { "Content-Type": "text/plain" }, body: typeof requestBody === "string" ? requestBody : "{}" }
+          : {}),
         mode: "cors",
         // Cookies travel only to a backend the load balancer flagged as PHP; an
         // ordinary backend stays credential-free exactly as before.
@@ -256,11 +265,12 @@ export function createVisitorRequest(options = {}) {
     const target = await resolveTarget(pinnedBackend);
     const backend = target.backend;
     const php = target.php;
-    const url = apiUrl(backend, path, method);
+    const body = typeof init.body === "string" ? init.body : undefined;
+    const url = apiUrl(backend, path, method, body);
     if (!url) throw new Error(UNAVAILABLE);
     const requestGeneration = generation;
     const counts = new URL(path, "https://route.invalid").pathname === "/api/likes/counts";
-    const result = await readJson(url, method, { signal: init.signal, counts, php });
+    const result = await readJson(url, method, { signal: init.signal, counts, php, requestBody: body });
     if (onOutcome) {
       onOutcome({
         path,
