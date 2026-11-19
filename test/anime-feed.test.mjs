@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { animeCards, animeEmbedUrl, animeFeedPayload, animeIdFromSlug, parseAnimeListing } from "../src/services/anime-feed.mjs";
+import { animeCards, animeEmbedUrl, animeFeedPayload, animeIdFromSlug, animeLists, parseAnimeListing } from "../src/services/anime-feed.mjs";
 
 const listing = `
 <div class="item">
@@ -62,7 +62,8 @@ test("ids and embed URLs are derived, never invented", () => {
 test("the payload survives a round trip and a tampered file can only point at the source player", () => {
   const items = parseAnimeListing(listing);
   const payload = animeFeedPayload(items, { generatedAt: "2026-11-19T00:00:00.000Z" });
-  assert.equal(payload.version, 1);
+  assert.equal(payload.version, 2);
+  assert.deepEqual(payload.lists, [], "a feed built without rows carries no invented ranking");
   assert.equal(payload.items.length, 2);
   const cards = animeCards(payload);
   assert.deepEqual(cards.map((card) => card.id), ["1JdXN6yeMdN", "OneWife001x"]);
@@ -82,4 +83,54 @@ test("the payload survives a round trip and a tampered file can only point at th
   assert.deepEqual(animeCards({}), []);
   assert.deepEqual(animeCards(null), []);
   assert.deepEqual(animeCards({ items: "nope" }), []);
+});
+
+test("the source's own rows survive a round trip, in their order, without duplicating a card", () => {
+  const items = parseAnimeListing(listing);
+  const payload = animeFeedPayload(items, {
+    generatedAt: "2026-11-19T00:00:00.000Z",
+    lists: [
+      { id: "new", title: "New Releases", itemIds: ["1JdXN6yeMdN", "OneWife001x"] },
+      { id: "popular", title: "Most Popular", itemIds: ["OneWife001x", "gone-forever", "OneWife001x"] },
+      { id: "top", title: "Top Rated", itemIds: ["nope"] },
+      { id: "bad id", title: "Broken id", itemIds: ["1JdXN6yeMdN"] },
+      { id: "", title: "", itemIds: ["1JdXN6yeMdN"] },
+      { id: "new", title: "Repeated row", itemIds: ["1JdXN6yeMdN"] },
+    ],
+  });
+  assert.deepEqual(payload.items.length, 2, "a card is stored once, however many rows show it");
+  assert.deepEqual(payload.lists, [
+    { id: "new", title: "New Releases", itemIds: ["1JdXN6yeMdN", "OneWife001x"] },
+    { id: "popular", title: "Most Popular", itemIds: ["OneWife001x"] },
+  ], "an empty row, an unknown id, a repeated id and a bad row are all dropped");
+
+  const rows = animeLists(payload);
+  assert.deepEqual(rows.map((row) => row.title), ["New Releases", "Most Popular"]);
+  assert.deepEqual(rows[0].cards.map((card) => card.id), ["1JdXN6yeMdN", "OneWife001x"]);
+  assert.equal(rows[0].cards[0].embedUrl, "https://www.hentaicity.com/embed/1JdXN6yeMdN");
+  assert.equal(rows[1].cards[0].id, "OneWife001x");
+});
+
+test("a tampered file can only produce rows that point at the source's own player", () => {
+  const rows = animeLists({
+    version: 2,
+    lists: [
+      { id: "new", title: "  New   Releases  ", itemIds: ["Safe12345", "Safe12345", "Evil12345", 42] },
+      { id: "popular", title: "Most Popular", itemIds: ["Evil12345"] },
+    ],
+    items: [
+      { id: "Safe12345", title: "Safe", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg", embedUrl: "https://evil.example/embed/Safe12345", duration: "07:03" },
+      { id: "Evil12345", title: "Bad poster", thumbnail: "http://insecure.example/b.jpg" },
+    ],
+  }, { perList: 1 });
+  assert.deepEqual(rows, [
+    { id: "new", title: "New Releases", cards: [{ id: "Safe12345", title: "Safe", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg", duration: "07:03", embedUrl: "https://www.hentaicity.com/embed/Safe12345" }] },
+  ], "the cap holds, the repeated id is dropped, the bad-poster card never appears and the embed URL is rebuilt");
+
+  for (const broken of [undefined, null, {}, { lists: "nope" }, { lists: [{ id: "x" }] }, { version: 1, items: [{ id: "Safe12345" }] }]) {
+    assert.deepEqual(animeLists(broken), [], "no rows without a real list");
+  }
+  const old = animeCards({ version: 1, items: [{ id: "Safe12345", title: "Safe", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg" }] });
+  assert.equal(old.length, 1, "an older feed still fills the grid");
+  assert.deepEqual(animeLists({ version: 1, items: [{ id: "Safe12345", title: "Safe", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg" }] }), []);
 });

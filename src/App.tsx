@@ -19,7 +19,7 @@ import { useLiveLikes } from "./hooks/useLiveLikes";
 import type { LiveLikes } from "./hooks/useLiveLikes";
 import type { Video } from "./data/mockVideos";
 import type { BrowseView } from "./types/navigation";
-import { TrendingUp, Loader2, Upload, Wifi, WifiOff, Grid2X2 } from "lucide-react";
+import { TrendingUp, Loader2, Upload, Wifi, WifiOff, Grid2X2, Sparkles } from "lucide-react";
 import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, logVisit, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, phpFailure, retryPhpSession } from "./services/api";
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
@@ -31,7 +31,7 @@ import {
   UNLOCK_RETRY_DELAYS_MS,
   retryWithDelays,
 } from "./services/retry.mjs";
-import { animeCards, type AnimeCard as AnimeCardData } from "./services/anime-feed.mjs";
+import { animeCards, animeLists, type AnimeCard as AnimeCardData, type AnimeList as AnimeListData } from "./services/anime-feed.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectHomeFilter, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
@@ -127,6 +127,9 @@ function App() {
   // The home filter lives in the page, not the URL: home stays one address.
   const [homeFilter, setHomeFilter] = useState<HomeFilter>("all");
   const [anime, setAnime] = useState<AnimeCardData[]>([]);
+  // The feed's own rows — New Releases, Most Popular, Top Rated. Empty when the
+  // baked file predates them or the build could not reach the source.
+  const [animeRows, setAnimeRows] = useState<AnimeListData[]>([]);
   const [activeAnime, setActiveAnime] = useState<AnimeCardData | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus>("loading");
@@ -223,8 +226,16 @@ function App() {
     const controller = new AbortController();
     fetch("/anime-feed.json", { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer", signal: controller.signal })
       .then((response) => (response.ok ? response.json() : null))
-      .then((payload: unknown) => { if (active) setAnime(animeCards(payload)); })
-      .catch(() => { if (active) setAnime([]); });
+      .then((payload: unknown) => {
+        if (!active) return;
+        setAnime(animeCards(payload));
+        setAnimeRows(animeLists(payload));
+      })
+      .catch(() => {
+        if (!active) return;
+        setAnime([]);
+        setAnimeRows([]);
+      });
     return () => { active = false; controller.abort(); };
   }, [accessGranted]);
 
@@ -619,9 +630,26 @@ function App() {
                     {homeVideos.length > 0 && (
                       <VideoGrid videos={homeVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
                     )}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 mt-4">
-                      {anime.map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
-                    </div>
+                    {animeRows.length ? (
+                      <div className="mt-5 space-y-7">
+                        {animeRows.map((row) => (
+                          <section key={row.id} aria-label={row.title}>
+                            <div className="flex items-center gap-2 mb-3">
+                              <Sparkles className="w-4 h-4" style={{ color: "#c9a84c" }} />
+                              <h3 className="text-white font-bold text-base">{row.title}</h3>
+                              <span className="text-gray-600 text-sm">({row.cards.length})</span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                              {row.cards.map((card) => <AnimeCard key={`${row.id}-${card.id}`} card={card} onPlay={setActiveAnime} />)}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 mt-4">
+                        {anime.map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
+                      </div>
+                    )}
                   </>
                 ) : homeVideos.length ? (
                   <>

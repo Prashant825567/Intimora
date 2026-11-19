@@ -16,9 +16,15 @@ const poster = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"
 
 const catalogVideos = [{ id: "own-one", title: "Our own video", views: 10, createdAt: 1_760_000_000, category: "Desi" }];
 const feed = {
-  version: 1,
+  version: 2,
   source: "https://www.hentaicity.com",
   generatedAt: "2026-11-19T00:00:00.000Z",
+  // The source's own rows, in its own order. One title appears in both, which is
+  // exactly what the real listings do.
+  lists: [
+    { id: "new", title: "New Releases", itemIds: ["1JdXN6yeMdN", "OneWife001x"] },
+    { id: "popular", title: "Most Popular", itemIds: ["OneWife001x"] },
+  ],
   items: [
     { id: "1JdXN6yeMdN", title: "Reality control 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", pageUrl: "https://www.hentaicity.com/video/x-1JdXN6yeMdN.html", embedUrl: "https://www.hentaicity.com/embed/1JdXN6yeMdN", duration: "07:03" },
     { id: "OneWife001x", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", pageUrl: "https://www.hentaicity.com/video/y-OneWife001x.html", embedUrl: "https://www.hentaicity.com/embed/OneWife001x", duration: "23:36" },
@@ -94,16 +100,23 @@ test("anime cards come from the baked feed and open the source's own player insi
     await page.getByRole("button", { name: "Anime", exact: true }).click();
     await page.getByRole("heading", { name: "Anime", exact: true }).waitFor();
     await page.locator(".video-card--anime").first().waitFor();
-    assert.equal(await page.locator(".video-card--anime").count(), 2);
-    const titles = await page.locator(".video-card--anime .video-card__title").allInnerTexts();
-    assert.deepEqual(titles, ["Reality control 6", "One Wife 1"]);
+
+    // The feed's own rows are shown as rows, in the feed's order — New Releases
+    // and Most Popular, not one undifferentiated wall of cards.
+    const newRow = page.getByRole("region", { name: "New Releases" });
+    const popularRow = page.getByRole("region", { name: "Most Popular" });
+    await newRow.waitFor();
+    assert.equal(await page.locator(".video-card--anime").count(), 3, "one title sits in both rows");
+    assert.deepEqual(await newRow.locator(".video-card--anime .video-card__title").allInnerTexts(), ["Reality control 6", "One Wife 1"]);
+    assert.deepEqual(await popularRow.locator(".video-card--anime .video-card__title").allInnerTexts(), ["One Wife 1"]);
+    assert.equal(await page.locator("h3", { hasText: "Top Rated" }).count(), 0, "a row the feed did not send is never invented");
     assert.equal(await page.locator(".video-card--anime .video-card__badge").first().innerText(), "ANIME");
     assert.match(await page.locator(".video-card--anime img").first().getAttribute("src"), /cdn1\.images\.hentaicity\.com/);
     assert.equal(await page.locator(".video-card--anime .duration, .video-card--anime").first().innerText().then((text) => text.includes("07:03")), true);
     assert.equal(await page.locator(".video-card--anime").first().getByRole("button", { name: /save|like/i }).count(), 0, "an external title has no backend id, so it offers no like/save");
 
     // A click opens the source's own player inside our overlay — never a copied media URL.
-    await page.locator(".video-card--anime").first().click();
+    await newRow.locator(".video-card--anime").first().click();
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
     const frame = dialog.locator("iframe");
@@ -118,7 +131,7 @@ test("anime cards come from the baked feed and open the source's own player insi
     await search.fill("one wife");
     await search.press("Enter");
     await page.getByRole("region", { name: "Anime results" }).waitFor();
-    assert.equal(await page.getByRole("region", { name: "Anime results" }).locator(".video-card--anime").count(), 1);
+    assert.equal(await page.getByRole("region", { name: "Anime results" }).locator(".video-card--anime").count(), 1, "search still matches the flat feed, not the rows");
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

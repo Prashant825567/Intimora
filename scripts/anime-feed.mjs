@@ -14,8 +14,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const FEED_FILE = "anime-feed.json";
 const MAX_BODY = 3 * 1024 * 1024;
 
-export const SEED_PAGES = Object.freeze([
-  `${ANIME_SOURCE}/videos/straight/hentai-popular.html`,
+// The source's own ordering, one page per row. "Most Recent" is their newest
+// first, "Most popular" and "Top rated" are their own sorts — this build copies
+// the order, it never invents a rank. Every page was checked against the live
+// site; a page that fails at build time only costs its own row.
+export const FEED_LISTS = Object.freeze([
+  { id: "new", title: "New Releases", url: `${ANIME_SOURCE}/videos/straight/all-recent.html` },
+  { id: "popular", title: "Most Popular", url: `${ANIME_SOURCE}/videos/straight/all-popular.html` },
+  { id: "top", title: "Top Rated", url: `${ANIME_SOURCE}/videos/straight/all-rate.html` },
 ]);
 
 const HEADERS = Object.freeze({
@@ -38,39 +44,61 @@ async function readPage(url, { fetchImpl = globalThis.fetch, timeoutMs = 15_000 
   }
 }
 
-// One page by default: their crawl delay is ten seconds, so more pages cost more
-// build time than they return. Raise ANIME_FEED_PAGES when a bigger catalogue is
-// worth the wait.
+// Their crawl delay is ten seconds, so three pages cost ~20s of build time. A
+// row that fails is skipped instead of failing the build, and if every row fails
+// the checked-in snapshot is kept.
 export async function buildAnimeFeed({
-  pages = SEED_PAGES,
+  lists = FEED_LISTS,
   fetchImpl = globalThis.fetch,
   delayMs = 10_000,
   limit = Number(process.env.ANIME_FEED_MAX ?? 120),
+  perList = 12,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
   const items = [];
-  const seen = new Set();
-  for (let index = 0; index < pages.length; index += 1) {
+  const byId = new Map();
+  const built = [];
+  const failed = [];
+  for (let index = 0; index < lists.length; index += 1) {
     if (index > 0 && delayMs > 0) await wait(delayMs);
-    const html = await readPage(pages[index], { fetchImpl });
-    for (const item of parseAnimeListing(html)) {
-      if (seen.has(item.id) || items.length >= limit) continue;
-      seen.add(item.id);
-      items.push(item);
+    const list = lists[index];
+    let parsed;
+    try {
+      parsed = parseAnimeListing(await readPage(list.url, { fetchImpl }));
+    } catch (error) {
+      failed.push(`${list.id}: ${error.message}`);
+      continue;
     }
-    if (items.length >= limit) break;
+    const itemIds = [];
+    for (const item of parsed) {
+      if (itemIds.length >= perList) break;
+      if (!byId.has(item.id)) {
+        if (items.length >= limit) continue;
+        byId.set(item.id, item);
+        items.push(item);
+      }
+      itemIds.push(item.id);
+    }
+    if (itemIds.length) built.push({ id: list.id, title: list.title, itemIds });
   }
-  if (!items.length) throw new Error("no anime items were found on the listing pages");
-  return animeFeedPayload(items);
+  if (!items.length) {
+    throw new Error(`no anime items were found on ${lists.length} listing pages${failed.length ? ` (${failed.join("; ")})` : ""}`);
+  }
+  if (failed.length) console.warn(`[anime-feed] kept ${built.length}/${lists.length} rows; ${failed.join("; ")}`);
+  return animeFeedPayload(items, { lists: built });
 }
 
 async function main() {
   const target = path.join(root, "public", FEED_FILE);
-  const pages = SEED_PAGES.slice(0, Math.max(1, Number(process.env.ANIME_FEED_PAGES ?? 1)));
+  // ANIME_FEED_LISTS caps how many rows are baked; ANIME_FEED_PAGES is the old
+  // name for the same knob and still works.
+  const wanted = Number(process.env.ANIME_FEED_LISTS ?? process.env.ANIME_FEED_PAGES ?? FEED_LISTS.length);
+  const lists = FEED_LISTS.slice(0, Math.min(FEED_LISTS.length, Math.max(1, Number.isFinite(wanted) ? wanted : FEED_LISTS.length)));
   try {
-    const payload = await buildAnimeFeed({ pages });
+    const payload = await buildAnimeFeed({ lists });
     await writeFile(target, `${JSON.stringify(payload, null, 2)}\n`);
-    console.log(`[anime-feed] wrote ${payload.items.length} anime cards`);
+    const rows = payload.lists.map((list) => `${list.title} ${list.itemIds.length}`).join(", ");
+    console.log(`[anime-feed] wrote ${payload.items.length} anime cards (${rows})`);
   } catch (error) {
     let kept = 0;
     try {
