@@ -306,7 +306,7 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
   };
 };
 
-// Visitor log: one POST per page load, fired after the 18+ gate. It travels
+// Visitor log: one POST per browser session, fired after the 18+ gate. It travels
 // through the same visitor route as the catalogue, so a PHP host's HTML check,
 // its cookie and the one-time unlock are handled instead of being bypassed by a
 // raw fetch. `text/plain` keeps it a "simple" request — no preflight, which a
@@ -314,8 +314,15 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
 // swallowed: logging never slows down or breaks the catalogue.
 let visitLogged = false;
 export async function logVisit() {
+  // Two guards: the flag covers this page load, sessionStorage covers reloads in
+  // the same tab. A closed tab is a new session and a new row. Storage that is
+  // disabled simply falls back to the in-memory flag.
   if (visitLogged) return;
   visitLogged = true;
+  try {
+    if (sessionStorage.getItem("intimora_visit_logged") === "1") return;
+    sessionStorage.setItem("intimora_visit_logged", "1");
+  } catch { /* Storage disabled: the flag above still limits this page. */ }
 
   // Chrome on Android exposes the device model here; Safari and iOS have no
   // such API, so the field is simply left out there.

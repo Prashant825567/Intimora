@@ -199,7 +199,7 @@ function App() {
     try { sessionStorage.setItem(AGE_VERIFIED_KEY, "true"); }
     catch { /* The current page can still be used when storage is disabled. */ }
     setAgeVerified(true);
-    // One visit row per page load, after the 18+ confirmation.
+    // One visit row per session, after the 18+ confirmation.
     void logVisit();
   };
 
