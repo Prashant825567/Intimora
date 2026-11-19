@@ -73,11 +73,15 @@ test("browse, search, and watch URLs work on direct entry, reload, and browser h
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    const response = await page.goto(`${base}/trending`, { waitUntil: "domcontentloaded" });
+    const response = await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
     assert.equal(response.status(), 200);
     await page.getByRole("button", { name: /I AM 18/i }).waitFor();
     assert.ok(!calls.some((call) => call.pathname.startsWith("/api/videos") || call.pathname === "/api/search"), "no catalog is requested before the age gate");
     await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.getByRole("heading", { name: "All Videos" }).waitFor();
+    // A deep link is not the front door: it opens the page it names, with no gate.
+    assert.equal((await page.goto(`${base}/trending`, { waitUntil: "domcontentloaded" })).status(), 200);
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "a deep link never asks for the age again");
     await page.getByRole("heading", { name: "Trending Now" }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/trending");
     const nav = page.locator(".site-nav__tabs");
@@ -106,16 +110,14 @@ test("browse, search, and watch URLs work on direct entry, reload, and browser h
 
     const direct = await context.newPage();
     assert.equal((await direct.goto(`${base}/exclusive/`)).status(), 200);
-    await direct.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await direct.getByRole("button", { name: /I AM 18/i }).count(), 0, "a deep link opens without the front-door gate");
     await direct.getByRole("heading", { name: "Exclusive", exact: true }).waitFor();
     assert.equal(new URL(direct.url()).pathname, "/exclusive/");
     await direct.close();
 
     const directSearch = await context.newPage();
     assert.equal((await directSearch.goto(`${base}/search?q=fresh%20%26%20direct`)).status(), 200);
-    await directSearch.getByRole("button", { name: /I AM 18/i }).waitFor();
-    assert.ok(!calls.some((call) => call.pathname === "/api/search" && call.query === "fresh & direct"), "direct searches also wait for age confirmation");
-    await directSearch.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await directSearch.getByRole("button", { name: /I AM 18/i }).count(), 0, "a direct search opens without the front-door gate");
     await directSearch.getByRole("button", { name: "Play Direct video" }).waitFor();
     assert.equal(await directSearch.getByRole("textbox", { name: "Search videos" }).inputValue(), "fresh & direct");
     await directSearch.close();
@@ -221,9 +223,7 @@ test("production bundle serves each real route on direct entry and refresh", {
       assert.equal(await link.getAttribute("href"), "https://trafficpeak.io");
     };
     assert.equal((await page.goto(`${base}/dashboard`)).status(), 200);
-    await page.getByRole("button", { name: /I AM 18/i }).waitFor();
-    assert.equal(await page.locator("footer").count(), 0, "the age gate still precedes the app");
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "an account deep link opens without the front-door gate");
     await page.getByRole("heading", { name: "Sign in to your account" }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/login", "a guest is sent to sign-in instead of seeing private account data");
     await assertFooterLink();
@@ -235,6 +235,9 @@ test("production bundle serves each real route on direct entry and refresh", {
       await assertFooterLink();
     }
     assert.equal((await page.goto(`${base}/`)).status(), 200);
+    await page.getByRole("button", { name: /I AM 18/i }).waitFor();
+    assert.equal(await page.locator("footer").count(), 0, "the home page still opens on the age gate");
+    await page.getByRole("button", { name: /I AM 18/i }).click();
     await page.getByRole("heading", { name: "All Videos" }).waitFor();
     await assertFooterLink();
     for (const [pathname, title] of [["/trending", "Trending Now"], ["/new/", "New Releases"], ["/exclusive", "Exclusive"], ["/categories/", "Coming Soon"]]) {

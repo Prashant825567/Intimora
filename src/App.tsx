@@ -82,12 +82,24 @@ function useLocalDayClock() {
   return now;
 }
 
+// The 18+ confirmation is the front door's job: opening the site at "/" asks
+// once, and every other address — a shared /watch link, a search result, a
+// Google hit, an account page — opens straight into the page it names. The
+// answer is kept per tab, so coming back to "/" does not ask again.
+function isFrontDoor(pathname: string) {
+  return pathname === "/" || pathname === "";
+}
+
 function App() {
+  const [gateRequired] = useState(() => isFrontDoor(window.location.pathname));
   const [ageVerified, setAgeVerified] = useState(() => {
     try { return sessionStorage.getItem(AGE_VERIFIED_KEY) === "true"; }
     catch { return false; }
   });
-  const account = useAccount(ageVerified);
+  // Everything downstream asks this, not the raw answer, so a deep link is not
+  // held back by a confirmation its page never asks for.
+  const accessGranted = ageVerified || !gateRequired;
+  const account = useAccount(accessGranted);
   const [location, setLocation] = useState(() => ({ pathname: window.location.pathname, search: window.location.search }));
   const { pathname } = location;
   const accountPage = accountPageFromPath(pathname);
@@ -118,7 +130,7 @@ function App() {
   // The partner feed is read once, after the age gate, from our own origin. A
   // single pasted embed page needs no feed.
   useEffect(() => {
-    if (!ageVerified || __INTIMORA_PARTNER_MODE__ !== "feed") return;
+    if (!accessGranted || __INTIMORA_PARTNER_MODE__ !== "feed") return;
     let active = true;
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     fetch("/partner-feed.json", { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer", signal: controller?.signal })
@@ -126,7 +138,7 @@ function App() {
       .then((payload: unknown) => { if (active) setSponsored(sponsoredCards(payload)); })
       .catch(() => { if (active) setSponsored([]); });
     return () => { active = false; controller?.abort(); };
-  }, [ageVerified]);
+  }, [accessGranted]);
   const catalogFinishedAt = useRef(0);
   const sharedVideoRequest = useRef<{ id: string; promise: ReturnType<typeof fetchVideoDetail> } | null>(null);
   const locallyOpenedVideo = useRef<string | null>(null);
@@ -184,16 +196,21 @@ function App() {
   // Deep-linked account pages are protected by the age gate and the current
   // Firebase/account state. Replace redirects so Back doesn't loop.
   useEffect(() => {
-    if (!ageVerified || !accountPage) return;
+    if (!accessGranted || !accountPage) return;
     let destination: AccountPage | null = null;
     if (account.status === "guest" && accountPage !== "login") destination = "login";
     else if (account.status === "needs-profile" && accountPage !== "profile" && accountPage !== "referral") destination = "profile";
     else if (account.status === "ready" && accountPage !== "dashboard") destination = "dashboard";
     if (destination) goTo(`/${destination}`, true);
-  }, [ageVerified, account.status, accountPage]);
+  }, [accessGranted, account.status, accountPage]);
 
-  // Discovery starts on arrival; no catalog or media is requested before age confirmation.
+  // Discovery starts on arrival; a page behind the front-door gate asks for no
+  // catalog or media until the gate is answered.
   useEffect(() => { primeBackendSelection().catch(() => {}); }, []);
+
+  // A deep-linked visitor never meets the gate, so the single per-session visit
+  // row is written on arrival instead of after a confirmation.
+  useEffect(() => { if (!gateRequired) void logVisit(); }, [gateRequired]);
 
   const handleAgeConfirm = () => {
     try { sessionStorage.setItem(AGE_VERIFIED_KEY, "true"); }
@@ -207,7 +224,7 @@ function App() {
   // Trending and Exclusive are based on the whole available catalog, while the
   // first page and ordinary browsing remain usable immediately.
   useEffect(() => {
-    if (!ageVerified) return;
+    if (!accessGranted) return;
     let cancelled = false;
     setVideos([]);
     setInitialLoading(true);
@@ -259,7 +276,7 @@ function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [ageVerified, catalogRevision]);
+  }, [accessGranted, catalogRevision]);
 
   // Search results are driven by the URL so a copied link, refresh, and browser
   // history restore the same query. Never query the catalog before the age gate.
@@ -268,7 +285,7 @@ function App() {
     setSearchQuery(submittedQuery ?? "");
     setSearchResults(null);
     setSearchError(false);
-    if (!ageVerified || !submittedQuery) {
+    if (!accessGranted || !submittedQuery) {
       setSearchLoading(false);
       return;
     }
@@ -284,13 +301,13 @@ function App() {
       if (!cancelled && request === searchRequest.current) setSearchLoading(false);
     });
     return () => { cancelled = true; };
-  }, [ageVerified, pathname, location.search, submittedQuery, searchRevision, historyRevision]);
+  }, [accessGranted, pathname, location.search, submittedQuery, searchRevision, historyRevision]);
 
   // Shared links resolve through the recipient's independently selected backend.
   useEffect(() => {
     const id = watchIdFromPath(pathname);
     setSharedVideoUnavailable(false);
-    if (!ageVerified || !id || locallyOpenedVideo.current === id) return;
+    if (!accessGranted || !id || locallyOpenedVideo.current === id) return;
     let cancelled = false;
     if (!sharedVideoRequest.current || sharedVideoRequest.current.id !== id) {
       sharedVideoRequest.current = { id, promise: fetchVideoDetail(id) };
@@ -309,7 +326,7 @@ function App() {
       setActiveVideo(mapApiVideoToVideo(video, backend));
     }).catch(() => { if (!cancelled) setSharedVideoUnavailable(true); });
     return () => { cancelled = true; };
-  }, [ageVerified, pathname, historyRevision]);
+  }, [accessGranted, pathname, historyRevision]);
 
   const trending = useMemo(() => selectTrending(videos), [videos]);
   const newReleases = useMemo(() => selectNewReleases(videos, Date.now()), [videos, now]);
@@ -326,7 +343,7 @@ function App() {
   // Keep rendering a small number of cards at a time even while catalog pages
   // are collected in the background for correct ranking/filtering.
   useEffect(() => {
-    if (!ageVerified || initialLoading || apiError || submittedQuery !== null || activeView === "Categories" || !hasMoreVisible) return;
+    if (!accessGranted || initialLoading || apiError || submittedQuery !== null || activeView === "Categories" || !hasMoreVisible) return;
     const element = loaderRef.current;
     if (!element) return;
     const observer = new IntersectionObserver((entries) => {
@@ -334,7 +351,7 @@ function App() {
     }, { rootMargin: "300px" });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ageVerified, initialLoading, apiError, submittedQuery, activeView, catalogStatus, hasMoreVisible, visibleCount, currentFeed.length]);
+  }, [accessGranted, initialLoading, apiError, submittedQuery, activeView, catalogStatus, hasMoreVisible, visibleCount, currentFeed.length]);
 
   // The screen says what actually happened: the host's check page coming back,
   // the browser blocking the answer, or the server's own error status.
@@ -452,7 +469,7 @@ function App() {
   const handleSave = (video: Video) => handleAccountAction("save", video);
   const handleLike = (video: Video) => handleAccountAction("like", video);
 
-  if (!ageVerified) return <AgeGate onConfirm={handleAgeConfirm} />;
+  if (!accessGranted) return <AgeGate onConfirm={handleAgeConfirm} />;
 
   const searchInProgress = searchLoading || (submittedQuery !== null && searchResults === null && !searchError);
   const catalogMessage = catalogStatus === "loading" ? (

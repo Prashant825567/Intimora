@@ -271,9 +271,7 @@ test("guest deep link, Google login, returning account, libraries and logout", b
   const { page, state, base } = fixture;
   try {
     await page.goto(`${base}/dashboard`);
-    await page.getByRole("button", { name: /I AM 18/i }).waitFor();
-    assert.ok(!state.calls.some((call) => call.path.startsWith("/api/auth/")), "age gate precedes account requests");
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "an account deep link opens without the front-door gate");
     await page.getByRole("heading", { name: "Sign in to your account" }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/login");
     await assertFits(page);
@@ -391,7 +389,7 @@ test("dashboard reports a failed public catalog without falsely claiming the lib
   state.failCatalog = true;
   try {
     await page.goto(`${base}/login`);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
     await page.getByRole("button", { name: "Sign in with Google" }).click();
     await page.getByText("Liked videos are currently unavailable.").waitFor();
     await page.getByText("Saved videos are currently unavailable.").waitFor();
@@ -408,7 +406,7 @@ test("new account can skip the referral step", browserOptions, async () => {
   const { page, state, base } = fixture;
   try {
     await page.goto(`${base}/login`);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
     await page.getByRole("button", { name: "Sign in with Google" }).click();
     await page.getByLabel("Username").fill("skip_user");
     await page.getByRole("button", { name: "Continue" }).click();
@@ -424,7 +422,7 @@ test("new account can skip the referral step", browserOptions, async () => {
 async function openNewReferral(fixture, username = "new_user") {
   const { page, base } = fixture;
   await page.goto(`${base}/login`);
-  await page.getByRole("button", { name: /I AM 18/i }).click();
+  assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
   await page.getByRole("button", { name: "Sign in with Google" }).click();
   await page.getByLabel("Username").fill(username);
   await page.getByRole("button", { name: "Continue" }).click();
@@ -502,7 +500,7 @@ test("returning users load the profile from the backend that verified them", bro
   state.switchAfterVerify = true;
   try {
     await page.goto(`${base}/login`);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
     await page.getByRole("button", { name: "Sign in with Google" }).click();
     await page.getByRole("heading", { name: "Viewer Name" }).waitFor({ timeout: 8_000 });
     assert.equal(state.calls.find((call) => call.path === "/api/auth/verify").origin, backendA);
@@ -565,7 +563,7 @@ test("sanitized referral fixture renders only two descendant levels, grouped by 
   };
   try {
     await page.goto(`${base}/login`);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
     await page.getByRole("button", { name: "Sign in with Google" }).click();
     const network = page.getByRole("region", { name: "Referral network" });
     await network.getByText("Direct Alice").waitFor();
@@ -605,7 +603,7 @@ test("a malicious discovery selection cannot receive a Firebase token", browserO
   const { page, state, base } = fixture;
   try {
     await page.goto(`${base}/login`);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
     await page.getByRole("button", { name: "Sign in with Google" }).click();
     await page.getByRole("heading", { name: "Account unavailable" }).waitFor();
     assert.ok(state.calls.filter((call) => call.origin === evil).every((call) => !call.headers.authorization));
@@ -621,7 +619,7 @@ test("a malicious discovery selection cannot receive a Firebase token", browserO
 async function openFirstVideoSignedIn(fixture) {
   const { page, base } = fixture;
   await page.goto(`${base}/login`);
-  await page.getByRole("button", { name: /I AM 18/i }).click();
+  assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
   await page.getByRole("button", { name: "Sign in with Google" }).click();
   await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
   await page.getByRole("button", { name: "Open navigation menu" }).click();
@@ -774,7 +772,7 @@ test("privacy-safe referrals use the verified backend and retry a temporary fail
   state.tree = { code: "REF-OWN001", direct: [{ name: "Direct Alice", username: "alice", referralCode: "REF-ALICE", referredBy: "REF-OWN001" }], level2: [] };
   try {
     await page.goto(`${base}/login`);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
     await page.getByRole("button", { name: "Sign in with Google" }).click();
     const network = page.getByRole("region", { name: "Referral network" });
     await network.getByRole("alert").getByText(/Could not load referrals/).waitFor();

@@ -213,7 +213,7 @@ test("browser calls public discovery and backends directly, with per-tab routing
     await installMocks(recipient, state);
     const sharedPage = await recipient.newPage();
     await sharedPage.goto(sharedUrl);
-    await sharedPage.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await sharedPage.getByRole("button", { name: /I AM 18/i }).count(), 0, "a shared watch link opens without the front-door gate");
     await sharedPage.locator("#player-container").waitFor();
     assert.match(await sharedPage.locator("#player-container video").getAttribute("src"), /^https:\/\/backend-[ab]\.example\/api\/videos\/video-1\/stream$/);
     await recipient.close();
