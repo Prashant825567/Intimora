@@ -170,3 +170,14 @@ test("production CSP preserves the static site-name data block", { skip: !exists
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("the Google Search Console verification tag is present exactly once beside the existing tags", async () => {
+  const html = await readFile(path.join(root, "index.html"), "utf8");
+  const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1];
+  assert.ok(head, "the page has a static head");
+  assert.match(head, /<meta\s+name="google-site-verification"\s+content="XKvySdEZI16sohiIw1xwDoNZ_SmtA_hYVis7wX1C1LU"\s*\/?\s*>/i);
+  assert.equal((html.match(/name="google-site-verification"/g) || []).length, 1);
+  for (const previous of ["6a97888e-site-verification", "juicyads-site-verification", "clckd", "67c50a5b22eae3d0d911662d4560abe589cdf595"]) {
+    assert.equal((html.match(new RegExp(`name="${previous}"`, "g")) || []).length, 1, `${previous} is still present once`);
+  }
+});

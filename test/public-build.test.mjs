@@ -47,6 +47,8 @@ test("public discovery configuration is bundled, while unsafe URLs fail without 
     assert.equal((html.match(/name="clckd"/g) || []).length, 1);
     assert.match(head, /<meta\s+name="67c50a5b22eae3d0d911662d4560abe589cdf595"\s+content="67c50a5b22eae3d0d911662d4560abe589cdf595"\s*\/?\s*>/i);
     assert.equal((html.match(/name="67c50a5b22eae3d0d911662d4560abe589cdf595"/g) || []).length, 1);
+    assert.match(head, /<meta\s+name="google-site-verification"\s+content="XKvySdEZI16sohiIw1xwDoNZ_SmtA_hYVis7wX1C1LU"\s*\/?\s*>/i);
+    assert.equal((html.match(/name="google-site-verification"/g) || []).length, 1);
     const noScript = html.match(/<noscript>([\s\S]*?)<\/noscript>/i)?.[1];
     assert.ok(noScript, "the static HTML includes a no-JavaScript fallback");
     assert.match(noScript, /<a\s+href="https:\/\/trafficpeak\.io"[^>]*>Boost Your Website Traffic with TrafficPeak<\/a>/);
