@@ -84,10 +84,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const port = Number(process.env.PORT || 5173);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");
     const server = createAppServer({ allowPreviewEmbed: process.env.ALLOW_PREVIEW_EMBED === "1" });
-    server.listen(port, "0.0.0.0", () => console.log(`Intivora listening on port ${port}`));
+    server.listen(port, "0.0.0.0", () => console.log(`Intimora listening on port ${port}`));
   } catch {
     // Configuration can contain private URLs or secrets; do not print it.
-    console.error("Unable to start Intivora. Check the server configuration.");
+    console.error("Unable to start Intimora. Check the server configuration.");
     process.exitCode = 1;
   }
 }

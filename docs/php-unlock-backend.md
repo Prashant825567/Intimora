@@ -23,11 +23,11 @@ RewriteRule ^__unlock/?$ unlock.php [L,QSA]
 
 ```php
 <?php
-// Reached as https://<php-host>/__unlock?back=https://intimora.new.tg/trending
-$back = isset($_GET['back']) ? (string) $_GET['back'] : 'https://intimora.new.tg/';
+// Reached as https://<php-host>/__unlock?back=https://intimora.net/trending
+$back = isset($_GET['back']) ? (string) $_GET['back'] : 'https://intimora.net/';
 // Only ever bounce back to this site over HTTPS.
 if (!preg_match('#^https://(?:www\.)?intimora\.new\.tg(?:[/?#]|$)#i', $back)) {
-    $back = 'https://intimora.new.tg/';
+    $back = 'https://intimora.net/';
 }
 $back = str_replace(["\r", "\n"], '', $back);
 
@@ -62,7 +62,7 @@ Notes
 
 ```php
 <?php
-const SITE_ORIGINS = ['https://intimora.new.tg', 'https://www.intimora.new.tg'];
+const SITE_ORIGINS = ['https://intimora.net', 'https://www.intimora.net'];
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if (in_array($origin, SITE_ORIGINS, true)) {

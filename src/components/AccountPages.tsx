@@ -133,7 +133,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
         <div className="account-card account-card--auth">
           <button type="button" className="account-back" onClick={onBack}><ArrowLeft size={16} /> Back to browsing</button>
           <img src="/logo.svg" className="account-mark" alt="" />
-          <p className="account-eyebrow">WELCOME TO INTIVORA</p>
+          <p className="account-eyebrow">WELCOME TO INTIMORA</p>
           <h1>Sign in to your account</h1>
           <p>Keep your favorite videos and your referral network together, wherever you watch.</p>
           <button type="button" className="google-signin" onClick={signIn} disabled={account.signingIn}>
@@ -141,7 +141,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
             {account.signingIn ? "Signing in…" : "Sign in with Google"}
           </button>
           {formError && <p className="account-error" role="alert">{formError}</p>}
-          <p className="account-privacy"><ShieldCheck size={16} /> Your Google password is never shared with Intivora.</p>
+          <p className="account-privacy"><ShieldCheck size={16} /> Your Google password is never shared with Intimora.</p>
         </div>
       </section>
     );

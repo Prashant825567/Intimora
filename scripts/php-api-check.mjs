@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Full end-to-end check of a PHP Intivora backend that sits behind the
+// Full end-to-end check of a PHP Intimora backend that sits behind the
 // InfinityFree browser check.
 //
 //   node scripts/php-api-check.mjs                       # default: api2
@@ -171,9 +171,9 @@ async function checkOrigin(origin, { writes }) {
   // 5. Informational: the free host sends no CORS header, which is why the site
   //    has to talk to the Worker instead of the PHP host directly.
   try {
-    const probe = await fetch(origin + "/api/videos?limit=1", { headers: { origin: "https://intimora.new.tg", accept: "*/*" } });
+    const probe = await fetch(origin + "/api/videos?limit=1", { headers: { origin: "https://intimora.net", accept: "*/*" } });
     const allow = probe.headers.get("access-control-allow-origin");
-    console.log(`  INFO  CORS header for https://intimora.new.tg: ${allow ?? "missing (expected — the Worker adds it)"}`);
+    console.log(`  INFO  CORS header for https://intimora.net: ${allow ?? "missing (expected — the Worker adds it)"}`);
   } catch { /* informational only */ }
 }
 

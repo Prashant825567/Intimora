@@ -32,7 +32,7 @@ function sitemapRequest(pages, calls = []) {
 test("robots advertises the valid checked-in sitemap snapshot", async () => {
   const robots = await readFile(path.join(root, "public/robots.txt"), "utf8");
   const fallback = await readFile(path.join(root, "public/sitemap.xml"), "utf8");
-  assert.match(robots, /(?:^|\n)Sitemap:\s*https:\/\/intimora\.new\.tg\/sitemap\.xml\s*(?:\n|$)/i);
+  assert.match(robots, /(?:^|\n)Sitemap:\s*https:\/\/intimora\.net\/sitemap\.xml\s*(?:\n|$)/i);
   assert.match(fallback, /^<\?xml version="1\.0" encoding="UTF-8"\?>\n<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
   const urls = locs(fallback);
   assert.equal(urls[0], `${SITE_ORIGIN}/`);
@@ -41,7 +41,7 @@ test("robots advertises the valid checked-in sitemap snapshot", async () => {
   assert.deepEqual(urls.slice(0, 5), [
     `${SITE_ORIGIN}/`, `${SITE_ORIGIN}/trending`, `${SITE_ORIGIN}/new`, `${SITE_ORIGIN}/exclusive`, `${SITE_ORIGIN}/categories`,
   ]);
-  for (const url of urls.slice(5)) assert.match(url, /^https:\/\/intimora\.new\.tg\/watch\/[A-Za-z0-9_-]{1,128}$/);
+  for (const url of urls.slice(5)) assert.match(url, /^https:\/\/intimora\.net\/watch\/[A-Za-z0-9_-]{1,128}$/);
   assert.equal(fallback, renderSitemap(urls.slice(5).map((url) => url.split("/").at(-1))));
 });
 
@@ -164,7 +164,7 @@ test("a real Vite static build publishes generated XML and robots with crawler-f
     assert.equal(await head.text(), "");
     const robots = await fetch(`${base}/robots.txt`, { headers });
     assert.equal(robots.status, 200);
-    assert.match(await robots.text(), /Sitemap:\s*https:\/\/intimora\.new\.tg\/sitemap\.xml/i);
+    assert.match(await robots.text(), /Sitemap:\s*https:\/\/intimora\.net\/sitemap\.xml/i);
   } finally {
     if (server) {
       server.closeAllConnections();

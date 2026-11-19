@@ -60,9 +60,9 @@ const Navbar: React.FC<NavbarProps> = ({ searchQuery, onSearchChange, onSearchSu
         {/* Top bar */}
         <div className="site-nav__bar flex items-center gap-4 h-16">
           {/* Logo */}
-          <a href="/" aria-label="Intivora home" className="site-nav__brand flex items-center flex-shrink-0">
+          <a href="/" aria-label="Intimora home" className="site-nav__brand flex items-center flex-shrink-0">
             <img src="/logo.svg" alt="" className="site-nav__brand-mark" />
-            <span className="site-nav__brand-text brand-wordmark" aria-hidden="true">Intivora</span>
+            <span className="site-nav__brand-text brand-wordmark" aria-hidden="true">Intimora</span>
           </a>
 
           {/* Search bar */}
