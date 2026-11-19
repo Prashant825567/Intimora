@@ -85,9 +85,7 @@ test("production Firebase SDK opens a Google chooser popup under the scoped CSP"
     });
     const page = await context.newPage();
     await page.goto(`${base}/login`);
-    await page.getByRole("button", { name: /I AM 18/i }).waitFor();
-    assert.equal(seen.script || seen.iframe || seen.handler, false, "Firebase sign-in helpers are not initialized before the age gate");
-    await page.getByRole("button", { name: /I AM 18/i }).click();
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "the sign-in page never shows the front-door gate");
     await page.getByRole("button", { name: "Sign in with Google" }).waitFor();
     const opening = page.waitForEvent("popup");
     await page.getByRole("button", { name: "Sign in with Google" }).click();

@@ -2,16 +2,21 @@ import React, { useEffect } from "react";
 import { X } from "lucide-react";
 import type { SponsoredCard as SponsoredCardData } from "../services/partner-cards.mjs";
 
+// Both overlays only need the embed URL and a title, so the anime feed can reuse
+// this player without pretending to be a sponsored card.
+interface Embeddable { title?: string; embedUrl: string }
+
 // A sponsored partner video opens in the site's own player: the same full-screen
 // overlay, the same 16:9 frame, the same close control and typography. The
 // partner's page runs inside the frame because that page *is* their player; no
 // pre-roll, tracking or related-video logic of ours runs here.
 interface PartnerPlayerProps {
-  card: SponsoredCardData;
+  card: SponsoredCardData | Embeddable;
   onClose: () => void;
+  label?: string;
 }
 
-const PartnerPlayer: React.FC<PartnerPlayerProps> = ({ card, onClose }) => {
+const PartnerPlayer: React.FC<PartnerPlayerProps> = ({ card, onClose, label }) => {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -20,14 +25,14 @@ const PartnerPlayer: React.FC<PartnerPlayerProps> = ({ card, onClose }) => {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const title = card.title || "Sponsored video";
+  const title = card.title || label || "Partner video";
   return (
     <div
       className="mobile-overlay fixed inset-0 z-[200] flex items-center justify-center bg-black/95"
       style={{ backdropFilter: "blur(10px)" }}
       role="dialog"
       aria-modal="true"
-      aria-label="Sponsored video player"
+      aria-label={label ? `${label} player` : "Sponsored video player"}
     >
       <div className="mobile-overlay__content video-player__content w-full max-w-6xl mx-auto px-2 sm:px-4">
         <div

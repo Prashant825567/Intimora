@@ -384,7 +384,7 @@ test("a browser-blocked automatic start keeps the manual play button available",
   } finally { await fixture.close(); }
 });
 
-test("shared watch links do not request catalog, details or media before the age gate", options, async () => {
+test("a shared watch link opens without the front-door gate and does not autoplay", options, async () => {
   const fixture = await createFixture({ holdMedia: true });
   try {
     const context = await fixture.browser.newContext();
@@ -392,10 +392,8 @@ test("shared watch links do not request catalog, details or media before the age
     const discovery = page.waitForResponse((response) => response.url() === fixture.discovery);
     await page.goto(`${fixture.base}/watch/sample-1`);
     await discovery;
-    assert.ok(!fixture.state.calls.some((call) => call.path.startsWith("/api/videos")));
-    assert.equal(await page.locator("#player-container video").count(), 0);
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).count(), 0, "a shared link never asks for the age again");
     const streamResponse = page.waitForResponse((response) => response.url() === `${fixture.backend}/api/videos/sample-1/stream`);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
     await streamResponse;
     const media = page.locator("#player-container video");
     await media.waitFor();

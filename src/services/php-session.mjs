@@ -14,6 +14,7 @@ import {
   UNLOCK_FRESH_MS,
   UNLOCK_MAX_TRIES,
   UNLOCK_MIN_GAP_MS,
+  UNLOCK_RETRY_MS,
   UNLOCK_SPLASH_MS,
 } from "../config/php-backend.mjs";
 import { recordDiagnostic } from "./diagnostics.mjs";
@@ -59,6 +60,7 @@ export function phpSessionPending({ storage, now, freshMs = UNLOCK_FRESH_MS } = 
     storage,
     now,
     freshMs,
+    retryMs: UNLOCK_RETRY_MS,
     maxTries: UNLOCK_MAX_TRIES,
     minGapMs: UNLOCK_MIN_GAP_MS,
   });
@@ -73,6 +75,10 @@ export function requestPhpUnlock(navigation = {}) {
   const requested = requestUnlockNavigation({
     phpOrigin: state.backend,
     freshMs: UNLOCK_FRESH_MS,
+    retryMs: UNLOCK_RETRY_MS,
+    // A request the browser refused to hand over (a missing CORS header) is not
+    // something the host's cookie page can fix, so it is remembered as such.
+    blocked: navigation.challenge === false,
     maxTries: UNLOCK_MAX_TRIES,
     minGapMs: UNLOCK_MIN_GAP_MS,
     splashMs: UNLOCK_SPLASH_MS,
@@ -86,9 +92,10 @@ export function requestPhpUnlock(navigation = {}) {
 export function notePhpFailure(detail) {
   if (!state.php) return;
   const kind = detail?.shape ? "shape"
-    : detail?.challenge ? "check-page"
-      : detail?.blocked ? "blocked"
-        : detail?.status ? "status" : "unknown";
+    : detail?.cors ? "blocked"
+      : detail?.challenge ? "check-page"
+        : detail?.blocked ? "blocked"
+          : detail?.status ? "status" : "unknown";
   lastFailure = {
     kind,
     status: typeof detail?.status === "number" ? detail.status : undefined,

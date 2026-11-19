@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { selectExclusive, selectNewReleases, selectTrending } from "../src/services/catalog-views.mjs";
+import { isAnimeVideo, selectExclusive, selectHomeFilter, selectNewReleases, selectTrending } from "../src/services/catalog-views.mjs";
 
 const video = (id, viewCount, createdAt, isExclusive = false) => ({ id, viewCount, createdAt, isExclusive });
 
@@ -28,4 +28,30 @@ test("new releases include only today's uploads, or yesterday's when today is em
 test("exclusive shows only videos marked exclusive in metadata", () => {
   const entries = [video("yes-old", 8, 100, true), video("no", 9, 200, false), video("yes-new", 1, 300, true)];
   assert.deepEqual(selectExclusive(entries).map((item) => item.id), ["yes-new", "yes-old"]);
+});
+
+test("home filters split anime from our own uploads and never touch the catalogue", () => {
+  const entries = [
+    { id: "desi-one", category: "Desi", tags: ["hd"] },
+    { id: "anime-category", category: "Anime", tags: [] },
+    { id: "anime-tag", category: "", tags: ["Hot Anime Scenes"] },
+    { id: "foreign", category: "Foreign", tags: ["russian"] },
+    { id: "hyphenated", category: "anime-hd", tags: [] },
+    { id: "plain" },
+    { id: "not-anime", category: "Animesque trailer", tags: [] },
+  ];
+
+  assert.deepEqual(selectHomeFilter(entries, "anime").map((item) => item.id), ["anime-category", "anime-tag", "hyphenated"]);
+  assert.deepEqual(selectHomeFilter(entries, "desi").map((item) => item.id), ["desi-one", "foreign", "plain", "not-anime"],
+    "anime is the only thing removed, so uploads from other countries stay");
+  assert.deepEqual(selectHomeFilter(entries, "sponsored"), [], "sponsored cards come from their own source, not the catalogue");
+  assert.deepEqual(selectHomeFilter(entries, "all").map((item) => item.id), entries.map((item) => item.id));
+  assert.deepEqual(selectHomeFilter(entries, "nonsense").map((item) => item.id), entries.map((item) => item.id), "an unknown value falls back to everything");
+  assert.deepEqual(selectHomeFilter(null, "anime"), []);
+  assert.deepEqual(entries.map((item) => item.id), ["desi-one", "anime-category", "anime-tag", "foreign", "hyphenated", "plain", "not-anime"]);
+  assert.equal(isAnimeVideo({ category: "ANIME" }), true, "the label match is case-insensitive");
+  assert.equal(isAnimeVideo({ tags: ["#anime"] }), true);
+  assert.equal(isAnimeVideo({ category: "Anime", tags: null }), true);
+  assert.equal(isAnimeVideo({ category: "Animex" }), false);
+  assert.equal(isAnimeVideo(null), false);
 });

@@ -131,6 +131,20 @@ export function createVisitorRequest(options = {}) {
     try { getStorage()?.setItem(STORAGE_KEY, JSON.stringify(cached)); } catch { /* In-memory selection still works. */ }
   }
 
+  // A CORS refusal and a dead connection look identical to `fetch`: both throw.
+  // They are very different problems though — one is fixed by the host's cookie
+  // page, the other can only be fixed on the host's server. A `no-cors` probe
+  // tells them apart: it resolves when the host answered at all, and rejects
+  // only when nothing came back.
+  async function answeredAtAll(url) {
+    try {
+      await fetcher(url, { mode: "no-cors", credentials: "omit", redirect: "follow", cache: "no-store" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async function readJson(url, method, { signal, counts = false, php = false, requestBody } = {}) {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -197,8 +211,11 @@ export function createVisitorRequest(options = {}) {
       controller.abort();
       // A CORS rejection, a refused connection and a redirect all look like
       // this. On a PHP host the browser's own unlock page is the only thing that
-      // can hand out the cookie, so that is what the caller is told next.
-      return { failed: true, invalidate: true, network: true };
+      // can hand out the cookie — but only when the host actually received the
+      // request. A refused answer (missing Access-Control-Allow-Origin) is
+      // reported as such and never turns into an unlock redirect.
+      const cors = php ? await answeredAtAll(url) : false;
+      return { failed: true, invalidate: true, network: true, cors };
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
@@ -277,7 +294,8 @@ export function createVisitorRequest(options = {}) {
         php,
         ok: !result.failed,
         challenge: Boolean(result.challenge),
-        blocked: Boolean(result.network),
+        blocked: Boolean(result.network) && !result.cors,
+        cors: Boolean(result.cors),
         status: result.status,
       });
     }
@@ -289,7 +307,7 @@ export function createVisitorRequest(options = {}) {
       // left the browser. Send the visitor through the host's own unlock page
       // once (no proxy in between); the request stops here because the page is
       // about to leave.
-      if (!counts && php && requestUnlock && (result.challenge || result.network)) {
+      if (!counts && php && requestUnlock && (result.challenge || (result.network && !result.cors))) {
         if (requestUnlock({ path, challenge: Boolean(result.challenge) })) throw new Error(UNAVAILABLE);
       }
       throw new Error(UNAVAILABLE);
