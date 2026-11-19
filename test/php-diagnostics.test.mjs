@@ -55,7 +55,7 @@ test("`__intimoraDiag()` returns the trace as a table", () => {
 test("a success is reported as such, and follows redirects on a PHP host", async () => {
   const { visitor, calls, outcomes } = visitorWith(() => Response.json({ ok: true, data: { videos: [] } }));
   await visitor.requestJson("/api/videos?limit=5");
-  assert.deepEqual(outcomes, [{ path: "/api/videos?limit=5", php: true, ok: true, challenge: false, blocked: false, status: undefined }]);
+  assert.deepEqual(outcomes, [{ path: "/api/videos?limit=5", php: true, ok: true, challenge: false, blocked: false, cors: false, status: undefined }]);
   assert.equal(calls[1].init.redirect, "follow", "a PHP host may redirect to its own check page");
   assert.equal(calls[1].init.credentials, "include");
 });

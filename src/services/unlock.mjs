@@ -71,15 +71,21 @@ export function clearUnlockAttempt(storage) {
 // True when a new unlock is worth asking for: a confirmed session lasts the
 // host's window, an unconfirmed one is retried a bounded number of times with a
 // minimum gap so the visitor never sees a redirect loop.
-export function shouldRequestUnlock({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000, maxTries = MAX_TRIES, minGapMs = MIN_GAP_MS } = {}) {
+export function shouldRequestUnlock({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000, retryMs = 2 * 60 * 1000, maxTries = MAX_TRIES, minGapMs = MIN_GAP_MS } = {}) {
   const state = readUnlockState(storage);
-  if (state.blocked === true) return false;
   const at = Number(state.at);
+  // A refusal the browser caused (no CORS header) is not retried in a loop, but
+  // it must not leave the tab dead either: the same short window applies.
+  if (state.blocked === true && Number.isFinite(at) && now - at > retryMs) return true;
+  if (state.blocked === true) return false;
   // No attempt yet, or a clock that jumped backwards: a fresh one is allowed.
   if (!Number.isFinite(at) || at <= 0) return true;
   if (now < at - CLOCK_SLACK_MS) return true;
+  // A proven session lasts the host's six hours; an attempt that never produced
+  // an answer expires quickly, so a temporary outage heals itself instead of
+  // leaving the tab dead for the rest of the day.
   if (state.ok === true) return now - at > freshMs;
-  if (now - at > freshMs) return true;
+  if (now - at > retryMs) return true;
   if (minGapMs > 0 && now - at < minGapMs) return false;
   const tries = Number(state.tries);
   return !(Number.isFinite(tries) && tries >= maxTries);
@@ -140,6 +146,8 @@ export function requestUnlockNavigation({
   storage,
   now = Date.now(),
   freshMs = 5.5 * 60 * 60 * 1000,
+  retryMs = 2 * 60 * 1000,
+  blocked = false,
   maxTries = MAX_TRIES,
   minGapMs = MIN_GAP_MS,
   splashMs = 700,
@@ -147,10 +155,10 @@ export function requestUnlockNavigation({
   navigate = (url) => { globalThis.location.assign(url); },
   setTimeoutImpl = (fn, ms) => setTimeout(fn, ms),
 } = {}) {
-  if (!shouldRequestUnlock({ storage, now, freshMs, maxTries, minGapMs })) return false;
+  if (!shouldRequestUnlock({ storage, now, freshMs, retryMs, maxTries, minGapMs })) return false;
   const url = unlockUrl(phpOrigin, href);
   if (!url) return false;
-  markUnlockAttempt(storage, { now, freshMs });
+  markUnlockAttempt(storage, { now, freshMs, blocked });
   showUnlockSplash({ document: doc });
   // Give the splash a frame or two so the visitor never sees a frozen page.
   setTimeoutImpl(() => navigate(url), Math.max(0, splashMs));

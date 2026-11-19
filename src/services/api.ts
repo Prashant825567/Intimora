@@ -30,7 +30,7 @@ const visitor = createVisitorRequest({
   onPhpSuccess: confirmPhpSession,
   // Every direct call reports how it ended, so the failure screen can name its
   // reason and the console trace can be pasted as-is.
-  onOutcome: (outcome: { path: string; php: boolean; ok: boolean; challenge: boolean; blocked: boolean; status?: number }) => {
+  onOutcome: (outcome: { path: string; php: boolean; ok: boolean; challenge: boolean; blocked: boolean; cors?: boolean; status?: number }) => {
     recordDiagnostic("request", outcome);
     if (!outcome.ok) notePhpFailure(outcome);
   },

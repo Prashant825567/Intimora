@@ -5,6 +5,7 @@ import {
   UNLOCK_FRESH_MS,
   UNLOCK_MAX_TRIES,
   UNLOCK_MIN_GAP_MS,
+  UNLOCK_RETRY_MS,
 } from "../src/config/php-backend.mjs";
 import { setPhpMediaOrigin, mediaCrossOrigin } from "../src/services/media-credentials.mjs";
 import {
@@ -55,9 +56,19 @@ test("an unconfirmed window retries a bounded number of times, then stops", () =
   }
   const lastTry = now + UNLOCK_MAX_TRIES * (UNLOCK_MIN_GAP_MS + 1_000);
   assert.equal(
+    guard(lastTry + UNLOCK_RETRY_MS - 1_000),
+    false,
+    "an attempt that never proved a cookie holds the window only for the short retry gap",
+  );
+  assert.equal(
+    guard(lastTry + UNLOCK_RETRY_MS + 1),
+    true,
+    "a temporary outage heals itself instead of locking the tab for six hours",
+  );
+  assert.equal(
     guard(lastTry + UNLOCK_FRESH_MS + 1),
     true,
-    "a new window is allowed once the host's session would have expired",
+    "a new window is also allowed once the host's session would have expired",
   );
 });
 
@@ -82,12 +93,21 @@ test("a confirmed session keeps the window quiet for the host's lifetime", () =>
   );
 });
 
-test("a host that refuses is never retried", () => {
+test("a refusal the browser caused is not retried in a loop, but it is not a six-hour lockout either", () => {
   const storage = memoryStorage();
   const now = 1_700_000_000_000;
   markUnlockAttempt(storage, { now, blocked: true });
-  assert.equal(shouldRequestUnlock({ storage, now: now + UNLOCK_FRESH_MS * 3, freshMs: UNLOCK_FRESH_MS }), false);
   assert.deepEqual(readUnlockState(storage), { at: now, tries: 1, ok: false, blocked: true });
+  assert.equal(
+    shouldRequestUnlock({ storage, now: now + UNLOCK_RETRY_MS - 1_000, freshMs: UNLOCK_FRESH_MS }),
+    false,
+    "the same refused answer must not send the visitor through the unlock page again straight away",
+  );
+  assert.equal(
+    shouldRequestUnlock({ storage, now: now + UNLOCK_RETRY_MS + 1, freshMs: UNLOCK_FRESH_MS }),
+    true,
+    "after the short gap the visitor gets a fresh chance instead of a dead page",
+  );
 });
 
 test("the unlock URL carries the visitor back to the exact page", () => {
@@ -284,4 +304,44 @@ test("media from the PHP host drops the CORS attribute so the cookie still goes"
 
 test("the PHP origin is no longer hardcoded", () => {
   assert.equal(PHP_ORIGIN_OVERRIDE, "", "the load balancer names the server in normal use");
+});
+
+test("a refused answer (missing CORS header) never becomes an unlock redirect", async () => {
+  const unlocks = [];
+  const calls = [];
+  const visitor = createVisitorRequest({
+    discoveryUrl,
+    fetcher: async (url, init) => {
+      calls.push({ url, mode: init?.mode });
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: php, php: true } });
+      // The CORS probe (no-cors) is answered, the real read throws: exactly what a
+      // missing Access-Control-Allow-Origin looks like in a browser.
+      if (init?.mode === "no-cors") return new Response(null, { status: 200 });
+      throw new TypeError("Failed to fetch");
+    },
+    requestUnlock: (context) => { unlocks.push(context); return true; },
+    storage: null,
+    reuseStoredSelection: false,
+  });
+  await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
+  assert.equal(unlocks.length, 0, "the host's cookie page cannot fix a CORS header, so the visitor is not sent there");
+  assert.ok(calls.some((call) => call.mode === "no-cors"), "the probe is what told the two failures apart");
+});
+
+test("a request that never arrived still gets the host's own unlock page", async () => {
+  const unlocks = [];
+  const visitor = createVisitorRequest({
+    discoveryUrl,
+    fetcher: async (url, init) => {
+      if (url === discoveryUrl) return Response.json({ ok: true, data: { server: php, php: true } });
+      if (init?.mode === "no-cors") throw new TypeError("Failed to fetch");
+      throw new TypeError("Failed to fetch");
+    },
+    requestUnlock: (context) => { unlocks.push(context); return true; },
+    storage: null,
+    reuseStoredSelection: false,
+  });
+  await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
+  assert.equal(unlocks.length, 1, "a blocked request may still be fixed by the cookie page");
+  assert.equal(unlocks[0].challenge, false);
 });
