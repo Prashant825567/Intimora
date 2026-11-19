@@ -17,14 +17,14 @@ test("every published route shell is a real app page", () => {
 test("video shells come only from site watch URLs with a valid unique ID", () => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset>
-  <url><loc>https://intimora.new.tg/</loc></url>
-  <url><loc>https://intimora.new.tg/watch/abc-123</loc></url>
-  <url><loc> https://intimora.new.tg/watch/abc-123 </loc></url>
-  <url><loc>https://intimora.new.tg/watch/def_456</loc></url>
-  <url><loc>https://intimora.new.tg/watch/../escape</loc></url>
-  <url><loc>https://intimora.new.tg/watch/bad%20id</loc></url>
-  <url><loc>https://intimora.new.tg/watch/</loc></url>
-  <url><loc>https://intimora.new.tg/watch/${"a".repeat(129)}</loc></url>
+  <url><loc>https://intimora.net/</loc></url>
+  <url><loc>https://intimora.net/watch/abc-123</loc></url>
+  <url><loc> https://intimora.net/watch/abc-123 </loc></url>
+  <url><loc>https://intimora.net/watch/def_456</loc></url>
+  <url><loc>https://intimora.net/watch/../escape</loc></url>
+  <url><loc>https://intimora.net/watch/bad%20id</loc></url>
+  <url><loc>https://intimora.net/watch/</loc></url>
+  <url><loc>https://intimora.net/watch/${"a".repeat(129)}</loc></url>
   <url><loc>https://evil.example/watch/other-host</loc></url>
 </urlset>`;
   assert.deepEqual(watchIdsFromSitemap(xml), ["abc-123", "def_456"]);
@@ -36,7 +36,7 @@ test("video shells come only from site watch URLs with a valid unique ID", () =>
 
 test("the video shell list is bounded so a large catalog cannot flood the build", () => {
   assert.ok(Number.isInteger(MAX_WATCH_SHELLS) && MAX_WATCH_SHELLS > 0 && MAX_WATCH_SHELLS <= 1000);
-  const entries = Array.from({ length: MAX_WATCH_SHELLS + 25 }, (_, index) => `<url><loc>https://intimora.new.tg/watch/id-${index}</loc></url>`);
+  const entries = Array.from({ length: MAX_WATCH_SHELLS + 25 }, (_, index) => `<url><loc>https://intimora.net/watch/id-${index}</loc></url>`);
   const ids = watchIdsFromSitemap(`<urlset>${entries.join("")}</urlset>`);
   assert.equal(ids.length, MAX_WATCH_SHELLS);
   assert.equal(ids[0], "id-0");

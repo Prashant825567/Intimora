@@ -91,14 +91,14 @@ test("a host that refuses is never retried", () => {
 });
 
 test("the unlock URL carries the visitor back to the exact page", () => {
-  const href = "https://intimora.new.tg/watch/local-1?x=1#t=30";
+  const href = "https://intimora.net/watch/local-1?x=1#t=30";
   assert.equal(
     unlockUrl(php, href),
     `${new URL(php).origin}/__unlock?back=${encodeURIComponent(href)}`,
   );
   assert.equal(unlockUrl("http://insecure.example", href), null, "https is required");
   assert.equal(unlockUrl("not a url", href), null);
-  assert.equal(unlockUrl(php, ""), `${new URL(php).origin}/__unlock?back=${encodeURIComponent("https://intimora.new.tg/")}`);
+  assert.equal(unlockUrl(php, ""), `${new URL(php).origin}/__unlock?back=${encodeURIComponent("https://intimora.net/")}`);
 });
 
 test("requesting the unlock shows a splash and only then navigates", () => {
@@ -108,7 +108,7 @@ test("requesting the unlock shows a splash and only then navigates", () => {
   const timers = [];
   const first = requestUnlockNavigation({
     phpOrigin: php,
-    href: "https://intimora.new.tg/trending",
+    href: "https://intimora.net/trending",
     storage,
     now: 1_700_000_000_000,
     splashMs: 700,
@@ -123,7 +123,7 @@ test("requesting the unlock shows a splash and only then navigates", () => {
   assert.equal(timers[0].ms, 700);
   timers[0].fn();
   assert.equal(navigations.length, 1);
-  assert.match(navigations[0], /\/__unlock\?back=https%3A%2F%2Fintimora\.new\.tg%2Ftrending$/);
+  assert.match(navigations[0], /\/__unlock\?back=https%3A%2F%2Fintimora\.net%2Ftrending$/);
 
   const second = requestUnlockNavigation({
     phpOrigin: php,

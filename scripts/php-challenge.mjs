@@ -8,7 +8,7 @@
 // reloads.
 //
 // WHY THIS FILE EXISTS
-// The site does not use a proxy: a browser on intimora.new.tg talks to the PHP
+// The site does not use a proxy: a browser on intimora.net talks to the PHP
 // host itself, with the host's own cookie, and `src/services/unlock.mjs` sends
 // the visitor through the host's `/__unlock` page when the check answers
 // instead of JSON. This file is the terminal-side equivalent, used by
@@ -281,8 +281,8 @@ export function createChallengeClient({
 
 export const DEFAULT_PHP_ORIGINS = ["https://intimora-api2.site.je"];
 export const DEFAULT_ALLOWED_ORIGINS = [
-  "https://intimora.new.tg",
-  "https://www.intimora.new.tg",
+  "https://intimora.net",
+  "https://www.intimora.net",
   "https://intimora.tg",
 ];
 

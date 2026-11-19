@@ -42,7 +42,7 @@ function navigation(storage, now) {
     options: {
       storage,
       now,
-      href: "https://intimora.new.tg/trending",
+      href: "https://intimora.net/trending",
       document: fakeDocument(),
       navigate: (url) => navigations.push(url),
       setTimeoutImpl: (fn) => { timers.push(fn); return 1; },

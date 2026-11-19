@@ -29,7 +29,7 @@ export function activePhpOrigin() {
 export function mediaCrossOrigin(url) {
   try {
     if (!state.phpOrigin) return ANONYMOUS;
-    const base = globalThis.location?.href ?? "https://intimora.new.tg/";
+    const base = globalThis.location?.href ?? "https://intimora.net/";
     const target = new URL(String(url), base);
     if (target.origin === state.phpOrigin) return undefined;
   } catch {

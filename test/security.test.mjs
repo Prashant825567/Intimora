@@ -43,7 +43,7 @@ function json(res, status, value) {
 
 before(async () => {
   distDir = await mkdtemp(path.join(os.tmpdir(), "intimora-static-"));
-  await writeFile(path.join(distDir, "index.html"), "<!doctype html><title>Intivora</title>");
+  await writeFile(path.join(distDir, "index.html"), "<!doctype html><title>Intimora</title>");
   await writeFile(path.join(distDir, "logo.png"), "logo");
 
   other = createServer((_req, res) => {

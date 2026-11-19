@@ -104,7 +104,7 @@ export function unlockUrl(phpOrigin, href, { query = UNLOCK_QUERY } = {}) {
     return null;
   }
   if (!/^https:$/.test(new URL(origin).protocol)) return null;
-  const back = typeof href === "string" && href ? href : "https://intimora.new.tg/";
+  const back = typeof href === "string" && href ? href : "https://intimora.net/";
   return `${origin}/__unlock?back=${encodeURIComponent(back)}`;
 }
 
@@ -119,7 +119,7 @@ export function showUnlockSplash({ document: doc = globalThis.document, message 
   splash.setAttribute("aria-live", "polite");
   splash.innerHTML = `
     <div class="unlock-splash__card">
-      <img class="unlock-splash__logo" src="/logo.png" alt="Intivora" />
+      <img class="unlock-splash__logo" src="/logo.png" alt="Intimora" />
       <span class="unlock-splash__ring" aria-hidden="true"></span>
       <p class="unlock-splash__title">${message ?? "Ek second… verifying your connection"}</p>
       <p class="unlock-splash__note">You will be brought back here automatically.</p>

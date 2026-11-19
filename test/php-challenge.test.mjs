@@ -114,7 +114,7 @@ test("a challenge that cannot be solved is reported, not looped forever", async 
   await assert.rejects(() => client.request("https://example.test/api/videos"), /could not be solved/);
 });
 
-const siteOrigin = "https://intimora.new.tg";
+const siteOrigin = "https://intimora.net";
 
 function proxyWith(fetchImpl, extra = {}) {
   const cacheStore = new Map();

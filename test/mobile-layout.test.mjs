@@ -32,7 +32,7 @@ const videos = [{
   duration: 900,
   views: 250,
   likes: 42,
-  creator: "Intivora",
+  creator: "Intimora",
   tags: [" PREMIUM ", "#Premium", "recent", "hd"],
 }];
 
@@ -174,7 +174,7 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       const watch = page.getByRole("button", { name: /WATCH NOW/i });
       await watch.waitFor();
       await page.evaluate(() => document.fonts.ready);
-      const brand = page.getByRole("link", { name: "Intivora home" });
+      const brand = page.getByRole("link", { name: "Intimora home" });
       await assertInViewport(brand, width, height, `${label} brand`);
       await assertTextNotClipped(brand.locator(".site-nav__brand-text"), `${label} wordmark`);
       assert.equal(await brand.locator(".site-nav__brand-mark").evaluate((image) => image.complete && image.naturalWidth > 0), true, `${label}: brand image loaded`);
