@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import AgeGate from "./components/AgeGate";
+import CategoryBar, { type HomeFilter } from "./components/CategoryBar";
 import Navbar from "./components/Navbar";
 import HeroBanner from "./components/HeroBanner";
 import VideoCard from "./components/VideoCard";
@@ -31,7 +32,7 @@ import {
 } from "./services/retry.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
-import { selectExclusive, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
+import { selectExclusive, selectHomeFilter, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
 import { accountPageFromPath, BROWSE_PATHS, browseViewFromPath, isSearchPath, searchPathFor, searchTermFromLocation, watchIdFromPath, watchPathFor } from "./services/page-routes.mjs";
 
 const AGE_VERIFIED_KEY = "intimora_age_verified";
@@ -121,6 +122,8 @@ function App() {
   const [shareVideo, setShareVideo] = useState<Video | null>(null);
   const [activeSponsored, setActiveSponsored] = useState<SponsoredCardData | null>(null);
   const [sponsored, setSponsored] = useState<SponsoredCardData[]>([]);
+  // The home filter lives in the page, not the URL: home stays one address.
+  const [homeFilter, setHomeFilter] = useState<HomeFilter>("all");
   const [initialLoading, setInitialLoading] = useState(true);
   const [catalogStatus, setCatalogStatus] = useState<CatalogStatus>("loading");
   const [catalogRevision, setCatalogRevision] = useState(0);
@@ -211,6 +214,11 @@ function App() {
   // A deep-linked visitor never meets the gate, so the single per-session visit
   // row is written on arrival instead of after a confirmation.
   useEffect(() => { if (!gateRequired) void logVisit(); }, [gateRequired]);
+
+  const changeHomeFilter = (next: HomeFilter) => {
+    setHomeFilter(next);
+    setVisibleCount(DISPLAY_PAGE_SIZE);
+  };
 
   const handleAgeConfirm = () => {
     try { sessionStorage.setItem(AGE_VERIFIED_KEY, "true"); }
@@ -328,6 +336,7 @@ function App() {
     return () => { cancelled = true; };
   }, [accessGranted, pathname, historyRevision]);
 
+  const homeVideos = useMemo(() => selectHomeFilter(videos, homeFilter), [videos, homeFilter]);
   const trending = useMemo(() => selectTrending(videos), [videos]);
   const newReleases = useMemo(() => selectNewReleases(videos, Date.now()), [videos, now]);
   const exclusive = useMemo(() => selectExclusive(videos), [videos]);
@@ -337,7 +346,7 @@ function App() {
     New: { title: "New Releases", subtitle: "Today's uploads, or yesterday's if there are none today.", empty: "No videos were uploaded today or yesterday." },
     Exclusive: { title: "Exclusive", subtitle: "Videos marked exclusive in their metadata.", empty: "No exclusive videos are available yet." },
   };
-  const currentFeed = activeView === "Home" || activeView === "Categories" ? videos : feeds[activeView];
+  const currentFeed = activeView === "Home" ? homeVideos : activeView === "Categories" ? videos : feeds[activeView];
   const hasMoreVisible = visibleCount < currentFeed.length;
 
   // Keep rendering a small number of cards at a time even while catalog pages
@@ -551,14 +560,30 @@ function App() {
                 for a screen reader, and it stays out of the layout. */}
             <h1 className="sr-only">Intimora — free 18+ video streaming</h1>
             {videos.length > 0 && <div className="mb-10"><HeroBanner videos={videos} onPlay={handlePlayVideo} /></div>}
+            {/* Directly under the hero and above the grid: All, Desi, Anime and
+                Sponsored. A filter only narrows what home already shows —
+                Trending, New and Exclusive keep their own tabs. */}
+            {videos.length > 0 && <CategoryBar value={homeFilter} onChange={changeHomeFilter} />}
             {catalogMessage}
-            {/* Home is the whole catalogue. Trending, New and Exclusive have
-                their own tabs, so those rows never repeat here. */}
             {videos.length > 0 && (
-              <section aria-label="All Videos">
-                <div className="flex items-center gap-2 mb-5" style={{ color: "#c9a84c" }}><TrendingUp className="w-5 h-5" /><h2 className="text-white font-bold text-xl">All Videos</h2><span className="text-gray-600 text-sm ml-1">({videos.length})</span></div>
-                <VideoGrid videos={videos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} sponsored={sponsored} onPlaySponsored={setActiveSponsored} />
-                {listFooter(videos.length)}
+              <section aria-label={homeFilter === "sponsored" ? "Sponsored" : homeFilter === "anime" ? "Anime" : homeFilter === "desi" ? "Desi" : "All Videos"}>
+                <div className="flex items-center gap-2 mb-5" style={{ color: "#c9a84c" }}>
+                  <TrendingUp className="w-5 h-5" />
+                  <h2 className="text-white font-bold text-xl">{homeFilter === "sponsored" ? "Sponsored" : homeFilter === "anime" ? "Anime" : homeFilter === "desi" ? "Desi" : "All Videos"}</h2>
+                  <span className="text-gray-600 text-sm ml-1">({homeFilter === "sponsored" ? sponsored.length : homeVideos.length})</span>
+                </div>
+                {homeFilter === "sponsored" ? (
+                  sponsored.length ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                      {sponsored.map((card) => <SponsoredCard key={card.id} card={card} onPlay={setActiveSponsored} />)}
+                    </div>
+                  ) : <p className="home-empty">No sponsored videos right now.</p>
+                ) : homeVideos.length ? (
+                  <>
+                    <VideoGrid videos={homeVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} sponsored={sponsored} onPlaySponsored={setActiveSponsored} />
+                    {listFooter(homeVideos.length)}
+                  </>
+                ) : <p className="home-empty">{homeFilter === "anime" ? "No anime videos yet." : "No videos in this filter yet."}</p>}
               </section>
             )}
           </>
