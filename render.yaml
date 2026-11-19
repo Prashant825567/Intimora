@@ -3,7 +3,7 @@ services:
     name: intimora
     runtime: static
     branch: master
-    buildCommand: npm ci --include=dev && npm run build
+    buildCommand: npm ci --include=dev && npm run anime:feed && npm run build
     staticPublishPath: ./dist
     autoDeployTrigger: commit
     routes:
