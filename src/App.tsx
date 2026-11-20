@@ -31,7 +31,7 @@ import {
   UNLOCK_RETRY_DELAYS_MS,
   retryWithDelays,
 } from "./services/retry.mjs";
-import { animeCards, animeLists, type AnimeCard as AnimeCardData, type AnimeList as AnimeListData } from "./services/anime-feed.mjs";
+import { animeCards, animeLists, animeSearch, type AnimeCard as AnimeCardData, type AnimeList as AnimeListData } from "./services/anime-feed.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectHomeFilter, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
@@ -379,7 +379,7 @@ function App() {
   const animeMatches = useMemo(() => {
     const query = (submittedQuery ?? "").trim().toLowerCase();
     if (!query) return [];
-    return anime.filter((card) => card.title.toLowerCase().includes(query)).slice(0, 24);
+    return animeSearch(anime, query, { limit: 24 });
   }, [anime, submittedQuery]);
   const currentFeed = activeView === "Home" ? homeVideos : activeView === "Categories" ? videos : feeds[activeView];
   const hasMoreVisible = visibleCount < currentFeed.length;

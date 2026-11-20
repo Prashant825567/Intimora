@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { animeCards, animeEmbedUrl, animeFeedPayload, animeIdFromSlug, animeLists, parseAnimeListing } from "../src/services/anime-feed.mjs";
+import { animeCards, animeEmbedUrl, animeFeedPayload, animeIdFromSlug, animeLists, animeSearch, enrichAnimePage, parseAnimeListing } from "../src/services/anime-feed.mjs";
 
 const listing = `
 <div class="item">
@@ -62,7 +62,7 @@ test("ids and embed URLs are derived, never invented", () => {
 test("the payload survives a round trip and a tampered file can only point at the source player", () => {
   const items = parseAnimeListing(listing);
   const payload = animeFeedPayload(items, { generatedAt: "2026-11-19T00:00:00.000Z" });
-  assert.equal(payload.version, 2);
+  assert.equal(payload.version, 3);
   assert.deepEqual(payload.lists, [], "a feed built without rows carries no invented ranking");
   assert.equal(payload.items.length, 2);
   const cards = animeCards(payload);
@@ -133,4 +133,87 @@ test("a tampered file can only produce rows that point at the source's own playe
   const old = animeCards({ version: 1, items: [{ id: "Safe12345", title: "Safe", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg" }] });
   assert.equal(old.length, 1, "an older feed still fills the grid");
   assert.deepEqual(animeLists({ version: 1, items: [{ id: "Safe12345", title: "Safe", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg" }] }), []);
+});
+
+// The shape of a real video page: a schema.org record, a profile link for the
+// author, `/tags/video/<tag>` links (spaces as `+`), and category links that are
+// not tags.
+const videoPage = `
+<h1>Now That I Can Control Reality 6</h1>
+<a href="https://www.hentaicity.com/profile/fluffy/">fluffy</a>
+<a href="https://www.hentaicity.com/videos/straight/bigtits-popular.html">big tits</a>
+<a href="https://www.hentaicity.com/tags/video/mind+control">mind control</a>
+<a href="https://www.hentaicity.com/tags/video/weird">weird</a>
+<a href="https://www.hentaicity.com/tags/video/public+sex">public sex</a>
+<a href="https://www.hentaicity.com/tags/video/weird">weird</a>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"VideoObject","name":"Reality 6",
+ "description":"Takumi is an introverted student whose mouse cursor can reach outside the screen.",
+ "uploadDate":"2026-11-16T00:00:00+00:00","duration":"PT7M3S",
+ "thumbnailUrl":["https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg"],
+ "author":{"@type":"Person","name":"fluffy"},
+ "aggregateRating":{"@type":"AggregateRating","ratingValue":"73","ratingCount":"506"}}
+</script>
+<meta property="og:description" content="A fallback that is ignored when the record has one." />
+`;
+
+test("a video page adds its tags, author, date, rating and description to the card", () => {
+  assert.deepEqual(enrichAnimePage(videoPage), {
+    author: "fluffy",
+    uploadDate: "2026-11-16",
+    tags: ["mind control", "weird", "public sex"],
+    description: "Takumi is an introverted student whose mouse cursor can reach outside the screen.",
+    rating: 73,
+  });
+  assert.deepEqual(enrichAnimePage(""), {}, "an empty page adds nothing");
+  assert.deepEqual(enrichAnimePage(undefined), {}, "no page adds nothing");
+  assert.deepEqual(
+    enrichAnimePage('<meta property="og:description" content="Only a meta description here." />'),
+    { description: "Only a meta description here." },
+    "markup without a schema.org record still yields what it does state",
+  );
+  assert.deepEqual(
+    enrichAnimePage('<script type="application/ld+json">{not json}</script><a href="/tags/video/a b/c?x=1">bad</a>'),
+    {},
+    "broken JSON and an unusable tag link are skipped, never thrown",
+  );
+});
+
+test("the feed's optional fields are validated on the way in, so a tampered file cannot slip through", () => {
+  const base = { id: "1JdXN6yeMdN", title: "Fine", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg" };
+  const [card] = animeCards({ items: [{
+    ...base,
+    tags: ["futanari", "futanari", "", "<script>", 42, ...Array.from({ length: 12 }, (_, i) => `tag${i}`)],
+    author: "<img src=x onerror=alert(1)>",
+    uploadDate: "16 Nov 2026",
+    rating: "not a number",
+    description: "x".repeat(900),
+  }] });
+  assert.deepEqual(card.tags, ["futanari", "tag0", "tag1", "tag2", "tag3", "tag4", "tag5", "tag6"], "eight clean tags, deduplicated");
+  assert.equal(card.author, undefined, "markup is not an author");
+  assert.equal(card.uploadDate, undefined, "a loose date is not an upload date");
+  assert.equal(card.rating, undefined);
+  assert.equal(card.description.length, 300);
+
+  const [clean] = animeCards({ items: [{ ...base, author: "fluffy", uploadDate: "2026-11-16", rating: "73" }] });
+  assert.equal(clean.author, "fluffy");
+  assert.equal(clean.uploadDate, "2026-11-16");
+  assert.equal(clean.rating, 73);
+  assert.deepEqual(Object.keys(animeCards({ items: [base] })[0]), ["id", "title", "thumbnail", "duration", "embedUrl"],
+    "a card with no extra facts carries no empty keys");
+});
+
+test("search matches the title, the tags and the author, and still stays on our own copy", () => {
+  const cards = animeCards({ items: [
+    { id: "Aaa11111", title: "Metal Futa Solid", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg", tags: ["futanari", "3d"], author: "studio-x" },
+    { id: "Bbb22222", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/b/main.jpg", tags: ["teen"] },
+    { id: "Ccc33333", title: "Call of Cthulhu 3", thumbnail: "https://cdn1.images.hentaicity.com/c/main.jpg", tags: ["monster"] },
+  ] });
+  assert.deepEqual(animeSearch(cards, "one wife").map((card) => card.id), ["Bbb22222"]);
+  assert.deepEqual(animeSearch(cards, "FUTANARI").map((card) => card.id), ["Aaa11111"], "a tag is searchable");
+  assert.deepEqual(animeSearch(cards, "studio").map((card) => card.id), ["Aaa11111"], "the author is searchable");
+  assert.deepEqual(animeSearch(cards, "   "), [], "an empty query returns nothing");
+  assert.deepEqual(animeSearch(cards, "metal cthulhu"), [], "every word has to match one card");
+  assert.deepEqual(animeSearch(cards, "c", { limit: 1 }).length, 1);
+  assert.deepEqual(animeSearch(null, "x"), []);
 });

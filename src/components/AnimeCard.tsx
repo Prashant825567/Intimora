@@ -4,8 +4,9 @@ import type { AnimeCard as AnimeCardData } from "../services/anime-feed.mjs";
 
 // Anime titles come from the feed, so they have no catalogue record of ours: no
 // views, no like/save and no backend id. The card therefore shows only what the
-// feed can honestly promise — poster, title and duration — and a click opens the
-// source's own embed player inside our frame.
+// feed can honestly promise — poster, title, duration, and the tags, author and
+// rating the source's own video page volunteered. A click opens the source's own
+// embed player inside our frame; no media URL is ever copied here.
 const AnimeCard: React.FC<{ card: AnimeCardData; onPlay: (card: AnimeCardData) => void }> = ({ card, onPlay }) => (
   <button
     type="button"
@@ -42,7 +43,19 @@ const AnimeCard: React.FC<{ card: AnimeCardData; onPlay: (card: AnimeCardData) =
     <h3 className="video-card__title text-white text-sm font-semibold line-clamp-2 leading-snug group-hover:text-yellow-300 transition-colors mt-2">
       {card.title}
     </h3>
-    <p className="text-gray-500 text-xs mt-1">Anime · Hentai City</p>
+    <p className="text-gray-500 text-xs mt-1">
+      Anime · {card.author ?? "Hentai City"}
+      {typeof card.rating === "number" ? ` · ${card.rating}%` : ""}
+    </p>
+    {card.tags?.length ? (
+      <p className="anime-card__tags flex flex-wrap gap-1 mt-1.5">
+        {card.tags.slice(0, 2).map((tag) => (
+          <span key={tag} className="px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide" style={{ background: "rgba(201,168,76,0.14)", color: "#d8bf74" }}>
+            {tag}
+          </span>
+        ))}
+      </p>
+    ) : null}
   </button>
 );
 
