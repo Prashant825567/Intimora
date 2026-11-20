@@ -7,6 +7,12 @@ export interface AnimeCard {
   thumbnail: string;
   duration: string;
   embedUrl: string;
+  /** Optional facts the source's video page volunteered; absent when it did not. */
+  tags?: string[];
+  author?: string;
+  uploadDate?: string;
+  rating?: number;
+  description?: string;
 }
 
 export interface AnimeList {
@@ -30,3 +36,5 @@ export function animeFeedPayload(
 ): { version: number; source: string; generatedAt: string; lists: AnimeFeedList[]; items: AnimeCard[] };
 export function animeCards(payload: unknown, options?: { limit?: number }): AnimeCard[];
 export function animeLists(payload: unknown, options?: { perList?: number }): AnimeList[];
+export function animeSearch(cards: AnimeCard[], query: string, options?: { limit?: number }): AnimeCard[];
+export function enrichAnimePage(html: string): Partial<Pick<AnimeCard, "tags" | "author" | "uploadDate" | "rating" | "description">>;

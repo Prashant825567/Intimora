@@ -26,7 +26,7 @@ const feed = {
     { id: "popular", title: "Most Popular", itemIds: ["OneWife001x"] },
   ],
   items: [
-    { id: "1JdXN6yeMdN", title: "Reality control 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", pageUrl: "https://www.hentaicity.com/video/x-1JdXN6yeMdN.html", embedUrl: "https://www.hentaicity.com/embed/1JdXN6yeMdN", duration: "07:03" },
+    { id: "1JdXN6yeMdN", title: "Reality control 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", pageUrl: "https://www.hentaicity.com/video/x-1JdXN6yeMdN.html", embedUrl: "https://www.hentaicity.com/embed/1JdXN6yeMdN", duration: "07:03", tags: ["mind control", "futanari"], author: "fluffy", uploadDate: "2026-11-16", rating: 73 },
     { id: "OneWife001x", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", pageUrl: "https://www.hentaicity.com/video/y-OneWife001x.html", embedUrl: "https://www.hentaicity.com/embed/OneWife001x", duration: "23:36" },
   ],
 };
@@ -111,6 +111,14 @@ test("anime cards come from the baked feed and open the source's own player insi
     assert.deepEqual(await popularRow.locator(".video-card--anime .video-card__title").allInnerTexts(), ["One Wife 1"]);
     assert.equal(await page.locator("h3", { hasText: "Top Rated" }).count(), 0, "a row the feed did not send is never invented");
     assert.equal(await page.locator(".video-card--anime .video-card__badge").first().innerText(), "ANIME");
+
+    // The facts their own video page volunteered are shown; the card without them
+    // stays as clean as before.
+    const firstCard = newRow.locator(".video-card--anime").first();
+    assert.match((await firstCard.innerText()).toLowerCase(), /anime · fluffy · 73%/);
+    assert.deepEqual((await firstCard.locator(".anime-card__tags span").allInnerTexts()).map((tag) => tag.toLowerCase()), ["mind control", "futanari"]);
+    assert.equal(await newRow.locator(".video-card--anime").nth(1).locator(".anime-card__tags").count(), 0, "no tags, no empty row");
+    assert.match(await newRow.locator(".video-card--anime").nth(1).innerText(), /Anime · Hentai City/, "the credit line falls back to the source");
     assert.match(await page.locator(".video-card--anime img").first().getAttribute("src"), /cdn1\.images\.hentaicity\.com/);
     assert.equal(await page.locator(".video-card--anime .duration, .video-card--anime").first().innerText().then((text) => text.includes("07:03")), true);
     assert.equal(await page.locator(".video-card--anime").first().getByRole("button", { name: /save|like/i }).count(), 0, "an external title has no backend id, so it offers no like/save");
@@ -132,6 +140,12 @@ test("anime cards come from the baked feed and open the source's own player insi
     await search.press("Enter");
     await page.getByRole("region", { name: "Anime results" }).waitFor();
     assert.equal(await page.getByRole("region", { name: "Anime results" }).locator(".video-card--anime").count(), 1, "search still matches the flat feed, not the rows");
+
+    // A tag is searchable too, so "futanari" finds a title that never says it.
+    await search.fill("futanari");
+    await search.press("Enter");
+    await page.getByRole("region", { name: "Anime results" }).waitFor();
+    assert.deepEqual(await page.getByRole("region", { name: "Anime results" }).locator(".video-card__title").allInnerTexts(), ["Reality control 6"]);
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

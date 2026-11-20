@@ -8,7 +8,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ANIME_SOURCE, animeFeedPayload, parseAnimeListing } from "../src/services/anime-feed.mjs";
+import { ANIME_SOURCE, animeFeedPayload, enrichAnimePage, parseAnimeListing } from "../src/services/anime-feed.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const FEED_FILE = "anime-feed.json";
@@ -22,6 +22,11 @@ export const FEED_LISTS = Object.freeze([
   { id: "new", title: "New Releases", url: `${ANIME_SOURCE}/videos/straight/all-recent.html` },
   { id: "popular", title: "Most Popular", url: `${ANIME_SOURCE}/videos/straight/all-popular.html` },
   { id: "top", title: "Top Rated", url: `${ANIME_SOURCE}/videos/straight/all-rate.html` },
+  // Their own category pages, linked from every listing page and from every
+  // video page. Same crawl, same limits, one row each.
+  { id: "genre-3d", title: "3D", url: `${ANIME_SOURCE}/videos/straight/3d-popular.html` },
+  { id: "genre-cartoon", title: "Cartoon", url: `${ANIME_SOURCE}/videos/straight/cartoon-popular.html` },
+  { id: "genre-futanari", title: "Futanari", url: `${ANIME_SOURCE}/videos/straight/futanari-popular.html` },
 ]);
 
 const HEADERS = Object.freeze({
@@ -53,6 +58,11 @@ export async function buildAnimeFeed({
   delayMs = 10_000,
   limit = Number(process.env.ANIME_FEED_MAX ?? 120),
   perList = 12,
+  // One video page per title costs a crawl delay each, so enrichment is capped.
+  // Two is the default: it proves the path on every build for one extra minute,
+  // and ANIME_FEED_ENRICH=12 tags the first twelve cards when that wait is worth
+  // it. ANIME_FEED_ENRICH=0 turns it off.
+  enrich = 2,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 } = {}) {
   const items = [];
@@ -85,6 +95,20 @@ export async function buildAnimeFeed({
     throw new Error(`no anime items were found on ${lists.length} listing pages${failed.length ? ` (${failed.join("; ")})` : ""}`);
   }
   if (failed.length) console.warn(`[anime-feed] kept ${built.length}/${lists.length} rows; ${failed.join("; ")}`);
+
+  let enriched = 0;
+  for (const item of items.slice(0, Math.max(0, enrich))) {
+    if (delayMs > 0) await wait(delayMs);
+    try {
+      const extras = enrichAnimePage(await readPage(item.pageUrl, { fetchImpl }));
+      if (Object.keys(extras).length) {
+        Object.assign(item, extras);
+        enriched += 1;
+      }
+    } catch { /* A page that will not load costs its own tags, nothing else. */ }
+  }
+  if (enrich > 0) console.log(`[anime-feed] enriched ${enriched}/${Math.min(enrich, items.length)} cards from their video pages`);
+
   return animeFeedPayload(items, { lists: built });
 }
 
@@ -95,10 +119,12 @@ async function main() {
   const wanted = Number(process.env.ANIME_FEED_LISTS ?? process.env.ANIME_FEED_PAGES ?? FEED_LISTS.length);
   const lists = FEED_LISTS.slice(0, Math.min(FEED_LISTS.length, Math.max(1, Number.isFinite(wanted) ? wanted : FEED_LISTS.length)));
   try {
-    const payload = await buildAnimeFeed({ lists });
+    const enrich = Math.max(0, Number(process.env.ANIME_FEED_ENRICH ?? 2) || 0);
+    const payload = await buildAnimeFeed({ lists, enrich });
     await writeFile(target, `${JSON.stringify(payload, null, 2)}\n`);
     const rows = payload.lists.map((list) => `${list.title} ${list.itemIds.length}`).join(", ");
-    console.log(`[anime-feed] wrote ${payload.items.length} anime cards (${rows})`);
+    const tagged = payload.items.filter((item) => item.tags?.length).length;
+    console.log(`[anime-feed] wrote ${payload.items.length} anime cards (${rows})${tagged ? ` — tags on ${tagged}` : ""}`);
   } catch (error) {
     let kept = 0;
     try {

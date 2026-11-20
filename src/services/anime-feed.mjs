@@ -8,13 +8,18 @@
 // order — new, most popular and top rated — so the site can show the same rows
 // instead of one undifferentiated grid.
 export const ANIME_SOURCE = "https://www.hentaicity.com";
-export const ANIME_FEED_VERSION = 2;
+export const ANIME_FEED_VERSION = 3;
 
 const MAX_TITLE = 140;
 const MAX_ITEMS = 200;
 const VIDEO_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const DURATION = /^\d{1,3}:[0-5]\d$/;
 const THUMBNAIL = /^https:\/\/[^\s"'<>]+\.(?:jpe?g|png|webp)$/i;
+const TAG = /^[\p{L}0-9][\p{L}0-9 '&+._-]{0,23}$/u;
+const AUTHOR = /^[\p{L}0-9][\p{L}0-9 ._'&-]{0,39}$/u;
+const UPLOAD_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_TAGS = 8;
+const MAX_DESCRIPTION = 300;
 const LIST_ID = /^[a-z0-9-]{1,24}$/;
 const MAX_LISTS = 6;
 const MAX_LIST_ITEMS = 24;
@@ -52,6 +57,13 @@ function cleanTitle(value, fallback = "") {
     .trim();
   const title = text || fallback.trim();
   return title ? title.slice(0, MAX_TITLE) : "";
+}
+
+// A description is prose, not a title: it keeps its length up to its own cap
+// instead of being cut at the title limit.
+function cleanText(value, max = MAX_DESCRIPTION) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, max) : "";
 }
 
 function stripTags(html) {
@@ -92,6 +104,89 @@ export function parseAnimeListing(html, { source = ANIME_SOURCE, limit = MAX_ITE
   return items;
 }
 
+function decodeEntities(value) {
+  return String(value ?? "")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
+function metaContent(html, name) {
+  const pattern = new RegExp(`<meta\\b[^>]*?(?:property|name)=["']${name}["'][^>]*?content=["']([^"']*)["']`, "i");
+  return decodeEntities(html.match(pattern)?.[1] ?? "") || "";
+}
+
+// The page embeds a schema.org record for the video; it is the one place the
+// source states its own title, poster, upload date, author and description in a
+// machine-readable way, so it is read first and everything else is a fallback.
+function readJsonLdRecord(html) {
+  for (const match of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(match[1].trim());
+    } catch {
+      continue;
+    }
+    const candidates = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.["@graph"]) ? parsed["@graph"] : [parsed];
+    for (const record of candidates) {
+      if (record && typeof record === "object" && (record.uploadDate || record.description || record.author)) return record;
+    }
+  }
+  return null;
+}
+
+function cleanTagsFromHtml(html) {
+  const tags = [];
+  const seen = new Set();
+  for (const match of html.matchAll(/<a\b[^>]*href=["'](?:https?:\/\/www\.hentaicity\.com)?\/tags\/video\/([^"'?#]+)["']/gi)) {
+    let tag;
+    try {
+      tag = decodeEntities(decodeURIComponent(match[1].replace(/\+/g, " "))).replace(/\s+/g, " ").trim();
+    } catch {
+      continue;
+    }
+    const key = tag.toLowerCase();
+    if (!tag || tag.length > 24 || !TAG.test(tag) || seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+    if (tags.length >= MAX_TAGS) break;
+  }
+  return tags;
+}
+
+// What one video page can add to a card. Everything here is optional and
+// additive: a page whose markup changed yields fewer fields, never a broken
+// card, and nothing here touches a media URL.
+export function enrichAnimePage(html) {
+  if (typeof html !== "string" || !html) return {};
+  const record = readJsonLdRecord(html);
+  const extras = {};
+
+  const rawAuthor = record?.author?.name ?? record?.author ?? html.match(/<a\b[^>]*href=["'](?:https?:\/\/www\.hentaicity\.com)?\/profile\/([^"'/]+)\/?["']/i)?.[1];
+  const author = decodeEntities(decodeURIComponent(String(rawAuthor ?? "").replace(/\+/g, " "))).replace(/\s+/g, " ").trim();
+  if (author && AUTHOR.test(author)) extras.author = author;
+
+  const rawDate = String(record?.uploadDate ?? html.match(/"uploadDate"\s*:\s*"([^"]+)"/i)?.[1] ?? "").trim();
+  const date = rawDate.slice(0, 10);
+  if (UPLOAD_DATE.test(date) && !Number.isNaN(Date.parse(rawDate))) extras.uploadDate = date;
+
+  const tags = cleanTagsFromHtml(html);
+  if (tags.length) extras.tags = tags;
+
+  const description = cleanText(stripTags(decodeEntities(
+    String(record?.description ?? "") || metaContent(html, "og:description") || metaContent(html, "description"),
+  )));
+  if (description) extras.description = description;
+
+  const rating = Number.parseInt(String(record?.aggregateRating?.ratingValue ?? ""), 10);
+  if (Number.isFinite(rating) && rating >= 0 && rating <= 100) extras.rating = rating;
+
+  return extras;
+}
+
 // One shape for one card, so every reader in the app — the flat grid, the
 // ordered rows and the search results — validates a card the same way.
 function sanitizeItem(item) {
@@ -103,7 +198,30 @@ function sanitizeItem(item) {
   const embedUrl = animeEmbedUrl(id);
   if (!title || !thumbnail || !embedUrl) return null;
   const duration = typeof item.duration === "string" && DURATION.test(item.duration) ? item.duration : "";
-  return { id, title, thumbnail, duration, embedUrl };
+  const card = { id, title, thumbnail, duration, embedUrl };
+
+  // Optional facts the video page volunteered. A hand-edited file can only ever
+  // add a plausible label here — never a URL, an embed target or markup.
+  const tags = [];
+  const seen = new Set();
+  for (const tag of Array.isArray(item.tags) ? item.tags : []) {
+    if (tags.length >= MAX_TAGS) break;
+    const clean = typeof tag === "string" ? cleanTitle(tag) : "";
+    const key = clean.toLowerCase();
+    if (!clean || clean.length > 24 || !TAG.test(clean) || seen.has(key)) continue;
+    seen.add(key);
+    tags.push(clean);
+  }
+  if (tags.length) card.tags = tags;
+  const author = typeof item.author === "string" ? cleanTitle(item.author).slice(0, 40) : "";
+  if (author && AUTHOR.test(author)) card.author = author;
+  const uploadDate = typeof item.uploadDate === "string" ? item.uploadDate.trim() : "";
+  if (UPLOAD_DATE.test(uploadDate)) card.uploadDate = uploadDate;
+  const rating = Number.parseInt(String(item.rating ?? ""), 10);
+  if (Number.isFinite(rating) && rating >= 0 && rating <= 100) card.rating = rating;
+  const description = typeof item.description === "string" ? cleanText(item.description) : "";
+  if (description) card.description = description;
+  return card;
 }
 
 function cleanListTitle(value) {
@@ -184,4 +302,23 @@ export function animeLists(payload, { perList = 12 } = {}) {
     if (cards.length) rows.push({ id, title, cards });
   }
   return rows;
+}
+
+// Search stays on our own copy of the feed: the source's /search/ is disallowed
+// to crawlers, so no query ever leaves our origin. Tags and the author are
+// searchable too — "futanari" finds a card whose title never says it.
+export function animeSearch(cards, query, { limit = 24 } = {}) {
+  const text = typeof query === "string" ? query.trim().toLowerCase() : "";
+  if (!text || !Array.isArray(cards)) return [];
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const matches = [];
+  for (const card of cards) {
+    if (!card || typeof card.title !== "string") continue;
+    const haystack = [card.title, card.author ?? "", ...(Array.isArray(card.tags) ? card.tags : [])].join(" ").toLowerCase();
+    if (!words.every((word) => haystack.includes(word))) continue;
+    matches.push(card);
+    if (matches.length >= limit) break;
+  }
+  return matches;
 }
