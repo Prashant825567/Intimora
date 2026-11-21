@@ -306,7 +306,7 @@ test("the PHP origin is no longer hardcoded", () => {
   assert.equal(PHP_ORIGIN_OVERRIDE, "", "the load balancer names the server in normal use");
 });
 
-test("a refused answer (missing CORS header) never becomes an unlock redirect", async () => {
+test("a refused answer reaches the unlock once, and the callback is told it was a refusal", async () => {
   const unlocks = [];
   const calls = [];
   const visitor = createVisitorRequest({
@@ -324,7 +324,11 @@ test("a refused answer (missing CORS header) never becomes an unlock redirect", 
     reuseStoredSelection: false,
   });
   await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
-  assert.equal(unlocks.length, 0, "the host's cookie page cannot fix a CORS header, so the visitor is not sent there");
+  // A cookieless answer from a PHP host looks exactly like this, so the host's
+  // own page gets one chance; the cookie budget in php-session keeps it at one.
+  assert.equal(unlocks.length, 1);
+  assert.deepEqual({ ...unlocks[0], path: undefined }, { path: undefined, challenge: false, cors: true },
+    "the unlock is told this was a refusal, not the host's check page");
   assert.ok(calls.some((call) => call.mode === "no-cors"), "the probe is what told the two failures apart");
 });
 

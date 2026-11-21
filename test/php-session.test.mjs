@@ -125,3 +125,31 @@ test("retrying gives the budget back instead of leaving the page dead", () => {
   assert.deepEqual(readUnlockState(storage), {});
   assert.equal(phpSessionPending({ storage, now: now + 60_000 }), true);
 });
+
+test("a refusal earns one unlock while the session is unproven, and none once it is proven", () => {
+  setActiveTarget({ backend: php, php: true });
+  const storage = memoryStorage();
+  const now = 1_700_000_000_000;
+  const first = navigation(storage, now);
+  assert.equal(requestPhpUnlock({ ...first.options, challenge: false, cors: true }), true, "a cookieless answer is worth the host's own page");
+  first.timers[0]();
+  confirmPhpSession({ storage, now });
+  const second = navigation(storage, now + 5_000);
+  assert.equal(requestPhpUnlock({ ...second.options, challenge: false, cors: true }), false,
+    "once an answer has arrived, a missing CORS header is the host's server problem and not a reason to navigate");
+  assert.equal(second.navigations.length, 0);
+  resetPhpSession(storage);
+});
+
+test("the check page still opens even after a proven session", () => {
+  setActiveTarget({ backend: php, php: true });
+  const storage = memoryStorage();
+  const now = 1_700_000_000_000;
+  confirmPhpSession({ storage, now });
+  resetPhpSession(storage);
+  confirmPhpSession({ storage, now });
+  const trip = navigation(storage, now + 6 * 60 * 60 * 1000 + 1);
+  assert.equal(requestPhpUnlock({ ...trip.options, challenge: true, cors: false }), true,
+    "the host's own check page is always a reason to visit it");
+  resetPhpSession(storage);
+});

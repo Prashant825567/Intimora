@@ -63,6 +63,17 @@ export function confirmUnlockSession(storage, { now = Date.now() } = {}) {
   write(storage, { at: now, tries: 0, ok: true });
 }
 
+// A PHP answer that arrived once already proved the host's cookie works. Used to
+// tell "the cookie is missing" (worth the host's own unlock page) apart from
+// "the host answers without a CORS header" (its server, not its cookie).
+export function hasProvenSession({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000 } = {}) {
+  const state = readUnlockState(storage);
+  const at = Number(state.at);
+  if (state.ok !== true || !Number.isFinite(at) || at <= 0) return false;
+  if (now < at - CLOCK_SLACK_MS) return true;
+  return now - at <= freshMs;
+}
+
 export function clearUnlockAttempt(storage) {
   const store = storage === undefined ? safely(() => globalThis.localStorage) : storage;
   safely(() => store?.removeItem(STORAGE_KEY));

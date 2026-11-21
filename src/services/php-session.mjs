@@ -22,6 +22,7 @@ import { setPhpMediaOrigin } from "./media-credentials.mjs";
 import {
   clearUnlockAttempt,
   confirmUnlockSession,
+  hasProvenSession,
   requestUnlockNavigation,
   shouldRequestUnlock,
 } from "./unlock.mjs";
@@ -69,8 +70,19 @@ export function phpSessionPending({ storage, now, freshMs = UNLOCK_FRESH_MS } = 
 // Returns true when the browser was sent to the host's own unlock page. Only a
 // PHP backend ever gets here, and the attempt budget is bounded, so the redirect
 // can never loop.
-export function requestPhpUnlock(navigation = {}) {
+export function requestPhpUnlock(navigation = {}, storage) {
   if (!state.php || !state.backend || leaving) return false;
+  // A refusal with no CORS header is normally the host's own server problem, and
+  // its cookie page cannot fix that. But a host that has never proven a session
+  // looks exactly the same when the browser sends no cookie at all — on a PHP
+  // host that is worth exactly one attempt, and the cookie budget below makes
+  // sure it stays one.
+  const corsOnly = navigation.cors === true && navigation.challenge !== true;
+  const store = storage !== undefined ? storage : navigation.storage;
+  if (corsOnly && hasProvenSession({ storage: store })) {
+    recordDiagnostic("unlock-skipped", { reason: "cors-after-proven-session" });
+    return false;
+  }
   recordDiagnostic("unlock", { reason: lastFailure?.kind ?? "first-attempt" });
   const requested = requestUnlockNavigation({
     phpOrigin: state.backend,
