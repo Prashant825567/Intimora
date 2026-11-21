@@ -24,16 +24,16 @@ const videos = [{
   likes: 1245,
   creator: "CreatorWithAVeryVeryLongUnbrokenNameThatMustStayInsideTheScreen",
   uploadedAt: "7 months ago",
-  tags: ["premium", "longtag".repeat(10)],
+  tags: ["longtag".repeat(10)],
 }, {
   id: "sample-2",
   title: "Catalog item remains available",
-  category: " pReMiUm ",
+  category: "Classic",
   duration: 900,
   views: 250,
   likes: 42,
   creator: "Intimora",
-  tags: [" PREMIUM ", "#Premium", "recent", "hd"],
+  tags: ["recent", "hd"],
 }];
 
 async function availablePort() {
@@ -51,6 +51,8 @@ async function mockApi(page) {
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    // The anime API is a real host; tests never call it.
+    if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
     const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
     if (url.hostname === "intimora.tmc78lxnu.workers.dev" && url.pathname === "/api/get-server") {
       return route.fulfill({ headers, json: { ok: true, data: { server: "https://mobile-backend.example" } } });
@@ -306,9 +308,12 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
     await assertPageFits(desktop, "desktop home");
     await desktop.locator(".video-card__play").first().hover();
     assert.equal(await desktop.locator(".video-card__image").first().evaluate((image) => getComputedStyle(image).transform), "none", "hover does not zoom or crop card images");
-    assert.doesNotMatch(await desktop.locator("body").innerText(), /premium/i, "no premium controls, badges, tags, or footer links");
+    // Premium is a chip and a row now, and nothing else: no badge, no tag, no
+    // footer link, no menu item.
+    assert.equal(await desktop.getByRole("button", { name: "Premium", exact: true }).count(), 1, "Premium sits in the filter bar");
+    assert.doesNotMatch(await desktop.locator("footer").innerText(), /premium/i, "no premium footer link");
+    assert.doesNotMatch(await desktop.locator(".hero-banner__meta").first().innerText(), /premium/i);
 
-    // A video previously tagged with the retired tier remains visible and playable.
     const retiredCard = desktop.locator('section[aria-label="All Videos"] .video-card__title').filter({ hasText: "Catalog item remains available" }).locator("../..");
     assert.equal(await retiredCard.count(), 1);
     assert.equal(await retiredCard.locator(".video-card__badge").count(), 0);

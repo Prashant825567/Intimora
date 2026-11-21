@@ -35,6 +35,8 @@ async function installMocks(context, state, { invalidDiscovery = false } = {}) {
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    // The anime API is a real host; tests never call it.
+    if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
     const cors = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS",

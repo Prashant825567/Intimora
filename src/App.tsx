@@ -31,7 +31,7 @@ import {
   UNLOCK_RETRY_DELAYS_MS,
   retryWithDelays,
 } from "./services/retry.mjs";
-import { animeCards, animeLists, animeSearch, type AnimeCard as AnimeCardData, type AnimeList as AnimeListData } from "./services/anime-feed.mjs";
+import { animeSearch, fetchAnimeRows, type AnimeCard as AnimeCardData, type AnimeList as AnimeListData } from "./services/anime-api.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectHomeFilter, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
@@ -63,6 +63,21 @@ function VideoGrid({ videos, onPlay, onShare, onSave, account, liveLikes, sponso
         <VideoCard key={entry.video.id} video={liveLikes.withCount(entry.video)} onPlay={onPlay} onShare={onShare} onSave={onSave} saved={account.isSaved(entry.video.id)} savePending={account.pending.has(`save:${entry.video.id}`)} observeLikes={liveLikes.observe} />
       ))}
     </div>
+  );
+}
+
+// A titled block inside All Videos. Nothing in it means the block is not drawn.
+function HomeRow({ id, title, count, children }: { id: string; title: string; count: number; children: React.ReactNode }) {
+  if (!count) return null;
+  return (
+    <section aria-label={`${title} videos`} data-row={id}>
+      <div className="flex items-center gap-2 mb-4">
+        <TrendingUp className="w-4 h-4" style={{ color: "#c9a84c" }} />
+        <h3 className="text-white font-bold text-lg">{title}</h3>
+        <span className="text-gray-600 text-sm">({count})</span>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -126,9 +141,9 @@ function App() {
   const [sponsored, setSponsored] = useState<SponsoredCardData[]>([]);
   // The home filter lives in the page, not the URL: home stays one address.
   const [homeFilter, setHomeFilter] = useState<HomeFilter>("all");
-  const [anime, setAnime] = useState<AnimeCardData[]>([]);
-  // The feed's own rows — New Releases, Most Popular, Top Rated. Empty when the
-  // baked file predates them or the build could not reach the source.
+  // The anime page asks our own anime API when it opens — Recent first, then
+  // Popular. Nothing about that content is baked into this build; a row that
+  // fails is simply not drawn.
   const [animeRows, setAnimeRows] = useState<AnimeListData[]>([]);
   const [activeAnime, setActiveAnime] = useState<AnimeCardData | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -218,24 +233,15 @@ function App() {
   // catalog or media until the gate is answered.
   useEffect(() => { primeBackendSelection().catch(() => {}); }, []);
 
-  // The anime feed is a same-origin file written by the build: nothing is
-  // proxied at runtime and no third-party media URL is fetched here.
+  // Anime rows come from our anime API at runtime. Only metadata crosses the
+  // wire; a click still opens the source's own embed player in our frame.
   useEffect(() => {
     if (!accessGranted) return;
     let active = true;
     const controller = new AbortController();
-    fetch("/anime-feed.json", { cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer", signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((payload: unknown) => {
-        if (!active) return;
-        setAnime(animeCards(payload));
-        setAnimeRows(animeLists(payload));
-      })
-      .catch(() => {
-        if (!active) return;
-        setAnime([]);
-        setAnimeRows([]);
-      });
+    fetchAnimeRows({ signal: controller.signal })
+      .then((rows) => { if (active) setAnimeRows(rows); })
+      .catch(() => { if (active) setAnimeRows([]); });
     return () => { active = false; controller.abort(); };
   }, [accessGranted]);
 
@@ -365,9 +371,38 @@ function App() {
   }, [accessGranted, pathname, historyRevision]);
 
   const homeVideos = useMemo(() => selectHomeFilter(videos, homeFilter), [videos, homeFilter]);
+  // The four rows the All view is built from, in that order: Desi, Anime,
+  // Sponsored, Premium. Desi is the catalogue minus anime and premium titles,
+  // so no video is drawn twice on the same page.
+  const desiVideos = useMemo(() => selectHomeFilter(videos, "desi"), [videos]);
+  const animeCatalogue = useMemo(() => selectHomeFilter(videos, "anime"), [videos]);
+  const premiumVideos = useMemo(() => selectHomeFilter(videos, "premium"), [videos]);
+  // One flat list for search, so a title that sits in two rows is matched once.
+  const anime = useMemo(() => {
+    const seen = new Set<string>();
+    const cards: AnimeCardData[] = [];
+    for (const row of animeRows) {
+      for (const card of row.cards) {
+        if (seen.has(card.id)) continue;
+        seen.add(card.id);
+        cards.push(card);
+      }
+    }
+    return cards;
+  }, [animeRows]);
   const trending = useMemo(() => selectTrending(videos), [videos]);
   const newReleases = useMemo(() => selectNewReleases(videos, Date.now()), [videos, now]);
   const exclusive = useMemo(() => selectExclusive(videos), [videos]);
+  // What the home section header says, and how many cards that filter holds.
+  const homeTitle = homeFilter === "sponsored" ? "Sponsored"
+    : homeFilter === "anime" ? "Anime"
+      : homeFilter === "desi" ? "Desi"
+        : homeFilter === "premium" ? "Premium" : "All Videos";
+  const homeCount = homeFilter === "sponsored" ? sponsored.length
+    : homeFilter === "anime" ? homeVideos.length + anime.length
+      : homeFilter === "premium" ? premiumVideos.length
+      : homeFilter === "all" ? desiVideos.length + animeCatalogue.length + anime.length + sponsored.length + premiumVideos.length
+        : homeVideos.length;
   const feeds: Record<FeedView, Video[]> = { Trending: trending, New: newReleases, Exclusive: exclusive };
   const feedLabels: Record<FeedView, { title: string; subtitle: string; empty: string }> = {
     Trending: { title: "Trending Now", subtitle: "The most viewed videos, in order.", empty: "No videos are available yet." },
@@ -607,17 +642,17 @@ function App() {
                 for a screen reader, and it stays out of the layout. */}
             <h1 className="sr-only">Intimora — free 18+ video streaming</h1>
             {videos.length > 0 && <div className="mb-10"><HeroBanner videos={videos} onPlay={handlePlayVideo} /></div>}
-            {/* Directly under the hero and above the grid: All, Desi, Anime and
-                Sponsored. A filter only narrows what home already shows —
-                Trending, New and Exclusive keep their own tabs. */}
+            {/* Directly under the hero and above the grid: All, Desi, Anime,
+                Sponsored and Premium. A filter only narrows what home already
+                shows — Trending, New and Exclusive keep their own tabs. */}
             {videos.length > 0 && <CategoryBar value={homeFilter} onChange={changeHomeFilter} />}
             {catalogMessage}
             {videos.length > 0 && (
-              <section aria-label={homeFilter === "sponsored" ? "Sponsored" : homeFilter === "anime" ? "Anime" : homeFilter === "desi" ? "Desi" : "All Videos"}>
+              <section aria-label={homeTitle}>
                 <div className="flex items-center gap-2 mb-5" style={{ color: "#c9a84c" }}>
                   <TrendingUp className="w-5 h-5" />
-                  <h2 className="text-white font-bold text-xl">{homeFilter === "sponsored" ? "Sponsored" : homeFilter === "anime" ? "Anime" : homeFilter === "desi" ? "Desi" : "All Videos"}</h2>
-                  <span className="text-gray-600 text-sm ml-1">({homeFilter === "sponsored" ? sponsored.length : homeFilter === "anime" ? homeVideos.length + anime.length : homeVideos.length})</span>
+                  <h2 className="text-white font-bold text-xl">{homeTitle}</h2>
+                  <span className="text-gray-600 text-sm ml-1">({homeCount})</span>
                 </div>
                 {homeFilter === "sponsored" ? (
                   sponsored.length ? (
@@ -625,38 +660,69 @@ function App() {
                       {sponsored.map((card) => <SponsoredCard key={card.id} card={card} onPlay={setActiveSponsored} />)}
                     </div>
                   ) : <p className="home-empty">No sponsored videos right now.</p>
-                ) : homeFilter === "anime" && anime.length ? (
+                ) : homeFilter === "premium" ? (
+                  premiumVideos.length ? (
+                    <VideoGrid videos={premiumVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                  ) : <p className="home-empty">No premium videos yet.</p>
+                ) : homeFilter === "anime" ? (
+                  animeCatalogue.length || anime.length ? (
+                    <>
+                      {animeCatalogue.length > 0 && (
+                        <VideoGrid videos={animeCatalogue.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                      )}
+                      {animeRows.length > 0 && (
+                        <div className={`space-y-7${animeCatalogue.length ? " mt-6" : ""}`}>
+                          {animeRows.map((row) => (
+                            <section key={row.id} aria-label={row.title}>
+                              <div className="flex items-center gap-2 mb-3">
+                                <Sparkles className="w-4 h-4" style={{ color: "#c9a84c" }} />
+                                <h3 className="text-white font-bold text-base">{row.title}</h3>
+                                <span className="text-gray-600 text-sm">({row.cards.length})</span>
+                              </div>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                                {row.cards.map((card) => <AnimeCard key={`${row.id}-${card.id}`} card={card} onPlay={setActiveAnime} />)}
+                              </div>
+                            </section>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : <p className="home-empty">No anime videos yet.</p>
+                ) : homeFilter === "all" ? (
+                  // All Videos is four rows, in this order: Desi, Anime,
+                  // Sponsored, Premium. A row with nothing in it is not drawn.
                   <>
-                    {homeVideos.length > 0 && (
-                      <VideoGrid videos={homeVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
-                    )}
-                    {animeRows.length ? (
-                      <div className="mt-5 space-y-7">
-                        {animeRows.map((row) => (
-                          <section key={row.id} aria-label={row.title}>
-                            <div className="flex items-center gap-2 mb-3">
-                              <Sparkles className="w-4 h-4" style={{ color: "#c9a84c" }} />
-                              <h3 className="text-white font-bold text-base">{row.title}</h3>
-                              <span className="text-gray-600 text-sm">({row.cards.length})</span>
-                            </div>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-                              {row.cards.map((card) => <AnimeCard key={`${row.id}-${card.id}`} card={card} onPlay={setActiveAnime} />)}
-                            </div>
-                          </section>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 mt-4">
-                        {anime.map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
-                      </div>
-                    )}
+                    <div className="space-y-9">
+                      <HomeRow id="desi" title="Desi" count={desiVideos.length}>
+                        <VideoGrid videos={desiVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                      </HomeRow>
+                      <HomeRow id="anime" title="Anime" count={animeCatalogue.length + anime.length}>
+                        {animeCatalogue.length > 0 && (
+                          <VideoGrid videos={animeCatalogue.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                        )}
+                        {anime.length > 0 && (
+                          <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4${animeCatalogue.length ? " mt-4" : ""}`}>
+                            {anime.slice(0, visibleCount).map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
+                          </div>
+                        )}
+                      </HomeRow>
+                      <HomeRow id="sponsored" title="Sponsored" count={sponsored.length}>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                          {sponsored.map((card) => <SponsoredCard key={card.id} card={card} onPlay={setActiveSponsored} />)}
+                        </div>
+                      </HomeRow>
+                      <HomeRow id="premium" title="Premium" count={premiumVideos.length}>
+                        <VideoGrid videos={premiumVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />
+                      </HomeRow>
+                    </div>
+                    {homeVideos.length > 0 && listFooter(homeVideos.length)}
                   </>
                 ) : homeVideos.length ? (
                   <>
                     <VideoGrid videos={homeVideos.slice(0, visibleCount)} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} sponsored={sponsored} onPlaySponsored={(card) => setActiveSponsored(card)} />
                     {listFooter(homeVideos.length)}
                   </>
-                ) : <p className="home-empty">{homeFilter === "anime" ? "No anime videos yet." : "No videos in this filter yet."}</p>}
+                ) : <p className="home-empty">No videos in this filter yet.</p>}
               </section>
             )}
           </>
