@@ -307,8 +307,13 @@ export function createVisitorRequest(options = {}) {
       // left the browser. Send the visitor through the host's own unlock page
       // once (no proxy in between); the request stops here because the page is
       // about to leave.
-      if (!counts && php && requestUnlock && (result.challenge || (result.network && !result.cors))) {
-        if (requestUnlock({ path, challenge: Boolean(result.challenge) })) throw new Error(UNAVAILABLE);
+      // The host's own check page is one reason to visit it; a request that never
+      // left the browser is another. A refused answer (missing CORS header) is
+      // passed along too, because on a host whose session was never proven a
+      // cookieless request looks exactly like that — `requestUnlock` decides, and
+      // it refuses once a session has been proven.
+      if (!counts && php && requestUnlock && (result.challenge || result.network)) {
+        if (requestUnlock({ path, challenge: Boolean(result.challenge), cors: Boolean(result.cors) })) throw new Error(UNAVAILABLE);
       }
       throw new Error(UNAVAILABLE);
     }

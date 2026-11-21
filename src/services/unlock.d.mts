@@ -9,6 +9,7 @@ type Store = Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
 
 export function readUnlockState(storage?: Store): UnlockState;
 export function markUnlockAttempt(storage?: Store, options?: { now?: number; blocked?: boolean }): void;
+export function hasProvenSession(options?: { storage?: Store; now?: number; freshMs?: number }): boolean;
 export function clearUnlockAttempt(storage?: Store): void;
 export function confirmUnlockSession(storage?: Store, options?: { now?: number }): void;
 export function shouldRequestUnlock(options?: { storage?: Store; now?: number; freshMs?: number; maxTries?: number; minGapMs?: number }): boolean;
