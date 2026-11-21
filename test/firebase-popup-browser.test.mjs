@@ -81,6 +81,8 @@ test("production Firebase SDK opens a Google chooser popup under the scoped CSP"
         return route.fulfill({ contentType: "text/html", body: "<!doctype html><title>Test sign-in popup</title>" });
       }
       if (url.hostname === "identitytoolkit.googleapis.com") return route.fulfill({ headers: cors, json: { authorizedDomains: ["127.0.0.1"] } });
+      // The anime API is a real host; the browser tests never call it.
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
       return route.continue();
     });
     const page = await context.newPage();

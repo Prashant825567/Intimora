@@ -116,6 +116,8 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
     await targetContext.route("**/*", async (route) => {
     const req = route.request();
     const url = new URL(req.url());
+    // The anime API is a real host; tests never call it.
+    if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
     const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Authorization, Content-Type, Range", "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length" };
     if (req.url() === discovery) {
       state.calls.push({ origin: "discovery", path: url.pathname, method: req.method(), headers: req.headers() });

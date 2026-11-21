@@ -165,20 +165,17 @@ Three things worth knowing:
 
 Render's dashboard does not report traffic for a static site; the Cloudflare worker's own analytics count `get-server` calls, not visitors.
 
-## Anime titles (baked feed)
+## Anime titles (live API)
 
-Anime cards come from one external source, **hentaicity.com**, and only as a feed: `scripts/anime-feed.mjs` reads their public listing pages once (their `robots.txt` allows listings with `Crawl-Delay: 10` and disallows `/embed/`, `/search/` and `/playlist/`, so only listings are requested) and writes `public/anime-feed.json` — id, title, poster, duration, and the embed URL **derived** from the id. Nothing is proxied at runtime, no media URL is copied, and the browser never talks to them until a visitor clicks a card.
+Anime cards come from our own anime API, **`https://pacahub-34nd.onrender.com`** (a deployment of the PacaHub service). Nothing about that content is baked or scraped into this repository any more: the page asks the API when it opens and draws whatever the service sends.
 
-- **Rows:** their own sort and category pages are baked, in their order, as `lists` in the same file — **New Releases** (`all-recent.html`), **Most Popular** (`all-popular.html`), **Top Rated** (`all-rate.html`), then **3D**, **Cartoon** and **Futanari** (`<category>-popular.html`, the pages their own menu links to). The feed carries ids per row, so a card shared by two rows is stored once and a row can never point at a card the file does not describe. The ranking is theirs, never invented by us.
-- **Card facts:** with `ANIME_FEED_ENRICH` (default **2**) the build also reads that many video pages and copies what the page itself states in its schema.org record and its tag links — `tags`, `author`, `uploadDate`, `rating`, `description`. Every field is optional and validated; a page that fails costs only its own tags. Raise it (`ANIME_FEED_ENRICH=12`) to tag more cards, `=0` to read no video page at all. The base build is `~70s`: six listing pages plus two video pages, each after the 10s crawl delay.
-- **Build step:** `npm run anime:feed` (all six rows; `ANIME_FEED_LISTS=1` narrows to the first, old `ANIME_FEED_PAGES` still works; `ANIME_FEED_MAX` caps the items, `ANIME_FEED_ENRICH` the tagged ones). One page costs one request plus the 10s crawl delay, and a page that fails costs only its own row. A build that read nothing keeps the checked-in snapshot, exactly like the sitemap step, so no network never means no site.
-- **Fallback:** a feed without `lists` (an older file, or a failed build) renders one grid instead of rows — the cards never disappear because the rows did.
-- **Click:** the card opens `https://www.hentaicity.com/embed/<id>` inside our own player overlay (`PartnerPlayer`), sandboxed and `no-referrer`. Their player, their ads, their bandwidth; our design.
-- **Filter:** the anime cards appear under the **Anime** chip only, as the feed's own rows. They never enter **All**, so the home counts stay ours.
-- **Search:** matches are computed on the local feed (`/search` on their host is disallowed to crawlers), so no query leaves our origin. The title, the tags and the author are all searchable — "futanari" finds a card whose title never says it.
-- **Freshness:** the feed is baked at build, so it is as fresh as the last deploy (hourly). `.github/workflows/refresh-anime-feed.yml` asks Render for a rebuild every six hours through the same deploy hook the sitemap job uses, so the rows follow their listings without any runtime request and without a proxy.
-- **No like/save on anime cards:** those actions need a video id in our own backend, and an external title has none. Storing them would mean adding external ids (`hc:<id>`) to the backend API first. The cards therefore show no like/save button instead of a button that always fails.
-- **CSP:** `frame-src` lists `https://www.hentaicity.com` in both `server/security.mjs` and `render.yaml`; `img-src https:` already covers their poster CDN.
+- **Rows:** `GET /api/hen/city/recent` and `GET /api/hen/city/popular/1`, asked for **in that order** — Recent first, then Popular, exactly as the anime page shows them. `…/popular/:page` and `…/top/:page` exist on the service; `…/info/:id` and `…/watch/:id` are available for a single title. The repository keeps no copy of any row, so the page is always as fresh as the service.
+- **Card facts:** a list row carries an id, a title, a poster and a duration, so that is all a card shows. No author, rating or tags are invented, and no per-title request is made. The id is taken from the end of the source slug (`…/video/<slug>-<id>.html`) and validated; a poster must be a plain `https` image URL. A row that fails is dropped, not faked.
+- **Click:** the card opens `https://www.hentaicity.com/embed/<id>` inside our own player overlay (`PartnerPlayer`), sandboxed and `no-referrer`. Their player, their ads, their bandwidth; our design. Nothing is proxied and no media URL is ever copied into the page.
+- **All Videos:** the anime cards sit in the **Anime** row of All Videos (right after **Desi**), and under the **Anime** chip as the API's own two rows.
+- **Search:** matches are computed on the cards the page already loaded (the source's `/search/` is disallowed to crawlers), so no query leaves our origin and no search request is made to the API.
+- **No like/save on anime cards:** those actions need a video id in our own backend, and an external title has none. The cards therefore show no like/save button instead of a button that always fails.
+- **CSP:** `connect-src https:` already allows the API origin, `frame-src` lists `https://www.hentaicity.com` in both `server/security.mjs` and `render.yaml`, and `img-src https:` covers their poster CDN.
 
 ## Sponsored partner videos (TubeCorporate)
 

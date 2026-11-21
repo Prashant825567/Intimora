@@ -152,6 +152,8 @@ async function stubNetwork(context, { feed = false } = {}) {
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    // The anime API is a real host; tests never call it.
+    if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
     const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range" };
     if (url.pathname === "/partner-feed.json") {
       calls.feed.push(url.href);
@@ -194,6 +196,8 @@ test("the campaign feed becomes sponsored cards in the grid, only after the age 
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      // The anime API is a real host; tests never call it.
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range" };
       if (url.pathname === "/partner-feed.json") {
         calls.feed.push(url.href);

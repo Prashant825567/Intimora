@@ -47,6 +47,8 @@ async function makePage(browser, base, scenario, mobile = false) {
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    // The anime API is a real host; tests never call it.
+    if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
     const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
     if (url.hostname === "intimora.tmc78lxnu.workers.dev") return route.fulfill({ headers, json: { ok: true, data: { server: "https://catalog-backend.example" } } });
     if (url.hostname !== "catalog-backend.example") return route.continue();

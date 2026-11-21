@@ -23,11 +23,13 @@ export function selectExclusive(videos) {
 }
 
 // Home's filter bar. A video is "anime" when its category or one of its tags
-// says so; "desi" is simply everything that is not anime, because the catalogue
-// also carries uploads from other countries and a country name would be wrong
-// for them. "Sponsored" is a separate source handled by the grid, so it yields
-// no catalogue rows here. An unknown value falls back to the whole catalogue.
-export const HOME_FILTERS = ["all", "desi", "anime", "sponsored"];
+// says so, and "premium" when one of them says premium. "desi" is everything
+// that is neither: the catalogue also carries uploads from other countries, so a
+// country name would be wrong for them, and a premium title is drawn in its own
+// row under the grid, not twice. "Sponsored" is a separate source handled by the
+// grid, so it yields no catalogue rows here. An unknown value falls back to the
+// whole catalogue.
+export const HOME_FILTERS = ["all", "desi", "anime", "sponsored", "premium"];
 
 const ANIME_LABEL = /(^|[^a-z])anime([^a-z]|$)/i;
 
@@ -44,10 +46,19 @@ export function isAnimeVideo(video) {
   return labelsOf(video).some((label) => ANIME_LABEL.test(label));
 }
 
+// Premium is not a separate endpoint: the catalogue marks it the same way it
+// marks everything else, with a category or a tag of its own.
+const PREMIUM_LABEL = /(^|[^a-z])premium([^a-z]|$)/i;
+
+export function isPremiumVideo(video) {
+  return labelsOf(video).some((label) => PREMIUM_LABEL.test(label));
+}
+
 export function selectHomeFilter(videos, filter = "all") {
   const list = Array.isArray(videos) ? videos : [];
   if (filter === "sponsored") return [];
   if (filter === "anime") return list.filter(isAnimeVideo);
-  if (filter === "desi") return list.filter((video) => !isAnimeVideo(video));
+  if (filter === "premium") return list.filter(isPremiumVideo);
+  if (filter === "desi") return list.filter((video) => !isAnimeVideo(video) && !isPremiumVideo(video));
   return list;
 }

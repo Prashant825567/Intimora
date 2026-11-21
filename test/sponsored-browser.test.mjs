@@ -65,6 +65,8 @@ test("sponsored partner videos sit between ours and open in our own player", {
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      // The anime API is a real host; tests never call it.
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
       if (url.pathname === "/partner-feed.json") {
         requests.feed += 1;
@@ -98,15 +100,14 @@ test("sponsored partner videos sit between ours and open in our own player", {
     await sponsored.first().waitFor();
     assert.equal(requests.feed, 1, "the feed is read once, from our own origin");
 
-    // Four of ours, then one of theirs.
-    const order = await page.locator("section[aria-label='All Videos'] .video-card").evaluateAll((cards) =>
-      cards.slice(0, 6).map((card) => ({
-        sponsored: card.classList.contains("video-card--sponsored"),
-        title: card.querySelector(".video-card__title")?.textContent ?? "",
-      })));
-    assert.deepEqual(order.map((item) => item.sponsored), [false, false, false, false, true, false], "every fifth card is sponsored");
-    assert.equal(order[4].title, "Partner one");
-    assert.equal(order[4].title, (await sponsored.first().locator(".video-card__title").textContent()), "the partner title is used");
+    // All Videos is four rows now — Desi, Anime, Sponsored, Premium — so the
+    // partner cards live in their own Sponsored row instead of being mixed in.
+    assert.deepEqual(await page.locator("section[aria-label='All Videos'] section[data-row]").evaluateAll((rows) =>
+      rows.map((row) => row.dataset.row)), ["desi", "sponsored"], "rows appear in their promised order, empty ones are not drawn");
+    assert.equal(await page.locator("section[aria-label='Sponsored videos'] .video-card--sponsored").count(), sponsoredPayload.items.length, "every partner card is in the Sponsored row");
+    // A partner card is never mixed into the Desi grid — one card, one place.
+    assert.equal(await page.locator("section[aria-label='Desi videos'] .video-card--sponsored").count(), 0, "the Desi row holds only our videos");
+    assert.equal(await sponsored.first().locator(".video-card__title").textContent(), "Partner one", "the partner title is used");
     assert.equal(await sponsored.first().locator(".video-card__badge").textContent(), "SPONSORED", "the badge sits where EXCLUSIVE does on our cards");
     assert.equal(await page.locator("section[aria-label='All Videos'] .video-card:not(.video-card--sponsored) .video-card__badge").count(), 0, "ordinary categories stay off the artwork");
     assert.match(await sponsored.first().locator(".video-card__image").getAttribute("src"), /cdn\.partner\.example\/one\.jpg/);

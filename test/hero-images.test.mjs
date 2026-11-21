@@ -34,6 +34,8 @@ test("portrait, panoramic and landscape thumbnails remain fully visible without 
       const page = await browser.newPage({ viewport: { width, height }, isMobile: mobile, hasTouch: mobile });
       await page.route("**/*", (route) => {
         const url = new URL(route.request().url());
+        // The anime API is a real host; tests never call it.
+        if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
         const headers = { "Access-Control-Allow-Origin": "*" };
         if (url.hostname === "intimora.tmc78lxnu.workers.dev") return route.fulfill({ headers, json: { ok: true, data: { server: "https://image-backend.example" } } });
         if (url.hostname !== "image-backend.example") return route.continue();

@@ -19,6 +19,7 @@ const videos = [
   { id: "anime-one", title: "Anime one", views: 30, createdAt: 1_759_900_000, category: "Anime" },
   { id: "anime-two", title: "Anime two", views: 20, createdAt: 1_759_800_000, tags: ["hot anime"] },
   { id: "foreign-one", title: "Foreign one", views: 10, createdAt: 1_759_700_000, category: "Russian" },
+  { id: "premium-one", title: "Premium one", views: 5, createdAt: 1_759_600_000, tags: ["Premium"] },
 ];
 
 const guestIdentity = `
@@ -62,7 +63,7 @@ test("home shows All, Desi, Anime and Sponsored under the hero and filters the g
       const url = new URL(request.url());
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
-      if (url.pathname === "/anime-feed.json") return route.fulfill({ json: { version: 1, items: [] } });
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.fulfill({ headers: { "Access-Control-Allow-Origin": "*" }, json: { ok: true, data: { results: [] } } });
       if (url.pathname === "/partner-feed.json") {
         return route.fulfill({ json: { version: 2, items: [
           { embedUrl: "https://desi-porntube.com/embed/762647/?source=1", title: "Sponsored one", thumbnail: "https://cdn.example/one.jpg" },
@@ -95,12 +96,14 @@ test("home shows All, Desi, Anime and Sponsored under the hero and filters the g
     assert.ok(barBox.y >= heroBox.y + heroBox.height - 1, "the bar starts below the hero");
     assert.ok(barBox.y + barBox.height <= headingBox.y + 1, "the bar sits above the All Videos heading");
 
-    for (const label of ["All", "Desi", "Anime", "Sponsored"]) {
+    for (const label of ["All", "Desi", "Anime", "Sponsored", "Premium"]) {
       assert.equal(await page.getByRole("button", { name: label, exact: true }).count(), 1, `${label} chip exists`);
     }
+    assert.deepEqual(await page.locator(".category-bar__chip").allInnerTexts(), ["All", "Desi", "Anime", "Sponsored", "Premium"],
+      "Premium sits right beside Sponsored");
     assert.equal(await page.getByRole("button", { name: "All", exact: true }).getAttribute("aria-pressed"), "true");
     const titles = async () => page.locator("main .video-card:not(.video-card--sponsored) .video-card__title").allInnerTexts();
-    assert.deepEqual((await titles()).sort(), ["Anime one", "Anime two", "Desi one", "Foreign one"]);
+    assert.deepEqual((await titles()).sort(), ["Anime one", "Anime two", "Desi one", "Foreign one", "Premium one"]);
 
     await page.getByRole("button", { name: "Anime", exact: true }).click();
     await page.getByRole("heading", { name: "Anime", exact: true }).waitFor();
@@ -116,9 +119,14 @@ test("home shows All, Desi, Anime and Sponsored under the hero and filters the g
     assert.equal(await page.locator("main .video-card:not(.video-card--sponsored)").count(), 0, "no catalogue card in the sponsored view");
     assert.equal(await page.locator("main .video-card--sponsored").count(), 2);
 
+    // Premium is its own filter: only the uploads the catalogue marks premium.
+    await page.getByRole("button", { name: "Premium", exact: true }).click();
+    await page.getByRole("heading", { name: "Premium", exact: true }).waitFor();
+    assert.deepEqual((await titles()).sort(), ["Premium one"]);
+
     await page.getByRole("button", { name: "All", exact: true }).click();
     await page.getByRole("heading", { name: "All Videos" }).waitFor();
-    assert.equal((await titles()).length, 4);
+    assert.equal((await titles()).length, 5);
     assert.deepEqual(errors, []);
 
     // A phone must not gain a horizontal scrollbar from the bar.

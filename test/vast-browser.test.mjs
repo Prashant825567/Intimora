@@ -90,6 +90,8 @@ async function withPlayer({ vast, cached = null, run }) {
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      // The anime API is a real host; tests never call it.
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
       const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range", "Access-Control-Expose-Headers": "Content-Range, Accept-Ranges, Content-Length" };
       if (url.hostname === "track.example") {
         requests.push({ kind: "track", path: url.pathname });

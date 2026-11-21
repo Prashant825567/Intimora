@@ -1,12 +1,13 @@
 import React from "react";
 
-export type HomeFilter = "all" | "desi" | "anime" | "sponsored";
+export type HomeFilter = "all" | "desi" | "anime" | "sponsored" | "premium";
 
 const FILTERS: { id: HomeFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "desi", label: "Desi" },
   { id: "anime", label: "Anime" },
   { id: "sponsored", label: "Sponsored" },
+  { id: "premium", label: "Premium" },
 ];
 
 // Sits between the hero and the "All Videos" heading. It is a filter, not a

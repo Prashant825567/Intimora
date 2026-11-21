@@ -53,6 +53,8 @@ test("the visitor log posts once per session, only after the age gate, and survi
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      // The anime API is a real host; tests never call it.
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
       if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });

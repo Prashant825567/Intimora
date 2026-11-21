@@ -59,6 +59,8 @@ test("browse, search, and watch URLs work on direct entry, reload, and browser h
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      // The anime API is a real host; tests never call it.
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range" };
       if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
       if (url.origin !== backend) return route.continue();
@@ -202,6 +204,8 @@ test("production bundle serves each real route on direct entry and refresh", {
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
+      // The anime API is a real host; tests never call it.
+      if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range" };
       if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
       if (url.origin !== backend) return route.continue();
@@ -289,6 +293,8 @@ test("production bundle serves each real route on direct entry and refresh", {
       await staticContext.route("**/*", async (route) => {
         const request = route.request();
         const url = new URL(request.url());
+        // The anime API is a real host; tests never call it.
+        if (url.hostname === "pacahub-34nd.onrender.com") return route.abort();
         const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Range" };
         if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
         if (url.origin !== backend) return route.continue();

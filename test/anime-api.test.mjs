@@ -1,0 +1,85 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, fetchAnimeRows, parseAnimeResults } from "../src/services/anime-api.mjs";
+
+// The service answers with the source's own list rows. Only metadata is read:
+// id, title, poster, duration — never a media URL.
+const recent = {
+  status: "success",
+  data: {
+    provider: "hentaicity",
+    type: "recent",
+    results: [
+      { id: "now-that-i-can-control-reality-6-1JdXN6yeMdN", title: "Reality 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", duration: "HD07:03", trailer: "https://cdn1.images.hentaicity.com/videos/0807/38331/preview.webp" },
+      { id: "one-wife-1-OneWife001x", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", duration: "23:36" },
+    ],
+  },
+};
+
+test("a list row becomes cards with a derived embed URL, never a copied media link", () => {
+  const cards = parseAnimeResults(recent);
+  assert.deepEqual(cards, [
+    { id: "1JdXN6yeMdN", title: "Reality 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", duration: "07:03", embedUrl: "https://www.hentaicity.com/embed/1JdXN6yeMdN" },
+    { id: "OneWife001x", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", duration: "23:36", embedUrl: "https://www.hentaicity.com/embed/OneWife001x" },
+  ]);
+  assert.equal(cards.some((card) => JSON.stringify(card).includes("preview.webp")), false, "the hover trailer is not a card field");
+  // A bare id works too; a slug without a usable id does not.
+  assert.equal(animeIdFromSlug("1JdXN6yeMdN"), "1JdXN6yeMdN");
+  assert.equal(animeIdFromSlug("slug without digits"), null);
+  assert.equal(animeIdFromSlug(undefined), null);
+  assert.equal(animeEmbedUrl("bad id"), null);
+});
+
+test("only a plain https poster is accepted, and a bad card is dropped not repaired", () => {
+  const cards = parseAnimeResults({
+    data: { results: [
+      { id: "good-1Good00001", title: "Good", thumbnail: "https://cdn1.images.hentaicity.com/a/main.jpg" },
+      { id: "insecure-1Bad00001x", title: "Insecure", thumbnail: "http://cdn1.images.hentaicity.com/b/main.jpg" },
+      { id: "evil-1Bad00002x", title: "Evil", thumbnail: "javascript:alert(1)" },
+      { id: "no-title-1Bad00003x", thumbnail: "https://cdn1.images.hentaicity.com/c/main.jpg" },
+      { id: "nope", title: "No id", thumbnail: "https://cdn1.images.hentaicity.com/d/main.jpg" },
+      { id: "dupe-1Good00001", title: "Duplicate", thumbnail: "https://cdn1.images.hentaicity.com/e/main.jpg" },
+      { id: "extra-1Good00003", title: "  Spaced   out  ", thumbnail: "https://cdn1.images.hentaicity.com/f/main.jpg", duration: "nonsense" },
+    ] },
+  });
+  assert.deepEqual(cards.map((card) => card.id), ["1Good00001", "1Good00003"], "a bare id is kept whole");
+  assert.equal(cards[1].title, "Spaced out");
+  assert.equal(cards[1].duration, "");
+  for (const broken of [null, undefined, {}, "nope", { data: null }, { data: { results: "x" } }]) {
+    assert.deepEqual(parseAnimeResults(broken), []);
+  }
+});
+
+test("the rows come back recent first, then popular, and a dead row costs only itself", async () => {
+  const asked = [];
+  const rows = await fetchAnimeRows({
+    fetchImpl: async (url) => {
+      asked.push(String(url));
+      if (String(url).endsWith("/api/hen/city/recent")) return Response.json(recent);
+      if (String(url).endsWith("/api/hen/city/popular/1")) return Response.json({ data: { results: [{ id: "trending-1Trend0001x", title: "Trending", thumbnail: "https://cdn1.images.hentaicity.com/g/main.jpg" }] } });
+      return new Response("nope", { status: 500 });
+    },
+  });
+  assert.deepEqual(asked, [`${ANIME_API_BASE}/api/hen/city/recent`, `${ANIME_API_BASE}/api/hen/city/popular/1`]);
+  assert.deepEqual(rows.map((row) => row.title), ["Recent", "Popular"]);
+  assert.deepEqual(rows[1].cards.map((card) => card.id), ["1Trend0001x"]);
+
+  const onlyRecent = await fetchAnimeRows({
+    fetchImpl: async (url) => {
+      if (String(url).endsWith("/recent")) return Response.json(recent);
+      throw new TypeError("Failed to fetch");
+    },
+  });
+  assert.deepEqual(onlyRecent.map((row) => row.id), ["recent"], "the popular row is dropped, the recent row stays");
+
+  const nothing = await fetchAnimeRows({ fetchImpl: async () => { throw new TypeError("Failed to fetch"); } });
+  assert.deepEqual(nothing, [], "no rows at all is an empty page, not a crash");
+});
+
+test("search runs on the cards the page already has", () => {
+  const cards = parseAnimeResults(recent);
+  assert.deepEqual(animeSearch(cards, "one wife").map((card) => card.id), ["OneWife001x"]);
+  assert.deepEqual(animeSearch(cards, "REALITY").map((card) => card.id), ["1JdXN6yeMdN"]);
+  assert.deepEqual(animeSearch(cards, "   "), []);
+  assert.deepEqual(animeSearch(cards, "reality wife"), [], "every word has to match");
+});
