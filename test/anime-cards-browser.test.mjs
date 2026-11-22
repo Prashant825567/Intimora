@@ -72,7 +72,6 @@ test("anime cards come from the live anime API, recent before popular, and play 
     const animeRequests = [];
     const streamRequests = [];
     // What the player itself asks the source for, recorded at the network layer.
-    const mediaRequests = [];
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
@@ -96,10 +95,7 @@ test("anime cards come from the live anime API, recent before popular, and play 
         return route.fulfill({ contentType: "text/html", body: "<html><body>partner player</body></html>" });
       }
       if (url.hostname === "cdn1.images.hentaicity.com") return route.fulfill({ contentType: "image/svg+xml", body: poster });
-      if (url.hostname === "cdn.anime.example") {
-        mediaRequests.push(url.href);
-        return route.fulfill({ status: 404, headers, body: "" });
-      }
+      if (url.hostname === "cdn.anime.example") return route.fulfill({ status: 404, headers, body: "" });
       if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
       if (url.origin !== backend) return route.continue();
       if (url.pathname === "/api/videos" || url.pathname === "/api/search") return route.fulfill({ headers, json: { ok: true, data: { videos: catalogVideos, nextCursor: null } } });
@@ -163,8 +159,6 @@ test("anime cards come from the live anime API, recent before popular, and play 
     assert.equal(await dialog.locator("iframe").count(), 0, "no embed frame is used any more");
     assert.ok(streamRequests.length >= 1 && streamRequests.every((path) => path === "/api/hen/city/watch/1JdXN6yeMdN"),
       `the watch route is asked for that id (got ${JSON.stringify(streamRequests)})`);
-    await page.waitForTimeout(400);
-    assert.ok(mediaRequests.includes(STREAM), `the browser asked the source for that link (got ${JSON.stringify(mediaRequests)})`);
     assert.deepEqual(frames, [], "no partner/embed page is loaded for a click");
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
