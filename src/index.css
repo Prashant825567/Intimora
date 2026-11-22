@@ -153,6 +153,7 @@ img {
 
 /* The hero keeps its image and information in separate panels. */
 .hero-banner {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   min-height: 380px;
@@ -213,7 +214,6 @@ img {
 .hero-banner__navigation {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
   margin-top: 1.75rem;
 }
@@ -240,6 +240,42 @@ img {
 .hero-banner__arrow:focus-visible {
   border-color: #c9a84c;
   color: #f3d58a;
+}
+
+/* Desktop: one arrow just inside the left edge of the banner and one just inside
+   the right edge, each vertically centred on the banner itself (not on the text
+   block), so neither side of the poster is hidden by a control. */
+.hero-banner__arrow--prev,
+.hero-banner__arrow--next {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-color: rgba(201, 168, 76, 0.45);
+  background: rgba(10, 9, 8, 0.72);
+  color: #f3e3bd;
+  transform: translateY(-50%);
+  backdrop-filter: blur(4px);
+}
+
+.hero-banner__arrow--prev {
+  left: 0.75rem;
+}
+
+.hero-banner__arrow--next {
+  right: 0.75rem;
+}
+
+/* Leave the arrows their own lane so the copy never runs underneath them. */
+@media (min-width: 768px) {
+  .hero-banner__content {
+    padding-inline-start: clamp(4rem, 5.5vw, 5rem);
+  }
+
+  .hero-banner__media {
+    padding-inline: 4rem 4rem;
+  }
 }
 
 .hero-banner__dot {
@@ -532,15 +568,19 @@ img {
     margin-top: 1rem;
   }
 
+  /* A phone shows the poster alone — the reference is a banner, not a text
+     block. No title, creator, meta, WATCH NOW or arrows; the carousel is moved
+     with a finger (swipe) or with the dots that sit on the poster. */
   .hero-banner {
-    grid-template-columns: minmax(0, 1fr);
+    display: block;
     min-height: 0;
   }
 
   .hero-banner__media {
-    grid-column: 1;
-    grid-row: 1;
+    display: flex;
     min-height: 10rem;
+    align-items: center;
+    justify-content: center;
   }
 
   .hero-banner__image {
@@ -548,9 +588,37 @@ img {
   }
 
   .hero-banner__content {
-    grid-column: 1;
-    grid-row: 2;
-    padding: 1.25rem;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    padding: 0;
+    justify-content: flex-end;
+    pointer-events: none;
+  }
+
+  .hero-banner__content > * {
+    display: none !important;
+  }
+
+  .hero-banner__content > .hero-banner__navigation {
+    display: flex !important;
+    margin: 0;
+    padding: 0.4rem 0.6rem;
+    align-self: flex-end;
+    margin-inline: auto;
+    margin-bottom: 0.35rem;
+    border-radius: 9999px;
+    background: rgba(8, 7, 6, 0.55);
+    pointer-events: auto;
+  }
+
+  .hero-banner__navigation {
+    justify-content: center;
+  }
+
+  .hero-banner__arrow--prev,
+  .hero-banner__arrow--next {
+    display: none;
   }
 
   .hero-banner__title {

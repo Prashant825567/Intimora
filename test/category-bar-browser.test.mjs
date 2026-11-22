@@ -20,6 +20,11 @@ const videos = [
   { id: "anime-two", title: "Anime two", views: 20, createdAt: 1_759_800_000, tags: ["hot anime"] },
   { id: "foreign-one", title: "Foreign one", views: 10, createdAt: 1_759_700_000, category: "Russian" },
   { id: "premium-one", title: "Premium one", views: 5, createdAt: 1_759_600_000, tags: ["Premium"] },
+  // The flag spelling a backend uses when the word is in the record itself.
+  { id: "premium-two", title: "Practice of Dao", views: 4, createdAt: 1_759_500_000, premium: true, category: "New" },
+  // Public-API shapes the catalogue already accepts: a metadata flag and a tag.
+  { id: "premium-three", title: "Premium metadata", views: 3, createdAt: 1_759_400_000, category: "New", metadata: { premium: true } },
+  { id: "premium-four", title: "Premium tag", views: 2, createdAt: 1_759_300_000, category: "New", tags: ["premium-hd"] },
 ];
 
 const guestIdentity = `
@@ -103,7 +108,7 @@ test("home shows All, Desi, Anime and Sponsored under the hero and filters the g
       "Premium sits right beside Sponsored");
     assert.equal(await page.getByRole("button", { name: "All", exact: true }).getAttribute("aria-pressed"), "true");
     const titles = async () => page.locator("main .video-card:not(.video-card--sponsored) .video-card__title").allInnerTexts();
-    assert.deepEqual((await titles()).sort(), ["Anime one", "Anime two", "Desi one", "Foreign one", "Premium one"]);
+    assert.deepEqual((await titles()).sort(), ["Anime one", "Anime two", "Desi one", "Foreign one", "Practice of Dao", "Premium metadata", "Premium one", "Premium tag"]);
 
     await page.getByRole("button", { name: "Anime", exact: true }).click();
     await page.getByRole("heading", { name: "Anime", exact: true }).waitFor();
@@ -112,7 +117,7 @@ test("home shows All, Desi, Anime and Sponsored under the hero and filters the g
 
     await page.getByRole("button", { name: "Desi", exact: true }).click();
     await page.getByRole("heading", { name: "Desi", exact: true }).waitFor();
-    assert.deepEqual((await titles()).sort(), ["Desi one", "Foreign one"], "other countries' uploads are not dropped");
+    assert.deepEqual((await titles()).sort(), ["Desi one", "Foreign one"], "other countries' uploads are not dropped, premium ones are not repeated");
 
     await page.getByRole("button", { name: "Sponsored", exact: true }).click();
     await page.getByRole("heading", { name: "Sponsored", exact: true }).waitFor();
@@ -122,11 +127,12 @@ test("home shows All, Desi, Anime and Sponsored under the hero and filters the g
     // Premium is its own filter: only the uploads the catalogue marks premium.
     await page.getByRole("button", { name: "Premium", exact: true }).click();
     await page.getByRole("heading", { name: "Premium", exact: true }).waitFor();
-    assert.deepEqual((await titles()).sort(), ["Premium one"]);
+    assert.deepEqual((await titles()).sort(), ["Practice of Dao", "Premium metadata", "Premium one", "Premium tag"],
+      "a flag, a metadata flag and a compound tag all land in the Premium view");
 
     await page.getByRole("button", { name: "All", exact: true }).click();
     await page.getByRole("heading", { name: "All Videos" }).waitFor();
-    assert.equal((await titles()).length, 5);
+    assert.equal((await titles()).length, 8);
     assert.deepEqual(errors, []);
 
     // A phone must not gain a horizontal scrollbar from the bar.

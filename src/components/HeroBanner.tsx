@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Play, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import { isPremiumLabel } from "../utils/video-labels";
@@ -9,9 +9,15 @@ interface HeroBannerProps {
   onPlay: (video: Video) => void;
 }
 
+// A phone shows the poster and nothing else: no title, no WATCH NOW, no creator
+// line. The carousel is moved with a finger (swipe) or with the dots under it, so
+// the two arrow buttons are a desktop control and are hidden on a phone. On a
+// desktop the arrows float vertically centred on the banner — one inside the
+// left edge, one inside the right edge.
 const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
   const [current, setCurrent] = useState(0);
   const [paused, setPaused] = useState(false);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
   const featured = videos.slice(0, 5);
   const count = featured.length;
 
@@ -33,6 +39,24 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
       onMouseLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false); }}
+      onTouchStart={(event) => {
+        const touch = event.touches[0];
+        touchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+        setPaused(true);
+      }}
+      onTouchEnd={(event) => {
+        const start = touchStart.current;
+        touchStart.current = null;
+        setPaused(false);
+        const touch = event.changedTouches[0];
+        if (!start || !touch || count < 2) return;
+        const dx = touch.clientX - start.x;
+        const dy = touch.clientY - start.y;
+        // A short drag is a scroll, not a swipe: only a mostly-horizontal move
+        // counts, so the page keeps scrolling normally over the hero.
+        if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        setCurrent((value) => (dx < 0 ? (value + 1) % count : (value - 1 + count) % count));
+      }}
     >
       <div className="hero-banner__media">
         <img
@@ -84,16 +108,9 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
           WATCH NOW – FREE
         </button>
 
+        {/* Dots only: the arrows are drawn outside the content, on the banner. */}
         {count > 1 && (
           <div className="hero-banner__navigation">
-            <div className="hero-banner__arrows">
-              <button type="button" className="hero-banner__arrow" aria-label="Previous featured video" onClick={() => setCurrent((index - 1 + count) % count)}>
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button type="button" className="hero-banner__arrow" aria-label="Next featured video" onClick={() => setCurrent((index + 1) % count)}>
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
             <div className="hero-banner__dots" aria-label="Choose featured video">
               {featured.map((item, dot) => (
                 <button
@@ -109,6 +126,27 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
           </div>
         )}
       </div>
+
+      {count > 1 && (
+        <>
+          <button
+            type="button"
+            className="hero-banner__arrow hero-banner__arrow--prev"
+            aria-label="Previous featured video"
+            onClick={() => setCurrent((index - 1 + count) % count)}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            className="hero-banner__arrow hero-banner__arrow--next"
+            aria-label="Next featured video"
+            onClick={() => setCurrent((index + 1) % count)}
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </>
+      )}
     </section>
   );
 };

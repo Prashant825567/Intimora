@@ -49,6 +49,9 @@ export interface ApiVideo {
   category?: string;
   tags?: string[];
   exclusive?: boolean;
+  // Premium arrives as a flag and/or as a tag/category; both are preserved.
+  premium?: boolean;
+  isPremium?: boolean;
   creator?: string;
   uploadedAt?: string;
   // Normalized to Unix milliseconds when present.
@@ -137,6 +140,33 @@ function hasExclusiveMetadata(video: Record<string, unknown>): boolean {
   return labels.some(exclusiveLabel);
 }
 
+// Premium follows the same rule as exclusive: an explicit boolean is
+// authoritative, and the word in a category or a tag is the fallback for public
+// API formats that do not send a flag. The raw record is read here so the value
+// survives into the mapped Video the Premium chip reads.
+function hasPremiumMetadata(video: Record<string, unknown>): boolean {
+  const metadata = video.metadata && typeof video.metadata === "object" && !Array.isArray(video.metadata)
+    ? video.metadata as Record<string, unknown> : {};
+  const flagOf = (value: unknown): boolean | undefined => {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "premium"].includes(normalized)) return true;
+    if (["false", "0", "free", "public"].includes(normalized)) return false;
+    return undefined;
+  };
+  const flag = flagOf(video.premium) ?? flagOf(video.isPremium) ?? flagOf(metadata.premium) ?? flagOf(metadata.isPremium);
+  if (flag !== undefined) return flag;
+  const premiumLabel = (value: unknown) => typeof value === "string"
+    && /(^|[^a-z])premium([^a-z]|$)/i.test(value.trim().replace(/^#+\s*/, ""));
+  const labels: unknown[] = [video.category, metadata.category, video.badge, video.tier];
+  for (const tags of [video.tags, metadata.tags]) {
+    if (Array.isArray(tags)) labels.push(...tags.slice(0, 30));
+  }
+  return labels.some(premiumLabel);
+}
+
 function publicVideo(input: unknown): ApiVideo | null {
   if (!input || typeof input !== "object") return null;
   const video = input as Record<string, unknown>;
@@ -152,6 +182,7 @@ function publicVideo(input: unknown): ApiVideo | null {
     shares: nonnegativeNumber(video.shares),
     category: safeText(video.category, 100),
     exclusive: hasExclusiveMetadata(video),
+    premium: hasPremiumMetadata(video),
     creator: safeText(video.creator, 200),
     uploadedAt: safeText(video.uploadedAt, 100),
     createdAt: timestampMs(video.createdAt) ?? timestampMs(video.uploadedAt),
@@ -291,6 +322,7 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     viewCount: apiVideo.views ?? 0,
     createdAt: apiVideo.createdAt ?? null,
     isExclusive: apiVideo.exclusive === true,
+    premium: apiVideo.premium === true || apiVideo.isPremium === true || undefined,
     likes: apiVideo.likes ?? null,
     category: apiVideo.category || (apiVideo.exclusive ? "Exclusive" : ""),
     tags: apiVideo.tags || [],

@@ -122,7 +122,7 @@ test("browser calls public discovery and backends directly, with per-tab routing
     assert.equal(state.discoveries, 2, "discovery starts once for each arriving tab, before age confirmation");
     assert.ok(!state.calls.some((call) => call.path === "/api/videos"), "catalog is not loaded before age confirmation");
     await Promise.all([pageA, pageB].map((page) => page.getByRole("button", { name: /I AM 18/i }).click()));
-    await Promise.all([pageA, pageB].map((page) => page.getByRole("button", { name: /WATCH NOW/i }).waitFor()));
+    await Promise.all([pageA, pageB].map((page) => page.locator(".video-card__play").first().waitFor()));
     const labels = await Promise.all([pageA, pageB].map(async (page) => (await page.locator(".hero-banner__title").textContent()).includes(" A ") ? "A" : "B"));
     assert.deepEqual(new Set(labels), new Set(["A", "B"]));
     assert.equal(state.discoveries, 2);
@@ -137,13 +137,13 @@ test("browser calls public discovery and backends directly, with per-tab routing
     assert.ok(browserRequests.every((url) => !url.includes("/_api/")), "the frontend does not call the old proxy");
 
     await pageA.reload();
-    await pageA.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    await pageA.locator(".hero-banner__image").first().waitFor();
     assert.equal(state.discoveries, 2, "reload reuses this tab's unexpired selection");
 
     const popupPromise = pageA.waitForEvent("popup");
     await pageA.evaluate(() => window.open("/", "_blank"));
     const popup = await popupPromise;
-    await popup.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    await popup.locator(".hero-banner__image").first().waitFor();
     assert.equal(state.discoveries, 3, "a new tab discovers independently even if sessionStorage was copied");
     await popup.close();
 
@@ -178,7 +178,7 @@ test("browser calls public discovery and backends directly, with per-tab routing
 
     await search.fill("");
     const detailResponse = pageA.waitForResponse((response) => response.url() === `${backends[original]}/api/videos/video-1`);
-    await pageA.getByRole("button", { name: /WATCH NOW/i }).click();
+    await pageA.locator(".video-card__play").first().click();
     await detailResponse;
     const player = pageA.locator("#player-container");
     await player.waitFor();
@@ -228,7 +228,7 @@ test("browser calls public discovery and backends directly, with per-tab routing
     const deniedPage = await denied.newPage();
     await deniedPage.goto(base);
     await deniedPage.getByRole("button", { name: /I AM 18/i }).click();
-    await deniedPage.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    await deniedPage.locator(".video-card__play").first().waitFor();
     await denied.close();
 
     const bad = await browser.newContext();

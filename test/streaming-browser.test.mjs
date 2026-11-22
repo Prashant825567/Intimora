@@ -202,7 +202,7 @@ test("native playback buffers, seeks and keeps the selected backend URL stable",
     const { page, errors } = await openHome(fixture, context);
     assert.ok(!state.calls.some((call) => call.path.startsWith("/api/videos")), "no catalog or media before the age gate");
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    const watch = page.locator(".video-card__play").first();
     await watch.waitFor();
     assert.equal(streamCalls(state).length, 0, "catalog cards do not preload streams");
 
@@ -287,7 +287,7 @@ test("seeking beyond the buffered data lets the browser request a later byte ran
       return;
     }
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await page.waitForFunction(() => {
       const video = document.querySelector("#player-container video");
@@ -331,7 +331,7 @@ test("watch-now starts playback without waiting for the view-count request", opt
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const media = page.locator("#player-container video");
     await media.waitFor();
     await page.waitForFunction(() => {
@@ -366,7 +366,7 @@ test("a browser-blocked automatic start keeps the manual play button available",
     });
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.locator("video").waitFor();
     await page.waitForFunction(() => window.__fixtureBlockedPlays > 0);
@@ -416,7 +416,7 @@ test("data saver and very slow connections use metadata preload", options, async
       await context.addInitScript((info) => { Object.defineProperty(navigator, "connection", { configurable: true, value: info }); }, connection);
       const { page, errors } = await openHome(fixture, context);
       await page.getByRole("button", { name: /I AM 18/i }).click();
-      await page.getByRole("button", { name: /WATCH NOW/i }).click();
+      await page.locator(".video-card__play").first().click();
       const media = page.locator("#player-container video");
       await media.waitFor();
       assert.equal(await media.getAttribute("preload"), "metadata");
@@ -437,7 +437,7 @@ test("a cut media request recovers without asking the visitor to press Try again
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await page.waitForFunction(() => {
       const video = document.querySelector("#player-container video");
@@ -457,7 +457,7 @@ test("a media failure that survives the silent retries still offers Try again", 
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.getByRole("alert").getByText("This video could not be loaded. Please try again.").waitFor();
     assert.doesNotMatch(await player.getByRole("alert").innerText(), /upstream|media-backend/);
@@ -479,7 +479,7 @@ test("a rejected play promise stays retryable and keeps the buffer", options, as
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await page.waitForFunction(() => {
       const video = document.querySelector("#player-container video");
@@ -517,7 +517,7 @@ test("a transient catalog failure is retried before the visitor is told", option
     await page.getByRole("button", { name: /I AM 18/i }).click();
     // The first /api/videos answers 503; the retry must fill the grid without
     // ever painting "Content Unavailable".
-    await page.getByRole("button", { name: /WATCH NOW/i }).waitFor({ timeout: 20_000 });
+    await page.locator(".video-card__play").first().waitFor({ timeout: 20_000 });
     assert.equal(await page.getByText("Content Unavailable").count(), 0, "no error screen for a retried request");
     const catalogCalls = fixture.state.calls.filter((call) => call.path === "/api/videos");
     assert.ok(catalogCalls.length >= 2, "the catalog request was repeated");
@@ -532,7 +532,7 @@ test("clicking the picture toggles the controls and never pauses", options, asyn
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     const media = player.locator("video");
     await page.waitForFunction(() => {
@@ -573,7 +573,7 @@ test("a CDN source that cannot play falls back to the byte stream", options, asy
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    const watch = page.locator(".video-card__play").first();
     await watch.waitFor();
     await watch.click();
     const media = page.locator("#player-container video");
@@ -613,7 +613,7 @@ test("a playable CDN source is used and the byte stream stays untouched", option
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    const watch = page.locator(".video-card__play").first();
     await watch.waitFor();
     await watch.click();
     const media = page.locator("#player-container video");

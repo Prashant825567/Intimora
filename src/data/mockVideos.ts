@@ -8,6 +8,9 @@ export interface Video {
   // Unix milliseconds; null when the source did not provide a trustworthy date.
   createdAt: number | null;
   isExclusive: boolean;
+  // Premium is metadata, like exclusive: a flag on the record or the word in a
+  // category/tag. Kept here so the Premium chip can read it directly.
+  premium?: boolean;
   // Null means the public API did not provide a trustworthy count.
   likes: number | null;
   category: string;

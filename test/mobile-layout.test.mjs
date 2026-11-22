@@ -95,20 +95,17 @@ async function assertHeroImagesFit(page, label) {
   const layout = await page.locator(".hero-banner").evaluate((hero) => {
     const media = hero.querySelector(".hero-banner__media").getBoundingClientRect();
     const image = hero.querySelector(".hero-banner__image");
-    const title = hero.querySelector(".hero-banner__title").getBoundingClientRect();
     const navigation = document.querySelector(".site-nav").getBoundingClientRect();
     return {
       fit: getComputedStyle(image).objectFit,
       transform: getComputedStyle(image).transform,
       naturalWidth: image.naturalWidth,
-      separate: title.right <= media.left + 1 || title.left >= media.right - 1 || title.top >= media.bottom - 1 || title.bottom <= media.top + 1,
       belowNav: hero.getBoundingClientRect().top >= navigation.bottom - 1,
     };
   });
   assert.equal(layout.fit, "contain", `${label}: hero image must not crop`);
   assert.equal(layout.transform, "none", `${label}: hero image must not zoom`);
   assert.ok(layout.naturalWidth > 0, `${label}: hero image loads`);
-  assert.ok(layout.separate, `${label}: title must be outside the image panel`);
   assert.ok(layout.belowNav, `${label}: navigation must not cover the hero`);
   assert.equal(await page.locator(".video-card__image").first().evaluate((image) => getComputedStyle(image).objectFit), "contain", `${label}: card image must not crop`);
 }
@@ -173,8 +170,17 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       await assertInViewport(page.getByRole("button", { name: /under 18/i }), width, height, `${label} exit button`);
       await enter.click();
 
-      const watch = page.getByRole("button", { name: /WATCH NOW/i });
-      await watch.waitFor();
+      // A phone shows the poster only: no title, no creator, no meta line, no
+      // WATCH NOW and no arrows — the carousel is moved with a finger or the dots.
+      const heroPoster = page.locator(".hero-banner");
+      await heroPoster.waitFor();
+      for (const hidden of [".hero-banner__title", ".hero-banner__creator", ".hero-banner__meta", ".hero-banner__cta", ".hero-banner__featured-label",
+        ".hero-banner__arrow--prev", ".hero-banner__arrow--next"]) {
+        assert.equal(await page.locator(hidden).first().isVisible(), false, `${label}: ${hidden} is not shown on a phone`);
+      }
+      const dots = page.locator(".hero-banner__dots");
+      assert.equal(await dots.isVisible(), true, `${label}: the dots under the poster move the carousel`);
+      await assertInViewport(dots, width, height, `${label} hero dots`);
       await page.evaluate(() => document.fonts.ready);
       const brand = page.getByRole("link", { name: "Intimora home" });
       await assertInViewport(brand, width, height, `${label} brand`);
@@ -194,16 +200,31 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       assert.equal(await tabs.evaluate((strip) => getComputedStyle(strip).overflowX), "auto", `${label}: tabs scroll inside the bar`);
       await assertPageFits(page, `${label} tabs`);
       await assertHeroImagesFit(page, label);
-      await assertTextNotClipped(page.locator(".hero-banner__title"), `${label} featured title`);
-      await assertTextNotClipped(page.locator(".hero-banner__creator"), `${label} featured creator`);
-      const heroContentsFit = await page.locator(".hero-banner").evaluate((hero) => {
+      const posterOnly = await page.locator(".hero-banner").evaluate((hero) => {
         const bounds = hero.getBoundingClientRect();
-        return [".hero-banner__title", ".hero-banner__creator", ".hero-banner__cta"].every((selector) => {
-          const child = hero.querySelector(selector).getBoundingClientRect();
-          return child.top >= bounds.top - 1 && child.bottom <= bounds.bottom + 1;
-        });
+        const image = hero.querySelector(".hero-banner__image").getBoundingClientRect();
+        return image.top >= bounds.top - 1 && image.left >= bounds.left - 1 && image.right <= bounds.right + 1;
       });
-      assert.ok(heroContentsFit, `${label}: featured content is clipped by the banner`);
+      assert.ok(posterOnly, `${label}: the poster itself has to fit inside the banner`);
+      // A finger swipe over the poster moves the carousel, exactly like the arrows
+      // do on a desktop.
+      if (await page.locator(".hero-banner__dots .hero-banner__dot").count() > 1) {
+        await page.locator(".hero-banner__media").evaluate((media) => {
+          const box = media.getBoundingClientRect();
+          const y = box.top + box.height / 2;
+          const fire = (type, x) => {
+            const event = new Event(type, { bubbles: true, cancelable: true });
+            event.touches = type === "touchend" ? [] : [{ clientX: x, clientY: y }];
+            event.changedTouches = [{ clientX: x, clientY: y }];
+            media.closest(".hero-banner").dispatchEvent(event);
+          };
+          fire("touchstart", box.left + box.width * 0.8);
+          fire("touchend", box.left + box.width * 0.2);
+        });
+        await page.waitForTimeout(100);
+        const active = await page.locator(".hero-banner__dots .hero-banner__dot").evaluateAll((dots) => dots.findIndex((dot) => dot.classList.contains("is-active")));
+        assert.equal(active, 1, `${label}: a left swipe shows the next poster`);
+      }
       await assertTextNotClipped(page.locator(".video-card__title").first(), `${label} card title`);
       await assertTextNotClipped(page.locator(".video-card__creator-name").first(), `${label} card creator`);
       const menu = page.getByRole("button", { name: "Open navigation menu" });
@@ -218,7 +239,9 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       await assertPageFits(page, `${label} open menu`);
       await closeMenu.click();
 
-      await assertInViewport(watch, width, height, `${label} featured action`);
+      // The featured action moved off the phone hero; the poster's dots are the
+      // phone control and were already checked above.
+      await assertInViewport(page.locator(".hero-banner__dots"), width, height, `${label} featured dots`);
       const cardShare = page.getByRole("button", { name: "Share video" }).first();
       assert.equal(await cardShare.locator("..").evaluate((element) => getComputedStyle(element).opacity), "1");
       const cardActionsFit = await cardShare.locator("..").evaluate((actions) => {
@@ -234,7 +257,8 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
       await assertTextNotClipped(page.locator(".share-modal__title"), `${label} shared title`);
       await page.getByRole("button", { name: "Close share dialog" }).click();
 
-      await watch.click();
+      // A phone plays from a card, not from the hero poster.
+      await page.locator(".video-card__play").first().click();
       const player = page.locator("#player-container");
       await player.waitFor();
       await assertPageFits(page, `${label} player`);

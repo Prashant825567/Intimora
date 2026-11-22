@@ -6,4 +6,5 @@ export function selectExclusive(videos: Video[]): Video[];
 export const HOME_FILTERS: string[];
 export function isAnimeVideo(video: Video): boolean;
 export function isPremiumVideo(video: Video): boolean;
+export function hasPremiumFlag(video: Video): boolean;
 export function selectHomeFilter(videos: Video[], filter?: "all" | "desi" | "anime" | "sponsored" | "premium"): Video[];

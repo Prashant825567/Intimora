@@ -261,7 +261,7 @@ test("a guest action heads to login even while initial auth state is still loadi
   try {
     await page.goto(base);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    await page.locator(".video-card__play").first().waitFor();
     await page.getByRole("button", { name: "Save video" }).first().click();
     assert.equal(new URL(page.url()).pathname, "/login");
     assert.ok(!state.calls.some((call) => call.path.endsWith("/save")));
@@ -316,7 +316,7 @@ test("new users complete name, unique username and optional referral; actions us
   try {
     await page.goto(base);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    await page.locator(".video-card__play").first().waitFor();
     await page.getByRole("button", { name: "Save video" }).first().click();
     await page.getByRole("heading", { name: "Sign in to your account" }).waitFor();
     assert.ok(!state.calls.some((call) => call.path.endsWith("/save")));
@@ -346,7 +346,7 @@ test("new users complete name, unique username and optional referral; actions us
     assert.deepEqual(JSON.parse(registration.body), { name: "Ava", username: "ava_123", referralCode: "INVITE-1" });
     await page.getByRole("button", { name: "Open navigation menu" }).click();
     await page.getByRole("link", { name: "Home", exact: true }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+    await page.locator(".video-card__play").first().waitFor();
     state.selected = backendB;
     await page.evaluate(() => { window.__timeOffset = 61_000; });
     const search = page.getByRole("textbox", { name: "Search videos" });
@@ -357,7 +357,7 @@ test("new users complete name, unique username and optional referral; actions us
     await page.getByText("Search results for").waitFor();
     assert.ok(state.calls.some((call) => call.origin === backendB && call.path === "/api/search"));
     await page.getByRole("button", { name: "Clear search" }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator(".video-player__content");
     state.delayMutation = 80;
     await player.getByRole("button", { name: "Like video" }).click();
