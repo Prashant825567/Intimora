@@ -19,6 +19,7 @@
     "@firebase/auth": "1.13.6",
     "@fontsource/dancing-script": "5.3.0",
     "clsx": "2.1.1",
+    "hls.js": "^1.7.4",
     "lucide-react": "^1.69.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",

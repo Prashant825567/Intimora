@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, animeStreamFrom, fetchAnimeRows, fetchAnimeStream, parseAnimeResults } from "../src/services/anime-api.mjs";
+import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, animeStreamFrom, fetchAnimeRows, fetchAnimeStream, isHlsLink, parseAnimeResults } from "../src/services/anime-api.mjs";
 
 // The service answers with the source's own list rows. Only metadata is read:
 // id, title, poster, duration — never a media URL.
@@ -87,10 +87,17 @@ test("the watch route's own link is the stream, and only a plain https media fil
   assert.deepEqual(asked, [`${ANIME_API_BASE}/api/hen/city/watch/AbC123xyz`], "the watch route is asked once");
   assert.equal(url, "https://cdn.anime.example/clip/index-720.mp4", "the link is used as it came, not rebuilt");
 
-  // Nothing playable: an HLS manifest, a page, an insecure or script URL, a
-  // download page. The player must be told "no link" instead of guessing.
+  // The watch route's real answer is an HLS playlist, which the player can play,
+  // so it counts as the link — the playlist URL is kept exactly as sent.
+  const hls = animeStreamFrom({ status: "success", data: { source: [{ src: "https://hls.hentaicity.com/_hls/flv/0807/38331/,default,.mp4.urlset/master.m3u8?validfrom=1&hash=abc%3D", formate: "hls" }] } });
+  assert.equal(hls, "https://hls.hentaicity.com/_hls/flv/0807/38331/,default,.mp4.urlset/master.m3u8?validfrom=1&hash=abc%3D", "the playlist, token and all");
+  assert.equal(isHlsLink(hls), true);
+  assert.equal(isHlsLink("https://cdn.anime.example/clip.mp4"), false);
+
+  // Nothing playable: a page, an insecure or script URL, a download page. The
+  // player must be told "no link" instead of guessing.
   for (const payload of [
-    { data: { url: "https://cdn.anime.example/index.m3u8" } },
+    { data: { url: "https://cdn.anime.example/watch/video-123.html" } },
     { data: { url: "http://cdn.anime.example/clip.mp4" } },
     { data: { url: "javascript:alert(1)" } },
     { data: { url: "https://bestfile.io/abc/file" } },
@@ -100,6 +107,8 @@ test("the watch route's own link is the stream, and only a plain https media fil
     assert.equal(animeStreamFrom(payload), null, JSON.stringify(payload));
   }
   assert.equal(animeStreamFrom({ data: { file: "https://cdn.anime.example/b.webm" } }), "https://cdn.anime.example/b.webm");
+  assert.equal(animeStreamFrom({ data: { source: [{ src: "https://hls.hentaicity.com/a/master.m3u8", formate: "hls" }] } }), "https://hls.hentaicity.com/a/master.m3u8");
+  assert.equal(animeStreamFrom({ data: { source: [{ src: "http://hls.hentaicity.com/a/master.m3u8" }] } }), null, "an insecure playlist is refused");
   assert.equal(await fetchAnimeStream("bad id", { fetchImpl: async () => { throw new Error("no"); } }), null, "a bad id never reaches the network");
   assert.equal(await fetchAnimeStream("AbC123xyz", { fetchImpl: async () => { throw new TypeError("Failed to fetch"); } }), null);
 });
