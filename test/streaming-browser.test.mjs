@@ -763,6 +763,38 @@ test("a premium video asks a guest to sign in before anything plays", options, a
   } finally { await fixture.close(); }
 });
 
+// A premium video without a trailer is no different for a guest: the metadata the
+// catalogue sent (poster, title) still arrives and is drawn, and the player shows
+// the sign-in message with nothing loaded behind it.
+test("a guest still sees a premium video's metadata, then the sign-in message", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked-noTrailer" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    // The card itself is drawn from the catalogue's metadata.
+    const card = page.locator(".video-card").first();
+    await card.waitFor();
+    assert.match(await card.innerText(), /Streaming fixture/, "the title comes from the catalogue");
+    assert.equal(await card.locator(".video-card__image").getAttribute("src"), `${fixture.backend}/api/videos/sample-1/thumbnail`);
+    assert.ok(fixture.state.calls.some((call) => call.path === "/api/videos/sample-1/thumbnail"), "the poster was fetched");
+
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await player.getByText("Sign in first to watch this premium video").waitFor();
+    // The player keeps the metadata visible, and there is no trailer note because
+    // there is no trailer to describe.
+    assert.equal(await player.getByText("Streaming fixture").count() >= 1, true, "the title is still on screen");
+    assert.match(await player.locator("img").first().getAttribute("src"), /thumbnail/, "the poster is the backdrop");
+    assert.equal(await player.locator("video").count(), 0, "no media element at all");
+    assert.equal(await player.locator(".video-player__trailer-note").count(), 0);
+    assert.deepEqual(streamCalls(fixture.state), [], "nothing is requested");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
 // The backend's premium contract, seen from the browser: a locked video only ever
 // offers its trailer, and an active window plays the tokenised stream it was
 // given — the app never rebuilds either link.
