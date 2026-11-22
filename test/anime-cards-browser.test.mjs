@@ -12,6 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const browserPath = process.env.CHROMIUM_PATH || chromium.executablePath();
 const discovery = "https://intimora.tmc78lxnu.workers.dev/api/get-server";
 const backend = "https://api-intimora.vercel.app";
+const STREAM = "https://cdn.anime.example/clip/index-720.mp4";
 const poster = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="480" height="270" fill="#6b4f8a"/></svg>';
 
 const catalogVideos = [{ id: "own-one", title: "Our own video", views: 10, createdAt: 1_760_000_000, category: "Desi" }];
@@ -53,7 +54,7 @@ async function availablePort() {
   return port;
 }
 
-test("anime cards come from the live anime API, recent before popular, and open the source's own player inside our frame", {
+test("anime cards come from the live anime API, recent before popular, and play the link the watch route returns", {
   skip: existsSync(browserPath) ? false : "Install Chromium or set CHROMIUM_PATH", timeout: 90_000,
 }, async () => {
   const vite = await createViteServer({
@@ -69,15 +70,24 @@ test("anime cards come from the live anime API, recent before popular, and open 
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const frames = [];
     const animeRequests = [];
+    const streamRequests = [];
+    // What the player itself asks the source for, recorded at the network layer.
+    const mediaRequests = [];
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       const headers = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Range" };
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
       if (url.hostname === "pacahub-34nd.onrender.com") {
-        animeRequests.push(url.pathname);
+        // Only the list routes are counted as rows; the click asks the watch
+        // route, which is recorded separately below.
+        if (url.pathname === "/api/hen/city/recent" || url.pathname === "/api/hen/city/popular/1") animeRequests.push(url.pathname);
         if (url.pathname === "/api/hen/city/recent") return route.fulfill({ headers, json: recent });
         if (url.pathname === "/api/hen/city/popular/1") return route.fulfill({ headers, json: popular });
+        if (url.pathname.startsWith("/api/hen/city/watch/")) {
+          streamRequests.push(url.pathname);
+          return route.fulfill({ headers, json: { status: "success", data: { id: url.pathname.split("/").pop(), sources: [{ label: "720p", url: STREAM }] } } });
+        }
         return route.fulfill({ status: 404, headers, json: { ok: false } });
       }
       if (url.pathname === "/partner-feed.json") return route.fulfill({ json: { version: 2, items: [] } });
@@ -86,6 +96,10 @@ test("anime cards come from the live anime API, recent before popular, and open 
         return route.fulfill({ contentType: "text/html", body: "<html><body>partner player</body></html>" });
       }
       if (url.hostname === "cdn1.images.hentaicity.com") return route.fulfill({ contentType: "image/svg+xml", body: poster });
+      if (url.hostname === "cdn.anime.example") {
+        mediaRequests.push(url.href);
+        return route.fulfill({ status: 404, headers, body: "" });
+      }
       if (request.url() === discovery) return route.fulfill({ headers, json: { ok: true, data: { server: backend } } });
       if (url.origin !== backend) return route.continue();
       if (url.pathname === "/api/videos" || url.pathname === "/api/search") return route.fulfill({ headers, json: { ok: true, data: { videos: catalogVideos, nextCursor: null } } });
@@ -136,16 +150,24 @@ test("anime cards come from the live anime API, recent before popular, and open 
     assert.equal(await page.locator(".video-card--anime").first().innerText().then((text) => text.includes("07:03")), true);
     assert.equal(await page.locator(".video-card--anime").first().getByRole("button", { name: /save|like/i }).count(), 0, "an external title has no backend id, so it offers no like/save");
 
-    // A click opens the source's own player inside our overlay — never a copied media URL.
+    // A click asks the service's watch route for the file and plays that exact
+    // link in our own <video>: no iframe, no proxy, nothing rebuilt. The src the
+    // player mounts is recorded, so the stub file's decodability is irrelevant.
     await recentRow.locator(".video-card--anime").first().click();
-    const dialog = page.getByRole("dialog");
+    const dialog = page.getByRole("dialog", { name: "Anime player" });
     await dialog.waitFor();
-    const frame = dialog.locator("iframe");
-    assert.equal(await frame.getAttribute("src"), "https://www.hentaicity.com/embed/1JdXN6yeMdN");
-    assert.equal(await frame.getAttribute("referrerpolicy"), "no-referrer");
+    await page.waitForFunction((expected) => document.querySelector("[data-anime-src]")?.getAttribute("data-anime-src") === expected, STREAM, { timeout: 20_000 })
+      .catch(async (error) => {
+        throw new Error(`player src never became the returned link; dialog says: ${(await dialog.innerText()).slice(0, 200)} / ${error.message}`);
+      });
+    assert.equal(await dialog.locator("iframe").count(), 0, "no embed frame is used any more");
+    assert.ok(streamRequests.length >= 1 && streamRequests.every((path) => path === "/api/hen/city/watch/1JdXN6yeMdN"),
+      `the watch route is asked for that id (got ${JSON.stringify(streamRequests)})`);
+    await page.waitForTimeout(400);
+    assert.ok(mediaRequests.includes(STREAM), `the browser asked the source for that link (got ${JSON.stringify(mediaRequests)})`);
+    assert.deepEqual(frames, [], "no partner/embed page is loaded for a click");
     await page.keyboard.press("Escape");
     await dialog.waitFor({ state: "detached" });
-    assert.deepEqual(frames, ["https://www.hentaicity.com/embed/1JdXN6yeMdN"]);
 
     // Search matches the cards this page already loaded, in its own section —
     // no query leaves our origin.

@@ -127,6 +127,45 @@ export async function fetchAnimeRows({
   return rows;
 }
 
+const MEDIA_FILE = /\.(?:mp4|m4v|webm|mov)$/i;
+
+// The service's watch route answers with the playable file itself. The link is
+// only ever handed to a <video> element — never proxied, never rebuilt, and only
+// when it is a plain https URL that looks like a media file. Anything else is
+// "no stream", which the page then reports instead of guessing.
+export function animeStreamFrom(payload) {
+  const seen = [];
+  const walk = (value, depth) => {
+    if (!value || depth > 4) return;
+    if (typeof value === "string") { seen.push(value.trim()); return; }
+    if (Array.isArray(value)) { for (const item of value.slice(0, 20)) walk(item, depth + 1); return; }
+    if (typeof value !== "object") return;
+    for (const key of ["url", "file", "videoUrl", "streamUrl", "src", "link", "playUrl", "media", "sources", "source", "data", "video", "result"]) {
+      if (key in value) walk(value[key], depth + 1);
+    }
+  };
+  walk(payload, 0);
+  for (const raw of seen) {
+    if (!raw || raw.length > 2048) continue;
+    let url;
+    try { url = new URL(raw); } catch { continue; }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) continue;
+    if (!MEDIA_FILE.test(url.pathname)) continue;
+    return url.href;
+  }
+  return null;
+}
+
+export async function fetchAnimeStream(id, { base = ANIME_API_BASE, fetchImpl = (...args) => fetch(...args), signal, timeoutMs = 15_000 } = {}) {
+  if (!VIDEO_ID.test(id ?? "")) return null;
+  try {
+    const payload = await readJson(`${base}/api/hen/city/watch/${encodeURIComponent(id)}`, { fetchImpl, signal, timeoutMs });
+    return animeStreamFrom(payload);
+  } catch {
+    return null;
+  }
+}
+
 // Search runs on what this page already loaded — the source's own /search/ is not
 // called, so no query leaves our origin.
 export function animeSearch(cards, query, { limit = 24 } = {}) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, fetchAnimeRows, parseAnimeResults } from "../src/services/anime-api.mjs";
+import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, animeStreamFrom, fetchAnimeRows, fetchAnimeStream, parseAnimeResults } from "../src/services/anime-api.mjs";
 
 // The service answers with the source's own list rows. Only metadata is read:
 // id, title, poster, duration — never a media URL.
@@ -74,6 +74,34 @@ test("the rows come back recent first, then popular, and a dead row costs only i
 
   const nothing = await fetchAnimeRows({ fetchImpl: async () => { throw new TypeError("Failed to fetch"); } });
   assert.deepEqual(nothing, [], "no rows at all is an empty page, not a crash");
+});
+
+test("the watch route's own link is the stream, and only a plain https media file qualifies", async () => {
+  const asked = [];
+  const url = await fetchAnimeStream("AbC123xyz", {
+    fetchImpl: async (target) => {
+      asked.push(String(target));
+      return Response.json({ status: "success", data: { id: "AbC123xyz", sources: [{ label: "720p", url: "https://cdn.anime.example/clip/index-720.mp4" }] } });
+    },
+  });
+  assert.deepEqual(asked, [`${ANIME_API_BASE}/api/hen/city/watch/AbC123xyz`], "the watch route is asked once");
+  assert.equal(url, "https://cdn.anime.example/clip/index-720.mp4", "the link is used as it came, not rebuilt");
+
+  // Nothing playable: an HLS manifest, a page, an insecure or script URL, a
+  // download page. The player must be told "no link" instead of guessing.
+  for (const payload of [
+    { data: { url: "https://cdn.anime.example/index.m3u8" } },
+    { data: { url: "http://cdn.anime.example/clip.mp4" } },
+    { data: { url: "javascript:alert(1)" } },
+    { data: { url: "https://bestfile.io/abc/file" } },
+    { data: null },
+    null,
+  ]) {
+    assert.equal(animeStreamFrom(payload), null, JSON.stringify(payload));
+  }
+  assert.equal(animeStreamFrom({ data: { file: "https://cdn.anime.example/b.webm" } }), "https://cdn.anime.example/b.webm");
+  assert.equal(await fetchAnimeStream("bad id", { fetchImpl: async () => { throw new Error("no"); } }), null, "a bad id never reaches the network");
+  assert.equal(await fetchAnimeStream("AbC123xyz", { fetchImpl: async () => { throw new TypeError("Failed to fetch"); } }), null);
 });
 
 test("search runs on the cards the page already has", () => {

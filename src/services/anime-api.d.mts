@@ -24,4 +24,11 @@ export function fetchAnimeRows(options?: {
   timeoutMs?: number;
   limit?: number;
 }): Promise<AnimeList[]>;
+export function animeStreamFrom(payload: unknown): string | null;
+export function fetchAnimeStream(id: string, options?: {
+  base?: string;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<string | null>;
 export function animeSearch(cards: AnimeCard[], query: string, options?: { limit?: number }): AnimeCard[];

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import AgeGate from "./components/AgeGate";
 import AnimeCard from "./components/AnimeCard";
+import AnimePlayer from "./components/AnimePlayer";
 import CategoryBar, { type HomeFilter } from "./components/CategoryBar";
 import Navbar from "./components/Navbar";
 import HeroBanner from "./components/HeroBanner";
@@ -740,7 +741,7 @@ function App() {
       <Footer />
       {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={closeVideo} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} />}
       {activeSponsored && <PartnerPlayer card={activeSponsored} onClose={() => setActiveSponsored(null)} />}
-      {activeAnime && <PartnerPlayer card={activeAnime} label="Anime" onClose={() => setActiveAnime(null)} />}
+      {activeAnime && <AnimePlayer card={activeAnime} onClose={() => setActiveAnime(null)} />}
       {shareVideo && <ShareModal video={shareVideo} onClose={closeShare} />}
     </div>
   );
