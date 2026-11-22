@@ -20,13 +20,15 @@ interface AnimePlayerProps {
 type State =
   | { kind: "loading" }
   | { kind: "playing"; url: string }
-  | { kind: "missing"; reason: "no-link" | "unreachable" | "no-id" }
+  | { kind: "missing"; reason: "no-link" | "unreachable" | "no-id" | "refused" }
   | { kind: "broken" };
 
 const reasonText: Record<string, string> = {
   "no-link": "This title has no playable file right now.",
   unreachable: "The anime server did not answer. Try again in a moment.",
   "no-id": "This card has no usable video id.",
+  // The service sends a playlist, but its host refuses the video to this site.
+  refused: "Is title ka video source hamari site ko nahi de raha. Baad me try karo.",
 };
 
 const AnimePlayer: React.FC<AnimePlayerProps> = ({ card, onClose }) => {

@@ -7,6 +7,7 @@
 export const ANIME_API_BASE = "https://pacahub-34nd.onrender.com";
 
 const VIDEO_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const WATCH_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const THUMBNAIL = /^https:\/\/[^\s"'<>]+\.(?:jpe?g|png|webp)(?:\?[^\s"'<>]*)?$/i;
 const MAX_TITLE = 140;
 const MAX_CARDS = 24;
@@ -46,15 +47,23 @@ function cleanDuration(value) {
   return String(value ?? "").match(/(\d{1,3}:[0-5]\d)/)?.[1] ?? "";
 }
 
+const SLUG = /^[A-Za-z0-9_-][A-Za-z0-9_-]*(?:-[A-Za-z0-9_-]+)*$/;
+
+// The API's own id is the whole slug (`…-girls-6-1JdXN6yeMdN`), and its watch
+// route needs it whole. The short tail is kept as `code`, for the embed URL and
+// the thumbnail video id only — asking the watch route with just the tail is what
+// returned `Failed to scrape HentaiCity watch: Request failed with status code 404`.
 function cardFromResult(result) {
   if (!result || typeof result !== "object") return null;
-  const id = animeIdFromSlug(typeof result.id === "string" ? result.id : "")
-    ?? animeIdFromSlug(typeof result.slug === "string" ? result.slug : "");
+  const raw = typeof result.id === "string" ? result.id : typeof result.slug === "string" ? result.slug : "";
+  const slug = raw.trim();
+  const code = animeIdFromSlug(slug);
+  const id = code && slug.length <= 200 && SLUG.test(slug) ? slug : null;
   if (!id) return null;
   const title = cleanTitle(result.title ?? result.name);
   const thumbnail = httpsUrl(result.thumbnail ?? result.poster ?? result.image);
   if (!title || !thumbnail || !THUMBNAIL.test(thumbnail)) return null;
-  return { id, title, thumbnail, duration: cleanDuration(result.duration ?? result.length), embedUrl: animeEmbedUrl(id) };
+  return { id, code, title, thumbnail, duration: cleanDuration(result.duration ?? result.length), embedUrl: animeEmbedUrl(code) };
 }
 
 // The service answers `{ ok, data: { results: [...] } }`; some deployments wrap it
@@ -71,8 +80,9 @@ export function parseAnimeResults(payload, { limit = MAX_CARDS } = {}) {
   const seen = new Set();
   for (const result of list) {
     const card = cardFromResult(result);
-    if (!card || seen.has(card.id)) continue;
-    seen.add(card.id);
+    // One title, once: the source may print the same video under two slugs.
+    if (!card || seen.has(card.code)) continue;
+    seen.add(card.code);
     cards.push(card);
     if (cards.length >= limit) break;
   }
@@ -162,12 +172,45 @@ export function animeStreamFrom(payload) {
   return null;
 }
 
+// A playlist can be readable while its segments refuse the browser (the source
+// checks the referrer and the page origin). That is not a link we can play, so the
+// player asks us first and is told plainly instead of showing a stuck spinner.
+export async function hlsPlayable(url, { fetchImpl = (...args) => fetch(...args), signal, timeoutMs = 8_000 } = {}) {
+  let target;
+  try { target = new URL(url); } catch { return false; }
+  if (target.protocol !== "https:" || !HLS_FILE.test(target.pathname)) return false;
+  let timer;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort);
+  try {
+    timer = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetchImpl(target.href, {
+      method: "GET",
+      mode: "cors",
+      credentials: "omit",
+      // The source is an ordinary website: it answers a browser-shaped request.
+      // A 200 with a playlist body is all this check needs.
+      headers: { Accept: "*/*" },
+      signal: controller.signal,
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+    });
+    return response.ok === true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
+  }
+}
+
 // Which kind of link the player was handed, so it can pick a playback path.
 export const isHlsLink = (url) => typeof url === "string" && HLS_FILE.test((() => {
   try { return new URL(url).pathname; } catch { return ""; }
 })());
 export async function fetchAnimeStream(id, { base = ANIME_API_BASE, fetchImpl = (...args) => fetch(...args), signal, timeoutMs = 15_000 } = {}) {
-  if (!VIDEO_ID.test(id ?? "")) return null;
+  if (!WATCH_ID.test(id ?? "")) return null;
   try {
     const payload = await readJson(`${base}/api/hen/city/watch/${encodeURIComponent(id)}`, { fetchImpl, signal, timeoutMs });
     return animeStreamFrom(payload);
