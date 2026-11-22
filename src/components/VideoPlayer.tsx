@@ -28,6 +28,10 @@ interface VideoPlayerProps {
   onLike: (video: Video) => void;
   onSave: (video: Video) => void;
   actionError: string;
+  // Whether an account is signed in. A premium video is for members, so a guest
+  // is asked to sign in first — with a button that goes to the sign-in page.
+  signedIn: boolean;
+  onSignIn: () => void;
 }
 
 type BufferedRange = { start: number; end: number };
@@ -48,7 +52,7 @@ function preloadHint(): "auto" | "metadata" {
     ? "metadata" : "auto";
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, onSignIn }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const playAttempt = useRef(0);
@@ -69,6 +73,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // that this visitor may not see it (`locked`); either way an ad has no place
   // in front of it.
   const premiumTitle = video.premium === true || video.locked === true;
+  // A guest never plays a premium title at all — not even its trailer: the player
+  // asks for a sign-in first, and the button opens the page that carries Google
+  // sign-in. The backend stays the authority on who may watch; this only stops a
+  // visitor who is not signed in from being shown a premium video player.
+  const signInGate = premiumTitle && !signedIn;
   const [source, setSource] = useState(welcomeSource);
   const sourceSwapped = useRef(false);
   const resumeAt = useRef(0);
@@ -250,6 +259,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // not answered within the short grace window, playback begins instead, so an
   // ad server can never block the video.
   const startPlayback = (v: HTMLVideoElement, automatic = false) => {
+    // Nothing starts behind the sign-in gate: no trailer, no stream, no ad.
+    if (signInGate) return;
     wantsPlay.current = true;
     const attempt = ++playAttempt.current;
     // No pre-roll for a premium title: playback starts on the click, with the
@@ -411,13 +422,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
           onMouseMove={() => { if (Date.now() - controlsToggledAt.current > 250) resetControlsTimer(); }}
           onMouseLeave={() => { if (playing && !adPlaying) setShowControls(false); }}
         >
-          {lockedBlocked ? (
+          {signInGate || lockedBlocked ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <img src={video.thumbnail} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
               <p className="relative text-white font-bold">{video.title}</p>
-              <p className="relative text-white font-semibold">Premium video · sirf premium members ke liye</p>
-              <p className="relative text-gray-300 text-sm">Sign in karke premium activate karo — uske baad yahi video full chalegi.</p>
-              <p className="relative text-gray-500 text-xs">Filhaal is video ka trailer bhi available nahi hai.</p>
+              {signInGate ? (
+                <>
+                  <p className="relative text-white font-semibold">Sign in first to watch this premium video</p>
+                  <p className="relative max-w-sm text-gray-300 text-sm">
+                    Premium video sirf sign-in kiye hue premium members ke liye hai. Sign in karo, premium activate karo — phir yahi video chalti hai.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onSignIn}
+                    className="video-player__signin relative mt-2 rounded-full px-5 py-2 text-sm font-bold"
+                    style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
+                  >
+                    Sign in to watch
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="relative text-white font-semibold">Premium video · sirf premium members ke liye</p>
+                  <p className="relative text-gray-300 text-sm">Sign in karke premium activate karo — uske baad yahi video full chalegi.</p>
+                  <p className="relative text-gray-500 text-xs">Filhaal is video ka trailer bhi available nahi hai.</p>
+                </>
+              )}
             </div>
           ) : (
           <video
@@ -483,7 +513,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
           />
           )}
 
-          {locked && (
+          {locked && !signInGate && (
             <>
               {/* The visitor sees the trailer and is told, plainly, why that is
                   all there is — and what unlocks the full video. */}
@@ -498,7 +528,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
           {adPlaying && <VideoAdOverlay ad={adPlaying} onFinish={finishAd} onClose={onClose} />}
 
           {/* The poster and native preload are used only for the selected video. */}
-          {!adPlaying && !playing && !playbackError && (
+          {!signInGate && !lockedBlocked && !adPlaying && !playing && !playbackError && (
             <button type="button" aria-label="Play video" className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
               <span
                 className="video-player__play-button w-20 h-20 rounded-full flex items-center justify-center transition-all hover:scale-110"

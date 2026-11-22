@@ -29,11 +29,39 @@ export async function signInWithGoogle() {}
 export async function signOutGoogle() {}
 `;
 
-function identityPlugin() {
+// A signed-in member, for the premium cases: the account is an input there, so
+// no account route is contacted and the assertions stay about the player.
+const memberIdentity = `
+const current = { uid: "member-1", email: "member@example.com", displayName: "Member", photoURL: null, getIdToken: async () => "member-token" };
+export function watchFirebaseUser(listener) { queueMicrotask(() => listener(current)); return () => {}; }
+export async function signInWithGoogle() { return current; }
+export async function signOutGoogle() {}
+`;
+const memberAccount = `
+const profile = { uid: "member-1", email: "member@example.com", name: "Member", username: "member", referralCode: "REF-MEMBER1", likedIds: [], savedIds: [], premium: true, backendBase: "https://api-intimora.vercel.app" };
+export async function verifyAccount() { return { exists: true, backend: profile.backendBase }; }
+export async function getMyAccount() { return profile; }
+export async function createAccount() { return profile; }
+export async function toggleAccountVideo() { return profile; }
+export async function getPremiumStatus() { return { status: { active: true, until: 1795400000, remainingSeconds: 9000, referralCode: "REF-MEMBER1", referrals: { total: 0, used: 0, available: 0, availableCodes: [], secondsEach: 9000, hoursEach: 2.5 } }, backend: profile.backendBase }; }
+export async function getPremiumHistory() { return { history: { periods: [], total: { seconds: 0, amountPaise: 0, bySource: {} } }, backend: profile.backendBase }; }
+export async function redeemReferrals() { return { status: null, entry: null }; }
+export async function getReferralTree() { return { direct: [], level2: [] }; }
+export const referralsEnabled = false;
+export function sanitizeReferralTree() { return { direct: [], level2: [] }; }
+`;
+
+function identityPlugin({ signedIn = false } = {}) {
   return {
     name: "vast-test-identity", enforce: "pre",
-    resolveId(id) { if (id === "../services/firebase") return "\0vast-test-identity"; },
-    load(id) { if (id === "\0vast-test-identity") return guestIdentity; },
+    resolveId(id) {
+      if (id === "../services/firebase") return "\0vast-test-identity";
+      if (signedIn && (id === "../services/account-api" || id === "./account-api")) return "\0vast-test-account";
+    },
+    load(id) {
+      if (id === "\0vast-test-identity") return signedIn ? memberIdentity : guestIdentity;
+      if (id === "\0vast-test-account") return memberAccount;
+    },
   };
 }
 
@@ -71,11 +99,11 @@ function vastXml({ skipOffset = "00:00:02", duration = "00:00:30", media = adMed
 </VAST>`;
 }
 
-async function withPlayer({ vast, cached = null, premium = null, run }) {
+async function withPlayer({ vast, cached = null, premium = null, signedIn = false, run }) {
   const vite = await createViteServer({
     configFile: path.join(root, "vite.config.ts"), logLevel: "silent",
     server: { host: "127.0.0.1", port: 0, strictPort: false },
-    plugins: [identityPlugin()],
+    plugins: [identityPlugin({ signedIn })],
   });
   let browser;
   const requests = [];
@@ -378,6 +406,9 @@ test("a premium title never gets a pre-roll, and a locked one explains itself", 
   await withPlayer({
     vast: () => ({ xml: vastXml() }),
     premium: () => shape,
+    // A member is signed in; the guest case (sign-in gate) is covered by the
+    // streaming browser test.
+    signedIn: true,
     run: async ({ context, base, requests }) => {
       for (const current of shapes) {
         shape = current.item;
