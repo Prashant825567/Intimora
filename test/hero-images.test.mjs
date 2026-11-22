@@ -49,9 +49,21 @@ test("portrait, panoramic and landscape thumbnails remain fully visible without 
       });
       await page.goto(base);
       await page.getByRole("button", { name: /I AM 18/i }).click();
-      await page.getByRole("button", { name: /WATCH NOW/i }).waitFor();
+      await page.locator(".hero-banner__image").first().waitFor();
+      if (width < 1024) {
+        // A phone shows the poster alone and moves it with a swipe, so the
+        // desktop-only arrow buttons and the text block are not rendered there.
+        assert.equal(await page.getByRole("button", { name: /WATCH NOW/i }).count(), 0, `${width}x${height}: phone hero has no text block`);
+        assert.equal(await page.locator(".hero-banner__arrow--prev").first().isVisible(), false, `${width}x${height}: no arrows on a phone`);
+      }
       for (let index = 0; index < dimensions.length; index += 1) {
-        await page.locator(".hero-banner__title").filter({ hasText: `Aspect ratio test ${index}` }).waitFor();
+        // The title is inside the hero text block, which a phone does not draw;
+        // the poster is what identifies the slide there.
+        if (width < 1024) {
+          await page.locator(".hero-banner__image").filter({ has: page.locator("xpath=.") }).first().waitFor();
+        } else {
+          await page.locator(".hero-banner__title").filter({ hasText: `Aspect ratio test ${index}` }).waitFor();
+        }
         await page.locator(".hero-banner__image").evaluate((image) => image.decode());
         await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
         const layout = await page.locator(".hero-banner").evaluate((hero) => {
@@ -78,9 +90,33 @@ test("portrait, panoramic and landscape thumbnails remain fully visible without 
         assert.deepEqual([layout.imageWidth, layout.imageHeight], dimensions[index]);
         assert.equal(layout.fit, "contain");
         assert.equal(layout.transform, "none");
-        assert.ok(layout.within && layout.separate && layout.belowNav, `${width}x${height}, image ${index}: ${JSON.stringify(layout)}`);
+        assert.ok(layout.within && layout.belowNav, `${width}x${height}, image ${index}: ${JSON.stringify(layout)}`);
+        // On a phone the text block is a full-size overlay holding only the dots,
+        // so it is expected to cover the poster; on a desktop it must not.
+        if (width < 1024) {
+          assert.equal(await page.locator(".hero-banner__title").first().isVisible(), false, `${width}x${height}: phone hero hides the title`);
+        } else {
+          assert.ok(layout.separate, `${width}x${height}, image ${index}: desktop text must not cover the poster`);
+        }
         assert.equal(await page.locator(".video-card__image").first().evaluate((image) => getComputedStyle(image).objectFit), "contain");
-        if (index < dimensions.length - 1) await page.getByRole("button", { name: "Next featured video" }).click();
+        if (index < dimensions.length - 1) {
+          if (width < 1024) {
+            // Swipe the poster: a horizontal drag, which the hero reads as "next".
+            await page.locator(".hero-banner__media").evaluate((media) => {
+              const box = media.getBoundingClientRect();
+              const touch = (type, x) => {
+                const event = new Event(type, { bubbles: true, cancelable: true });
+                event.touches = type === "touchend" ? [] : [{ clientX: x, clientY: box.top + box.height / 2 }];
+                event.changedTouches = [{ clientX: x, clientY: box.top + box.height / 2 }];
+                media.closest(".hero-banner").dispatchEvent(event);
+              };
+              touch("touchstart", box.left + box.width * 0.8);
+              touch("touchend", box.left + box.width * 0.2);
+            });
+          } else {
+            await page.getByRole("button", { name: "Next featured video" }).click();
+          }
+        }
       }
       await page.close();
     }

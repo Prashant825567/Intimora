@@ -8,6 +8,14 @@ export interface Video {
   // Unix milliseconds; null when the source did not provide a trustworthy date.
   createdAt: number | null;
   isExclusive: boolean;
+  // Premium is metadata, like exclusive: a flag on the record or the word in a
+  // category/tag. Kept here so the Premium chip can read it directly.
+  premium?: boolean;
+  // The backend says this video cannot play without an active premium window.
+  // A locked video still shows its poster, and plays its trailer when it has one.
+  locked?: boolean;
+  // The backend's own tokenised trailer link; null when it has no trailer.
+  trailerUrl?: string | null;
   // Null means the public API did not provide a trustworthy count.
   likes: number | null;
   category: string;

@@ -6,8 +6,8 @@ const VIDEO_ACTION = /^\/api\/videos\/[A-Za-z0-9_-]{1,128}\/(?:like|save)$/;
 // never sends a preflight. A preflight would leave without cookies (the Fetch
 // spec forbids them on OPTIONS), which is exactly what a free host's JavaScript
 // check answers with an HTML page — and an HTML page has no CORS headers.
-const GET_ROUTES = new Set(["/api/auth/me", "/api/user/referrals"]);
-const POST_ROUTES = new Set(["/api/auth/verify", "/api/auth/profile"]);
+const GET_ROUTES = new Set(["/api/auth/me", "/api/user/referrals", "/api/premium/status", "/api/premium/history"]);
+const POST_ROUTES = new Set(["/api/auth/verify", "/api/auth/profile", "/api/premium/redeem"]);
 const ACCOUNT_ROUTES = new Set([...GET_ROUTES, ...POST_ROUTES]);
 // A "simple" content type: no preflight, and the JSON travels as plain text.
 const SIMPLE_CONTENT_TYPE = "text/plain";
@@ -55,6 +55,9 @@ function errorCode(status, error) {
   if (error === "Invalid referral code") return "invalid_referral";
   if (error === "User already exists") return "already_exists";
   if (error === "Name and username required") return "invalid_profile";
+  // Premium refuses with a sentence, not a code; the caller turns it into its own
+  // wording (see premium.mjs) so nothing from a host is rendered verbatim.
+  if (/available nahi|^sirf|kam se kam/i.test(error)) return error;
   return "unavailable";
 }
 

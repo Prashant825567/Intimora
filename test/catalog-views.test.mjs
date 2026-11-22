@@ -42,18 +42,26 @@ test("home filters split anime from our own uploads and never touch the catalogu
     { id: "premium-tag", category: "Desi", tags: ["Premium", "hd"] },
     { id: "premium-category", category: " pReMiUm ", tags: [] },
     { id: "premium-ish", category: "Premiumish", tags: ["premiumish"] },
+    { id: "premium-flag", category: "Desi", premium: true },
+    { id: "premium-flag-spelling", category: "Desi", isPremium: true },
+    { id: "premium-compound", category: "Desi", tags: ["premium-hd"] },
+    { id: "premium-badge", category: "Desi", badge: "PREMIUM" },
+    { id: "exclusive-not-premium", category: "Desi", tags: ["exclusive"] },
   ];
 
   assert.deepEqual(selectHomeFilter(entries, "anime").map((item) => item.id), ["anime-category", "anime-tag", "hyphenated"]);
-  assert.deepEqual(selectHomeFilter(entries, "desi").map((item) => item.id), ["desi-one", "foreign", "plain", "not-anime", "premium-ish"],
+  assert.deepEqual(selectHomeFilter(entries, "premium").map((item) => item.id),
+    ["premium-tag", "premium-category", "premium-flag", "premium-flag-spelling", "premium-compound", "premium-badge"],
+    "a flag, an isPremium spelling, a compound tag and a badge all count");
+  assert.deepEqual(selectHomeFilter(entries, "desi").map((item) => item.id), ["desi-one", "foreign", "plain", "not-anime", "premium-ish", "exclusive-not-premium"],
     "anime and premium are removed, so uploads from other countries stay and nothing is drawn twice");
-  assert.deepEqual(selectHomeFilter(entries, "premium").map((item) => item.id), ["premium-tag", "premium-category"],
-    "premium is a category or a tag, matched on whole words");
+  assert.deepEqual(selectHomeFilter(entries, "premium").map((item) => item.id), ["premium-tag", "premium-category", "premium-flag", "premium-flag-spelling", "premium-compound", "premium-badge"],
+    "premium is metadata: a flag, a category, a tag or a badge");
   assert.deepEqual(selectHomeFilter(entries, "sponsored"), [], "sponsored cards come from their own source, not the catalogue");
   assert.deepEqual(selectHomeFilter(entries, "all").map((item) => item.id), entries.map((item) => item.id));
   assert.deepEqual(selectHomeFilter(entries, "nonsense").map((item) => item.id), entries.map((item) => item.id), "an unknown value falls back to everything");
   assert.deepEqual(selectHomeFilter(null, "anime"), []);
-  assert.deepEqual(entries.map((item) => item.id), ["desi-one", "anime-category", "anime-tag", "foreign", "hyphenated", "plain", "not-anime", "premium-tag", "premium-category", "premium-ish"]);
+  assert.deepEqual(entries.map((item) => item.id), ["desi-one", "anime-category", "anime-tag", "foreign", "hyphenated", "plain", "not-anime", "premium-tag", "premium-category", "premium-ish", "premium-flag", "premium-flag-spelling", "premium-compound", "premium-badge", "exclusive-not-premium"]);
   assert.equal(isAnimeVideo({ category: "ANIME" }), true, "the label match is case-insensitive");
   assert.equal(isAnimeVideo({ tags: ["#anime"] }), true);
   assert.equal(isAnimeVideo({ category: "Anime", tags: null }), true);
@@ -64,5 +72,8 @@ test("home filters split anime from our own uploads and never touch the catalogu
   assert.equal(isPremiumVideo({ category: "Premiumish" }), false);
   assert.equal(isPremiumVideo({ tags: ["premiumish"] }), false);
   assert.equal(isPremiumVideo(null), false);
+  assert.equal(isPremiumVideo({ premium: true }), true, "the backend's own flag is enough");
+  assert.equal(isPremiumVideo({ isPremium: true }), true);
+  assert.equal(isPremiumVideo({ premium: false, tags: ["hd"] }), false);
   assert.deepEqual(HOME_FILTERS, ["all", "desi", "anime", "sponsored", "premium"], "Premium is the last chip, beside Sponsored");
 });

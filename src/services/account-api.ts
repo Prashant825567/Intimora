@@ -2,6 +2,7 @@ import type { FirebaseUser } from "./firebase";
 import { primeBackendSelection, resolveBackendTarget } from "./api";
 import { AccountRequestError, createAuthenticatedRequest } from "./auth-request.mjs";
 import { readLikeCount } from "./like-counts.mjs";
+import { parsePremiumEntry, parsePremiumPeriods, parsePremiumStatus, redeemErrorCode } from "./premium.mjs";
 import { PHP_ORIGIN_OVERRIDE } from "../config/php-backend.mjs";
 import { activeTarget, requestPhpUnlock } from "./php-session.mjs";
 
@@ -155,6 +156,35 @@ export function sanitizeReferralTree(raw: unknown, ownCode: string): ReferralTre
     }
   }
   return { direct, level2 };
+}
+
+// Premium is a window the backend opens and closes. The app asks for its status
+// (a GET, or a POST on a PHP host — the shared request helper picks) and shows
+// exactly what came back; nothing here decides entitlement.
+export async function getPremiumStatus(user: FirebaseUser, backend?: string) {
+  const result = await request("/api/premium/status", { token: await token(user), backend });
+  const status = parsePremiumStatus(result.data);
+  if (!status) throw new AccountRequestError();
+  return { status, backend: result.backend };
+}
+
+export async function getPremiumHistory(user: FirebaseUser, backend?: string) {
+  const result = await request("/api/premium/history", { token: await token(user), backend });
+  return { history: parsePremiumPeriods(result.data), backend: result.backend };
+}
+
+// One referral redeems only once, and the backend refuses a count it cannot
+// cover — so the refusal is passed up by code, never as the host's own sentence.
+export async function redeemReferrals(user: FirebaseUser, count: number, backend?: string) {
+  const n = Number.isInteger(count) && count > 0 && count <= 50 ? count : 0;
+  if (!n) throw new AccountRequestError("too_few");
+  try {
+    const result = await request("/api/premium/redeem", { method: "POST", token: await token(user), backend, body: { count: n } });
+    return { entry: parsePremiumEntry(result.data), status: parsePremiumEntry(result.data)?.status ?? null, backend: result.backend };
+  } catch (error) {
+    if (error instanceof AccountRequestError) throw new AccountRequestError(redeemErrorCode(error.code));
+    throw error;
+  }
 }
 
 export async function getReferralTree(user: FirebaseUser, ownCode: string, backend?: string): Promise<ReferralTree> {

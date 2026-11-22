@@ -30,6 +30,29 @@ const fixtureVideo = {
   thumbnailUrl: "/api/videos/sample-1/thumbnail", streamUrl: "/api/videos/sample-1/stream",
 };
 
+// The backend's documented premium answers, for the fixture only.
+function premiumVideo(premiumMode, format) {
+  const base = { ...fixtureVideo, duration: format === "mp4" ? 30 : 20 };
+  if (premiumMode === "active") {
+    return {
+      ...base, premium: true, hasTrailer: true,
+      // Both links carry the backend's own token; the player must use them as-is.
+      streamUrl: "/api/videos/sample-1/stream?t=stream-token",
+      trailerUrl: "/api/videos/sample-1/stream?kind=trailer&t=trailer-token",
+    };
+  }
+  if (premiumMode === "locked") {
+    return {
+      ...base, premium: true, locked: true, hasTrailer: true, streamUrl: null,
+      trailerUrl: "/api/videos/sample-1/stream?kind=trailer&t=trailer-token",
+    };
+  }
+  if (premiumMode === "locked-noTrailer") {
+    return { ...base, premium: true, locked: true, hasTrailer: false, streamUrl: null, trailerUrl: null };
+  }
+  return base;
+}
+
 async function availablePort() {
   const server = createNetServer();
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -38,9 +61,20 @@ async function availablePort() {
   return port;
 }
 
-async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null } = {}) {
+async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null, premiumMode = null } = {}) {
   const clip = clips[format];
+  // `premiumMode` is the backend's own premium contract:
+  //   "locked"        — premium video, no active window, a trailer exists
+  //   "locked-noTrailer" — premium video, no active window, no trailer
+  //   "active"        — premium window open: a tokenised stream and a trailer
   const video = { ...fixtureVideo, duration: format === "mp4" ? 30 : 20 };
+  // The catalog and detail answers carry the premium shape and, when the test
+  // asks for one, the CDN link.
+  const catalogVideo = () => {
+    const item = premiumVideo(premiumMode, format);
+    if (video.cdnUrl) item.cdnUrl = video.cdnUrl;
+    return item;
+  };
   const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "intimora-stream-test-"));
   const previousDiscovery = process.env.INTIMORA_PUBLIC_API_DISCOVERY_URL;
   let backendServer;
@@ -76,11 +110,19 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
           res.end("temporary catalog failure");
           return;
         }
-        return json({ ok: true, data: { videos: [video], nextCursor: null } });
+        return json({ ok: true, data: { videos: [catalogVideo()], nextCursor: null } });
+      }
+      if (url.pathname === "/api/videos/sample-1/stream" && url.searchParams.get("kind") === "trailer") {
+        // The trailer is public: it plays without any premium window.
+        const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || "");
+        const start = match ? Number(match[1]) : 0;
+        res.writeHead(200, { ...cors, "Content-Type": `video/${format}`, "Accept-Ranges": "bytes", "Content-Length": clip.length - start });
+        res.end(clip.subarray(start));
+        return;
       }
       if (url.pathname === "/api/videos/sample-1") {
         if (state.holdDetail) state.pendingDetails.push(() => { if (!res.destroyed) json({ ok: true, data: { ...video, views: 123 } }); });
-        else json({ ok: true, data: { ...video, views: 123 } });
+        else json({ ok: true, data: { ...catalogVideo(), views: 123 } });
         return;
       }
       if (url.pathname === "/api/videos/sample-1/thumbnail") {
@@ -102,6 +144,13 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         return;
       }
       if (url.pathname === "/api/videos/sample-1/stream") {
+        // A premium stream without its own token is refused exactly as the
+        // backend documents it.
+        if (premiumMode && premiumMode !== "active" && !url.searchParams.get("t")) {
+          res.writeHead(403, { ...cors, "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Premium required" }));
+          return;
+        }
         if (state.failMedia > 0) {
           state.failMedia -= 1;
           res.writeHead(503, { ...cors, "Cache-Control": "no-store" });
@@ -202,7 +251,7 @@ test("native playback buffers, seeks and keeps the selected backend URL stable",
     const { page, errors } = await openHome(fixture, context);
     assert.ok(!state.calls.some((call) => call.path.startsWith("/api/videos")), "no catalog or media before the age gate");
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    const watch = page.locator(".video-card__play").first();
     await watch.waitFor();
     assert.equal(streamCalls(state).length, 0, "catalog cards do not preload streams");
 
@@ -287,7 +336,7 @@ test("seeking beyond the buffered data lets the browser request a later byte ran
       return;
     }
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await page.waitForFunction(() => {
       const video = document.querySelector("#player-container video");
@@ -331,7 +380,7 @@ test("watch-now starts playback without waiting for the view-count request", opt
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const media = page.locator("#player-container video");
     await media.waitFor();
     await page.waitForFunction(() => {
@@ -366,7 +415,7 @@ test("a browser-blocked automatic start keeps the manual play button available",
     });
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.locator("video").waitFor();
     await page.waitForFunction(() => window.__fixtureBlockedPlays > 0);
@@ -416,7 +465,7 @@ test("data saver and very slow connections use metadata preload", options, async
       await context.addInitScript((info) => { Object.defineProperty(navigator, "connection", { configurable: true, value: info }); }, connection);
       const { page, errors } = await openHome(fixture, context);
       await page.getByRole("button", { name: /I AM 18/i }).click();
-      await page.getByRole("button", { name: /WATCH NOW/i }).click();
+      await page.locator(".video-card__play").first().click();
       const media = page.locator("#player-container video");
       await media.waitFor();
       assert.equal(await media.getAttribute("preload"), "metadata");
@@ -437,7 +486,7 @@ test("a cut media request recovers without asking the visitor to press Try again
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await page.waitForFunction(() => {
       const video = document.querySelector("#player-container video");
@@ -457,7 +506,7 @@ test("a media failure that survives the silent retries still offers Try again", 
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.getByRole("alert").getByText("This video could not be loaded. Please try again.").waitFor();
     assert.doesNotMatch(await player.getByRole("alert").innerText(), /upstream|media-backend/);
@@ -479,7 +528,7 @@ test("a rejected play promise stays retryable and keeps the buffer", options, as
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await page.waitForFunction(() => {
       const video = document.querySelector("#player-container video");
@@ -517,7 +566,7 @@ test("a transient catalog failure is retried before the visitor is told", option
     await page.getByRole("button", { name: /I AM 18/i }).click();
     // The first /api/videos answers 503; the retry must fill the grid without
     // ever painting "Content Unavailable".
-    await page.getByRole("button", { name: /WATCH NOW/i }).waitFor({ timeout: 20_000 });
+    await page.locator(".video-card__play").first().waitFor({ timeout: 20_000 });
     assert.equal(await page.getByText("Content Unavailable").count(), 0, "no error screen for a retried request");
     const catalogCalls = fixture.state.calls.filter((call) => call.path === "/api/videos");
     assert.ok(catalogCalls.length >= 2, "the catalog request was repeated");
@@ -532,7 +581,7 @@ test("clicking the picture toggles the controls and never pauses", options, asyn
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.getByRole("button", { name: /WATCH NOW/i }).click();
+    await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     const media = player.locator("video");
     await page.waitForFunction(() => {
@@ -573,7 +622,7 @@ test("a CDN source that cannot play falls back to the byte stream", options, asy
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    const watch = page.locator(".video-card__play").first();
     await watch.waitFor();
     await watch.click();
     const media = page.locator("#player-container video");
@@ -613,7 +662,7 @@ test("a playable CDN source is used and the byte stream stays untouched", option
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
     await page.getByRole("button", { name: /I AM 18/i }).click();
-    const watch = page.getByRole("button", { name: /WATCH NOW/i });
+    const watch = page.locator(".video-card__play").first();
     await watch.waitFor();
     await watch.click();
     const media = page.locator("#player-container video");
@@ -626,6 +675,74 @@ test("a playable CDN source is used and the byte stream stays untouched", option
     assert.equal(await media.getAttribute("crossorigin"), null, "a CDN source is not asked for CORS");
     assert.ok(fixture.state.calls.some((call) => call.path === "/cdn-clip.mp4"));
     assert.ok(!fixture.state.calls.some((call) => call.path === "/api/videos/sample-1/stream"), "no bytes are downloaded");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// The backend's premium contract, seen from the browser: a locked video only ever
+// offers its trailer, and an active window plays the tokenised stream it was
+// given — the app never rebuilds either link.
+test("a locked premium video plays its trailer and never asks for the stream", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    const source = await player.locator("video").getAttribute("src");
+    assert.match(source, /kind=trailer/, "the trailer link the backend sent is the source");
+    assert.match(source, /t=trailer-token/, "its token is kept exactly");
+    assert.equal(await player.locator(".video-player__trailer-note").count(), 1, "the viewer is told it is a trailer");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+    const streams = streamCalls(fixture.state);
+    assert.ok(streams.length > 0 && streams.every((call) => call.search.includes("kind=trailer")),
+      `only trailers were requested (got ${JSON.stringify(streams.map((call) => call.search))})`);
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a locked premium video without a trailer explains itself instead of loading anything", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked-noTrailer" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    assert.equal(await player.locator("video").count(), 0, "nothing is played");
+    assert.match(await player.innerText(), /premium members ke liye hai/i);
+    assert.deepEqual(streamCalls(fixture.state), [], "the stream is never requested");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("an active premium window plays the tokenised stream the backend issued", options, async () => {
+  const fixture = await createFixture({ premiumMode: "active" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    const source = await player.locator("video").getAttribute("src");
+    assert.match(source, /\/api\/videos\/sample-1\/stream\?t=stream-token$/, "the issued stream link, not a rebuilt one");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+    const streams = streamCalls(fixture.state);
+    assert.ok(streams.some((call) => call.search === "?t=stream-token"), "the browser asked with that token");
+    assert.equal(await player.locator(".video-player__trailer-note").count(), 0, "a full video is not labelled a trailer");
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }

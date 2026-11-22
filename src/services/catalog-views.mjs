@@ -39,7 +39,19 @@ function labelsOf(video) {
   if (Array.isArray(video?.tags)) {
     for (const tag of video.tags) if (typeof tag === "string") labels.push(tag);
   }
+  // A label can also arrive as a bare word, the way a source writes it:
+  // "Premium", "premium-hd" or "#Premium" in a badge field.
+  for (const value of [video?.badge, video?.label, video?.tier, video?.badgeName]) {
+    if (typeof value === "string") labels.push(value);
+  }
   return labels.map((label) => label.trim()).filter(Boolean);
+}
+
+// Premium is metadata, and a source records it in more than one way: a flag on
+// the record, a tag or category, or the word inside a compound tag.
+export function hasPremiumFlag(video) {
+  return video?.premium === true || video?.isPremium === true || video?.premiumOnly === true
+    || (typeof video?.tier === "string" && video.tier.trim().toLowerCase() === "premium");
 }
 
 export function isAnimeVideo(video) {
@@ -51,6 +63,7 @@ export function isAnimeVideo(video) {
 const PREMIUM_LABEL = /(^|[^a-z])premium([^a-z]|$)/i;
 
 export function isPremiumVideo(video) {
+  if (hasPremiumFlag(video)) return true;
   return labelsOf(video).some((label) => PREMIUM_LABEL.test(label));
 }
 

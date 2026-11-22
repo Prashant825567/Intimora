@@ -6,6 +6,7 @@ import type { AccountController } from "../hooks/useAccount";
 import { getReferralTree, referralsEnabled } from "../services/account-api";
 import type { ReferralTree } from "../services/account-api";
 import ReferralFlow from "./ReferralFlow";
+import PremiumPanel from "./PremiumPanel";
 import { AccountRequestError } from "../services/auth-request.mjs";
 
 export type AccountPage = "login" | "profile" | "referral" | "dashboard";
@@ -20,12 +21,15 @@ interface Props {
   renderVideos: (videos: Video[]) => ReactNode;
   onPage: (page: AccountPage) => void;
   onBack: () => void;
+  // A premium purchase or redemption changes the stream links the catalogue
+  // issued, so the caller re-reads it after a successful one.
+  onPremiumChanged?: () => void;
 }
 
 const validName = (value: string) => value.trim().length >= 1 && value.trim().length <= 100;
 const validUsername = (value: string) => /^[A-Za-z0-9_]{3,30}$/.test(value.trim());
 
-export default function AccountPages({ page, account, videos, catalogLoading, catalogUnavailable, onRetryCatalog, renderVideos, onPage, onBack }: Props) {
+export default function AccountPages({ page, account, videos, catalogLoading, catalogUnavailable, onRetryCatalog, renderVideos, onPage, onBack, onPremiumChanged }: Props) {
   const [name, setName] = useState(account.identity?.displayName || "");
   const [username, setUsername] = useState("");
   const [referral, setReferral] = useState("");
@@ -200,6 +204,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
         <button type="button" className="dashboard__logout" onClick={() => { void account.logout().catch(() => setFormError("Could not sign out. Please try again.")); }}><LogOut size={16} /> Sign out</button>
       </div>
       {formError && <p className="account-error" role="alert">{formError}</p>}
+      {identity && <PremiumPanel user={identity} backend={profile.backendBase} onChanged={onPremiumChanged} />}
       <div className="dashboard__code">
         <div><span>Your referral code</span><strong>{profile.referralCode}</strong><small>Share this code with someone you invite.</small></div>
         <button type="button" onClick={copyCode} aria-label="Copy referral code">{copied ? <Check size={17} /> : <Copy size={17} />} {copied ? "Copied" : "Copy"}</button>
