@@ -579,7 +579,7 @@ function App() {
         )}
 
         {accountPage ? (
-          <AccountPages page={accountPage} account={account} videos={videos} catalogLoading={!apiError && (initialLoading || catalogStatus === "loading")} catalogUnavailable={apiError || catalogStatus === "partial"} onRetryCatalog={retryCatalog} renderVideos={(items) => <VideoGrid videos={items} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />} onPage={(page) => goTo(`/${page}`)} onBack={() => goTo("/")} />
+          <AccountPages page={accountPage} account={account} videos={videos} catalogLoading={!apiError && (initialLoading || catalogStatus === "loading")} catalogUnavailable={apiError || catalogStatus === "partial"} onRetryCatalog={retryCatalog} renderVideos={(items) => <VideoGrid videos={items} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />} onPage={(page) => goTo(`/${page}`)} onBack={() => goTo("/")} onPremiumChanged={retryCatalog} />
         ) : submittedQuery !== null ? (
           <section aria-label="Search results">
             <div className="mb-6">

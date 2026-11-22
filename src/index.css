@@ -1011,6 +1011,15 @@ img {
 .dashboard__section h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem; margin-bottom: 1rem; color: #fff; font-size: 1.12rem; font-weight: 800; }
 .dashboard__section h2 svg { color: #d8b759; }
 .dashboard__section h2 span { color: #8b857b; font-size: 0.8rem; }
+/* Premium panel: the referral buttons wrap, and the history reads like a ledger. */
+.premium-panel__state { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; font-weight: 600; color: #cfc9bf; }
+.premium-panel__state--active { color: #e8cf85; }
+.premium-panel__redeem { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+.premium-panel__history { margin-top: 1.25rem; }
+.premium-panel__history h3 { margin-bottom: 0.35rem; color: #fff; font-size: 0.95rem; font-weight: 700; }
+.premium-panel__history ul { display: grid; gap: 0.35rem; margin-top: 0.5rem; }
+.premium-panel__history li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.45rem 0.7rem; border: 1px solid #2c2822; border-radius: 0.55rem; color: #d6d0c6; font-size: 0.82rem; text-transform: capitalize; }
+.premium-panel__history li span:last-child { color: #e8cf85; font-variant-numeric: tabular-nums; }
 .dashboard__empty { padding: 1.25rem; border: 1px dashed #3b352b; border-radius: 0.8rem; color: #aaa49a; font-size: 0.875rem; line-height: 1.5; }
 /* Referral flow: small nodes joined by arrows, like a workflow canvas. The
    connectors are CSS borders on a nested list, so the tree reflows instead of

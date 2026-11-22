@@ -53,6 +53,12 @@ export interface ApiVideo {
   // Premium arrives as a flag and/or as a tag/category; both are preserved.
   premium?: boolean;
   isPremium?: boolean;
+  // Premium videos are drawn but locked, and a locked video may still offer a
+  // trailer. Both flags come from the backend and are never inferred here.
+  locked?: boolean;
+  hasTrailer?: boolean;
+  trailerUrl?: string;
+  trailerSize?: number;
   creator?: string;
   uploadedAt?: string;
   // Normalized to Unix milliseconds when present.
@@ -184,6 +190,10 @@ function publicVideo(input: unknown): ApiVideo | null {
     category: safeText(video.category, 100),
     exclusive: hasExclusiveMetadata(video),
     premium: hasPremiumMetadata(video),
+    locked: video.locked === true,
+    hasTrailer: video.hasTrailer === true,
+    trailerUrl: mediaLink(video.trailerUrl),
+    trailerSize: nonnegativeNumber(video.trailerSize),
     creator: safeText(video.creator, 200),
     uploadedAt: safeText(video.uploadedAt, 100),
     createdAt: timestampMs(video.createdAt) ?? timestampMs(video.uploadedAt),
@@ -320,7 +330,35 @@ export async function shareVideo(id: string, backend?: string) {
 }
 
 export const getThumbnailUrl = (id: string, backend: string) => `${backend}${videoPath(id)}/thumbnail`;
+// A premium stream link carries the backend's own token, so it is passed through
+// only when it is a same-backend/media-shaped URL; otherwise the plain byte route
+// stays the answer (which is what a free video gets anyway).
 export const getStreamUrl = (id: string, backend: string) => `${backend}${videoPath(id)}/stream`;
+
+// The backend hands premium playback a token-carrying link
+// (`/api/videos/<id>/stream?t=…`, `/stream?kind=trailer&t=…`). A media element
+// cannot send an Authorization header, so that exact link is what it must use —
+// but only after it is checked to be an https URL on the same backend with the
+// media path and a token, so a hostile answer cannot point the player elsewhere.
+export function mediaLinkFrom(raw: unknown, backend: string, kind: "stream" | "trailer" = "stream"): string | null {
+  if (typeof raw !== "string" || raw.length > 2048) return null;
+  let base: URL;
+  try { base = new URL(backend); } catch { return null; }
+  const value = raw.startsWith("/") ? `${base.origin}${raw}` : raw;
+  let url: URL;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== "https:" || url.origin !== base.origin) return null;
+  if (url.username || url.password || url.hash) return null;
+  if (!/^\/api\/videos\/[A-Za-z0-9_-]{1,128}\/stream$/.test(url.pathname)) return null;
+  const token = url.searchParams.get("t");
+  if (!token || token.length > 512 || url.searchParams.getAll("t").length !== 1) return null;
+  for (const key of url.searchParams.keys()) {
+    if (key !== "t" && !(kind === "trailer" && key === "kind")) return null;
+  }
+  if (kind === "trailer" && url.searchParams.get("kind") !== "trailer") return null;
+  if (kind === "stream" && url.searchParams.get("kind") !== null) return null;
+  return url.href;
+}
 
 export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video => {
   // Validate the id the same way every other media URL does before it is used.
@@ -341,8 +379,14 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     tags: apiVideo.tags || [],
     // The CDN file when the server offered one, otherwise the byte stream; the
     // byte stream also stays behind a CDN URL so a dead link cannot stop playback.
-    videoUrl: playback.videoUrl,
+    // A locked video gets a tokenised stream when the visitor's premium window is
+    // open; otherwise the backend sends no stream at all and the player must not
+    // build one itself — it would only be refused.
+    videoUrl: mediaLinkFrom(apiVideo.streamUrl, backend, "stream")
+      ?? (apiVideo.locked === true && !apiVideo.trailerUrl ? "" : playback.videoUrl),
     fallbackVideoUrl: playback.fallbackVideoUrl,
+    locked: apiVideo.locked === true,
+    trailerUrl: mediaLinkFrom(apiVideo.trailerUrl, backend, "trailer"),
     backendBase: backend,
     creator: apiVideo.creator || "Intimora",
     creatorAvatar: "/logo.png",

@@ -1,4 +1,7 @@
-type AccountErrorCode = "unavailable" | "unauthorized" | "username_taken" | "invalid_referral" | "already_exists" | "invalid_profile" | "unconfirmed";
+// Premium refusals arrive as the host's own sentence; the code keeps its shape so
+// the caller can render its own wording instead.
+type AccountErrorCode = "unavailable" | "unauthorized" | "username_taken" | "invalid_referral" | "already_exists" | "invalid_profile" | "unconfirmed"
+  | "none_available" | "not_enough" | "too_few";
 export class AccountRequestError extends Error {
   constructor(code?: AccountErrorCode);
   code: AccountErrorCode;

@@ -56,13 +56,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const [preload] = useState(preloadHint);
   // The URL a media element is actually loading. It is the CDN file when the
   // backend offered one, and it moves to the byte stream if that link fails.
-  const [source, setSource] = useState(video.videoUrl);
+  // A locked video (premium, not active for this visitor) plays its trailer and
+  // never asks for the full stream — the backend is the authority on that, and a
+  // request it refuses would only waste the visitor's data.
+  const locked = video.locked === true && !video.videoUrl?.includes("kind=trailer") && Boolean(video.trailerUrl);
+  const welcomeSource = locked ? (video.trailerUrl as string) : video.videoUrl;
+  // Premium video, no active window and no trailer: there is nothing to play, and
+  // the backend said so. The panel explains it instead of showing a broken player.
+  const lockedBlocked = video.locked === true && !video.trailerUrl && !video.videoUrl;
+  const [source, setSource] = useState(welcomeSource);
   const sourceSwapped = useRef(false);
   const resumeAt = useRef(0);
   // The CORS attribute is read once: changing it makes the browser throw away
   // the media load in progress, which showed up as a playback error. It follows
   // a different video only while nothing is being loaded.
-  const [crossOrigin, setCrossOrigin] = useState(() => sourceCrossOrigin(video.videoUrl, video.fallbackVideoUrl));
+  const [crossOrigin, setCrossOrigin] = useState(() => sourceCrossOrigin(welcomeSource, video.fallbackVideoUrl));
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
@@ -100,12 +108,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     pendingReload.current = false;
     sourceSwapped.current = false;
     resumeAt.current = 0;
-    setSource(video.videoUrl);
+    setSource(welcomeSource);
     const element = videoRef.current;
     if (!element || element.networkState === HTMLMediaElement.NETWORK_EMPTY) {
-      setCrossOrigin(sourceCrossOrigin(video.videoUrl, video.fallbackVideoUrl));
+      setCrossOrigin(sourceCrossOrigin(welcomeSource, video.fallbackVideoUrl));
     }
-  }, [video.videoUrl]);
+  }, [welcomeSource]);
 
   useEffect(() => () => {
     playAttempt.current += 1;
@@ -179,6 +187,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // is kept and playback resumes from metadata without another click. Only one
   // switch is ever made, so a broken pair can never loop.
   const swapToFallback = (element: HTMLVideoElement) => {
+    if (locked) return false;
     const fallback = video.fallbackVideoUrl;
     if (!fallback || sourceSwapped.current || source === fallback) return false;
     sourceSwapped.current = true;
@@ -389,6 +398,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
           onMouseMove={() => { if (Date.now() - controlsToggledAt.current > 250) resetControlsTimer(); }}
           onMouseLeave={() => { if (playing && !adPlaying) setShowControls(false); }}
         >
+          {lockedBlocked ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+              <img src={video.thumbnail} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
+              <p className="relative text-white font-bold">{video.title}</p>
+              <p className="relative text-gray-300 text-sm">Yeh video premium members ke liye hai.</p>
+              <p className="relative text-gray-500 text-xs">Premium active karte hi yahi page chalne lagega.</p>
+            </div>
+          ) : (
           <video
             ref={videoRef}
             src={source}
@@ -422,6 +439,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
               // A failed CDN source is answered by the byte stream first; the
               // ordinary reload only runs when there is nothing to switch to.
               if (swapToFallback(element)) return;
+              if (locked) {
+                // A trailer link is short-lived on purpose. Nothing is retried
+                // here: the visitor is told to reload, which fetches a fresh one.
+                setPlaybackError("This trailer link expired. Reload the page to watch it again.");
+                return;
+              }
               if (recoverContent(element, false)) return;
               setPlaybackError(playbackFailureMessage({ code }));
             }}
@@ -444,7 +467,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             onProgress={(e) => updateBuffered(e.currentTarget)}
             onSeeked={(e) => updateBuffered(e.currentTarget)}
           />
+          )}
 
+          {locked && (
+            <p className="video-player__trailer-note absolute bottom-16 left-4 z-10 rounded-full bg-black/75 px-3 py-1 text-xs text-gray-200">
+              Trailer · full video premium members ke liye
+            </p>
+          )}
           {adPlaying && <VideoAdOverlay ad={adPlaying} onFinish={finishAd} onClose={onClose} />}
 
           {/* The poster and native preload are used only for the selected video. */}

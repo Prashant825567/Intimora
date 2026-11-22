@@ -94,6 +94,13 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
     publicCounts: Object.fromEntries(videos.map((video) => [video.id, { likes: video.likes, version: 1 }])),
     failCounts: false, delayCounts: 0, holdNextCounts: false, countReleases: [], completedCounts: 0,
     failReferrals: false, holdMutations: false, mutationReleases: [], missingLikes: [],
+    // The premium window the backend reports, and the redemptions it accepted.
+    redeemCalls: [],
+    premiumPeriods: [],
+    premium: {
+      active: false, until: 0, remainingSeconds: 0, referralCode: "REF-U1X9",
+      referrals: { total: 4, used: 2, available: 2, availableCodes: ["REF-A1B2C3", "REF-D4E5F6"], secondsEach: 9000, hoursEach: 2.5 },
+    },
   };
   const setupContext = async (targetContext) => {
     await targetContext.addInitScript(({ delay, observeCards }) => {
@@ -153,6 +160,35 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
       const item = videos.find((v) => url.pathname.endsWith(v.id));
       const result = state.missingLikes.includes(item.id) ? { ...item, likes: undefined } : item;
       return route.fulfill({ headers: cors, json: { ok: true, data: result } });
+    }
+    if (url.pathname === "/api/premium/status") {
+      return route.fulfill({ headers: cors, json: { ok: true, data: state.premium } });
+    }
+    if (url.pathname === "/api/premium/history") {
+      const historySeconds = state.premiumPeriods.reduce((sum, period) => sum + period.seconds, 0);
+      return route.fulfill({ headers: cors, json: { ok: true, data: {
+        periods: state.premiumPeriods,
+        total: { seconds: historySeconds, amountPaise: 0, bySource: { referral: { periods: state.premiumPeriods.length, seconds: historySeconds, amountPaise: 0 } } },
+        status: state.premium,
+      } } });
+    }
+    if (url.pathname === "/api/premium/redeem") {
+      if (req.headers().authorization !== `Bearer ${fakeToken}`) return route.fulfill({ status: 401, headers: cors, json: { ok: false } });
+      const count = req.postDataJSON()?.count;
+      if (state.premium.referrals.available < count) {
+        return route.fulfill({ status: 400, headers: cors, json: { ok: false, error: `Sirf ${state.premium.referrals.available} referral available hain` } });
+      }
+      state.redeemCalls.push(count);
+      const seconds = state.premium.referrals.secondsEach * count;
+      state.premium = {
+        ...state.premium,
+        active: true,
+        until: 1795400000,
+        remainingSeconds: seconds,
+        referrals: { ...state.premium.referrals, available: state.premium.referrals.available - count, used: state.premium.referrals.used + count },
+      };
+      state.premiumPeriods.push({ id: `pp_${state.redeemCalls.length}`, source: "referral", seconds, refsUsed: ["REF-A1B2C3"], amountPaise: 0, at: 1795378000 });
+      return route.fulfill({ headers: cors, json: { ok: true, data: { status: state.premium, entry: { id: `pp_${state.redeemCalls.length}`, seconds, refsUsed: ["REF-A1B2C3"], startedAt: 1795378000, endsAt: 1795396000 } } } });
     }
     if (url.pathname.startsWith("/api/auth/") || url.pathname.startsWith("/api/user/") || /\/(like|save)$/.test(url.pathname)) {
       if (req.headers().authorization !== `Bearer ${fakeToken}`) return route.fulfill({ status: 401, headers: cors, json: { ok: false, error: "No auth token" } });
@@ -784,6 +820,50 @@ test("privacy-safe referrals use the verified backend and retry a temporary fail
     const calls = state.calls.filter((call) => call.path === "/api/user/referrals");
     assert.ok(calls.length >= 2 && calls.every((call) => call.origin === backendA && call.headers.authorization === `Bearer ${fakeToken}`));
     assert.equal(state.selected, backendB, "discovery switched after the account was verified");
+    assert.deepEqual(fixture.errors, []);
+  } finally { await fixture.close(); }
+});
+
+// The premium window is the backend's: the dashboard shows what it says and
+// redeems the referrals it says are available.
+test("the dashboard shows the premium window and redeems referrals through the backend", browserOptions, async () => {
+  const fixture = await createFixture({ exists: true, ownProfile: profile({}) });
+  const { page, state, base } = fixture;
+  try {
+    await page.goto(`${base}/dashboard`);
+    await page.getByRole("button", { name: "Sign in with Google" }).click();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+
+    const premium = page.getByRole("region", { name: "Premium" });
+    await premium.waitFor();
+    await premium.getByText(/Premium active nahi hai/).waitFor();
+    await premium.getByText(/2 available · 2 used · 4 total · har referral 2.5 ghanta/).waitFor();
+    assert.ok(state.calls.some((call) => call.path === "/api/premium/status" && call.method === "GET"), "the status is fetched with the bearer token");
+    assert.ok(state.calls.some((call) => call.path === "/api/premium/history"));
+
+    // One referral is 2.5h; the button says so before it is pressed.
+    const one = premium.getByRole("button", { name: /Use 1 referral = 2h 30m/ });
+    await one.waitFor();
+    await premium.getByRole("button", { name: /Use 2 referrals = 5h 0m/ }).waitFor();
+    await premium.getByRole("button", { name: /Use 4 referrals/ }).count().then((count) => assert.equal(count, 0, "only counts the backend can cover are offered"));
+    await one.click();
+
+    await premium.getByText(/Premium active · 2h 30m baaki/).waitFor();
+    assert.deepEqual(state.redeemCalls, [1], "one referral was sent");
+    assert.equal(await premium.getByText(/2h 30m premium add ho gaya/).count(), 1, "the added window is reported");
+    // With nothing left, the panel says so instead of offering a button the
+    // backend would refuse.
+    // The answer's own status replaces the old one: one referral is left, so only
+    // that option is offered — the four-referral option is gone with the window.
+    await premium.getByText(/1 available · 3 used · 4 total/).waitFor();
+    assert.deepEqual(await premium.getByRole("button", { name: /Use \d+ referral/ }).allInnerTexts(), ["Use 1 referral = 2h 30m"]);
+    assert.deepEqual(state.redeemCalls, [1], "only the accepted redemption was sent");
+
+    // The dashboard still fits a phone with the new panel on it.
+    for (const width of [280, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await assertFits(page);
+    }
     assert.deepEqual(fixture.errors, []);
   } finally { await fixture.close(); }
 });

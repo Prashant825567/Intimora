@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Play, Eye, Share2, Heart, ThumbsUp } from "lucide-react";
+import { Play, Eye, Share2, Heart, ThumbsUp, Lock } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import type { LiveLikes } from "../hooks/useLiveLikes";
 import { isPremiumLabel } from "../utils/video-labels";
@@ -56,6 +56,15 @@ const VideoCard: React.FC<VideoCardProps> = ({ video, onPlay, onShare, onSave, s
             style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
           >
             EXCLUSIVE
+          </div>
+        )}
+
+        {/* A locked premium video plays its trailer, so the card says so before
+            the click instead of letting the player explain it. */}
+        {video.locked && !video.isExclusive && (
+          <div className="video-card__locked absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider bg-black/80 text-yellow-300">
+            <Lock className="w-2.5 h-2.5" />
+            {video.trailerUrl ? "TRAILER" : "PREMIUM"}
           </div>
         )}
 
