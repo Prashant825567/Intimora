@@ -718,7 +718,9 @@ test("a locked premium video without a trailer explains itself instead of loadin
     const player = page.locator("#player-container");
     await player.waitFor();
     assert.equal(await player.locator("video").count(), 0, "nothing is played");
-    assert.match(await player.innerText(), /premium members ke liye hai/i);
+    assert.match(await player.innerText(), /Premium video · sirf premium members ke liye/);
+    assert.match(await player.innerText(), /Sign in karke premium activate karo/);
+    assert.match(await player.innerText(), /trailer bhi available nahi hai/i);
     assert.deepEqual(streamCalls(fixture.state), [], "the stream is never requested");
     assert.deepEqual(errors, []);
     await context.close();

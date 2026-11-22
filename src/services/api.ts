@@ -373,7 +373,10 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     viewCount: apiVideo.views ?? 0,
     createdAt: apiVideo.createdAt ?? null,
     isExclusive: apiVideo.exclusive === true,
-    premium: apiVideo.premium === true || apiVideo.isPremium === true || undefined,
+    // The backend's own premium flags: `premium` marks a premium title, `locked`
+    // says this visitor may not see it in full. Both are kept so the player can
+    // treat either as "premium" without deciding anything itself.
+    premium: apiVideo.premium === true || apiVideo.isPremium === true || apiVideo.locked === true || undefined,
     likes: apiVideo.likes ?? null,
     category: apiVideo.category || (apiVideo.exclusive ? "Exclusive" : ""),
     tags: apiVideo.tags || [],

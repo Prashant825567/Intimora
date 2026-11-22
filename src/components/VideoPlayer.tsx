@@ -64,6 +64,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // Premium video, no active window and no trailer: there is nothing to play, and
   // the backend said so. The panel explains it instead of showing a broken player.
   const lockedBlocked = video.locked === true && !video.trailerUrl && !video.videoUrl;
+  // A premium title never gets a pre-roll — not the trailer, not the full video.
+  // It is premium whether the backend marked the title (`premium`) or answered
+  // that this visitor may not see it (`locked`); either way an ad has no place
+  // in front of it.
+  const premiumTitle = video.premium === true || video.locked === true;
   const [source, setSource] = useState(welcomeSource);
   const sourceSwapped = useRef(false);
   const resumeAt = useRef(0);
@@ -134,7 +139,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     }).then((ad: VastAd | null) => ad, () => null);
   };
 
-  useEffect(() => { ensureAdRequest(); }, []);
+  // The tag is only ever requested for a title that may carry one, so a premium
+  // click does not even ask the ad server.
+  useEffect(() => { if (!premiumTitle) ensureAdRequest(); }, [premiumTitle]);
 
   const updateBuffered = (v: HTMLVideoElement) => {
     const total = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
@@ -245,6 +252,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const startPlayback = (v: HTMLVideoElement, automatic = false) => {
     wantsPlay.current = true;
     const attempt = ++playAttempt.current;
+    // No pre-roll for a premium title: playback starts on the click, with the
+    // trailer when the backend gave one.
+    if (premiumTitle) {
+      playContent(v, automatic, attempt);
+      return;
+    }
     ensureAdRequest();
     if (!VAST_TAG || adState.current.status === "done") {
       playContent(v, automatic, attempt);
@@ -402,8 +415,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <img src={video.thumbnail} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
               <p className="relative text-white font-bold">{video.title}</p>
-              <p className="relative text-gray-300 text-sm">Yeh video premium members ke liye hai.</p>
-              <p className="relative text-gray-500 text-xs">Premium active karte hi yahi page chalne lagega.</p>
+              <p className="relative text-white font-semibold">Premium video · sirf premium members ke liye</p>
+              <p className="relative text-gray-300 text-sm">Sign in karke premium activate karo — uske baad yahi video full chalegi.</p>
+              <p className="relative text-gray-500 text-xs">Filhaal is video ka trailer bhi available nahi hai.</p>
             </div>
           ) : (
           <video
@@ -470,9 +484,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
           )}
 
           {locked && (
-            <p className="video-player__trailer-note absolute bottom-16 left-4 z-10 rounded-full bg-black/75 px-3 py-1 text-xs text-gray-200">
-              Trailer · full video premium members ke liye
-            </p>
+            <>
+              {/* The visitor sees the trailer and is told, plainly, why that is
+                  all there is — and what unlocks the full video. */}
+              <p className="video-player__trailer-note absolute bottom-16 left-4 z-10 rounded-full bg-black/75 px-3 py-1 text-xs text-gray-200">
+                Trailer · full video premium members ke liye
+              </p>
+              <p className="video-player__premium-note absolute top-3 left-3 z-10 max-w-[16rem] rounded-lg bg-black/80 px-3 py-2 text-[11px] leading-snug text-gray-200">
+                Premium video · abhi sirf trailer. Sign in karke premium activate karo, phir full video chalegi.
+              </p>
+            </>
           )}
           {adPlaying && <VideoAdOverlay ad={adPlaying} onFinish={finishAd} onClose={onClose} />}
 
