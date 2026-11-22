@@ -1,13 +1,17 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, Loader2, AlertTriangle } from "lucide-react";
+import Hls from "hls.js";
 import type { AnimeCard as AnimeCardData } from "../services/anime-api.mjs";
+import { isHlsLink } from "../services/anime-api.mjs";
 import { fetchAnimeStreamUrl } from "../services/api";
 
-// An anime click now plays the file itself. The service's watch route is asked
-// for the playable link and that link goes straight into a <video> element: the
-// browser talks to the source, this site only passes the answer along. There is
-// no proxy, no rebuilt URL and no iframe — which is also why there is no pre-roll
-// here (the ad overlay belongs to our own catalogue player).
+// An anime click plays the service's own link. The watch route answers with an
+// HLS playlist for the title (some titles do come back as a plain file), and that
+// answer is used exactly as it arrives: a file goes into the <video> element, a
+// playlist is handed to the browser's own HLS reader (Safari) or to hls.js, which
+// fetches the playlist and its segments from the source directly. Nothing is
+// proxied, rebuilt or read out of a page, and there is no iframe — which is also
+// why there is no pre-roll here (the ad overlay belongs to our catalogue player).
 interface AnimePlayerProps {
   card: AnimeCardData;
   onClose: () => void;
@@ -28,9 +32,48 @@ const reasonText: Record<string, string> = {
 const AnimePlayer: React.FC<AnimePlayerProps> = ({ card, onClose }) => {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Where the element got its media from: the returned URL, or "hls" when hls.js
+  // attached the playlist to it. The attribute cannot hold a playlist URL (no
+  // browser can load one straight into src), so this marker is the evidence.
+  const [source, setSource] = useState<{ url: string; via: "src" | "hls" } | null>(null);
   // The link the service returned for this click, kept even after the element
   // reports a failed load, so the answer is unchanged by playback trouble.
   const [chosen, setChosen] = useState<string | null>(null);
+
+  // HLS: hls.js drives the same <video> element from the same URL wherever the
+  // browser exposes MSE; Safari on iOS, which has no MSE, reads the playlist
+  // natively.
+  useEffect(() => {
+    if (state.kind !== "playing" || !isHlsLink(state.url)) return;
+    const element = videoRef.current;
+    if (!element) return;
+    let hls: Hls | null = null;
+    let active = true;
+    const fail = () => { if (active) setState({ kind: "broken" }); };
+    // hls.js first wherever the browser can feed it (MSE): `canPlayType` answers
+    // "maybe" for a playlist even in browsers that cannot decode one, so it is
+    // only trusted where MSE is absent — Safari on iOS, which plays the playlist
+    // natively.
+    if (Hls.isSupported()) {
+      hls = new Hls({ enableWorker: true });
+      hls.on(Hls.Events.ERROR, (_event, data) => { if (data?.fatal) fail(); });
+      hls.loadSource(state.url);
+      hls.attachMedia(element);
+      setSource({ url: state.url, via: "hls" });
+    } else if (element.canPlayType("application/vnd.apple.mpegurl")) {
+      element.src = state.url;
+      element.addEventListener("error", fail);
+      setSource({ url: state.url, via: "src" });
+    } else {
+      fail();
+    }
+    return () => {
+      active = false;
+      element.removeEventListener("error", fail);
+      hls?.destroy();
+    };
+  }, [state]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
@@ -43,6 +86,7 @@ const AnimePlayer: React.FC<AnimePlayerProps> = ({ card, onClose }) => {
     const controller = new AbortController();
     setState({ kind: "loading" });
     setChosen(null);
+    setSource(null);
     fetchAnimeStreamUrl(card.id)
       .then((answer) => {
         if (!active) return;
@@ -68,16 +112,21 @@ const AnimePlayer: React.FC<AnimePlayerProps> = ({ card, onClose }) => {
           style={{ aspectRatio: "16/9", boxShadow: "0 0 60px rgba(0,0,0,0.9), 0 0 0 1px rgba(201,168,76,0.2)" }}
         >
           <span data-anime-src={chosen ?? ""} hidden aria-hidden="true" />
+          <span data-anime-via={source?.via ?? ""} hidden aria-hidden="true" />
           {state.kind === "playing" ? (
             <video
-              src={state.url}
+              ref={videoRef}
+              // A playlist is attached to this element by the effect above; the
+              // plain file is loaded by the attribute.
+              src={isHlsLink(state.url) ? undefined : state.url}
               poster={card.thumbnail}
               controls
               autoPlay
               playsInline
               preload="auto"
               className="w-full h-full block bg-black"
-              onError={() => setState({ kind: "broken" })}
+              onError={() => { if (!isHlsLink(state.url)) setState({ kind: "broken" }); }}
+              onLoadedMetadata={() => { if (!isHlsLink(state.url)) setSource({ url: state.url, via: "src" }); }}
             />
           ) : state.kind === "broken" ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">

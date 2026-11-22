@@ -128,11 +128,17 @@ export async function fetchAnimeRows({
 }
 
 const MEDIA_FILE = /\.(?:mp4|m4v|webm|mov)$/i;
+// The service's watch route answers with an HLS playlist for the same title
+// (`source[].src`, `formate: "hls"`), not with a file. Both are playable, so both
+// count as a link; the player handles whichever shape it is given.
+const HLS_FILE = /\.m3u8$/i;
 
-// The service's watch route answers with the playable file itself. The link is
-// only ever handed to a <video> element — never proxied, never rebuilt, and only
-// when it is a plain https URL that looks like a media file. Anything else is
-// "no stream", which the page then reports instead of guessing.
+const LINK_KEYS = ["url", "file", "videoUrl", "streamUrl", "src", "link", "playUrl", "media", "sources", "source", "data", "video", "result"];
+
+// The first link in the answer that a browser can really play: a plain https URL
+// (no credentials, no fragment) that ends in a media file or an HLS playlist.
+// Nothing is rebuilt, proxied or pulled out of a page — a page URL or a download
+// host stays "no stream", which the player then reports instead of guessing.
 export function animeStreamFrom(payload) {
   const seen = [];
   const walk = (value, depth) => {
@@ -140,7 +146,7 @@ export function animeStreamFrom(payload) {
     if (typeof value === "string") { seen.push(value.trim()); return; }
     if (Array.isArray(value)) { for (const item of value.slice(0, 20)) walk(item, depth + 1); return; }
     if (typeof value !== "object") return;
-    for (const key of ["url", "file", "videoUrl", "streamUrl", "src", "link", "playUrl", "media", "sources", "source", "data", "video", "result"]) {
+    for (const key of LINK_KEYS) {
       if (key in value) walk(value[key], depth + 1);
     }
   };
@@ -150,12 +156,16 @@ export function animeStreamFrom(payload) {
     let url;
     try { url = new URL(raw); } catch { continue; }
     if (url.protocol !== "https:" || url.username || url.password || url.hash) continue;
-    if (!MEDIA_FILE.test(url.pathname)) continue;
+    if (!MEDIA_FILE.test(url.pathname) && !HLS_FILE.test(url.pathname)) continue;
     return url.href;
   }
   return null;
 }
 
+// Which kind of link the player was handed, so it can pick a playback path.
+export const isHlsLink = (url) => typeof url === "string" && HLS_FILE.test((() => {
+  try { return new URL(url).pathname; } catch { return ""; }
+})());
 export async function fetchAnimeStream(id, { base = ANIME_API_BASE, fetchImpl = (...args) => fetch(...args), signal, timeoutMs = 15_000 } = {}) {
   if (!VIDEO_ID.test(id ?? "")) return null;
   try {

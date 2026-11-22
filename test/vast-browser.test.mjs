@@ -29,11 +29,39 @@ export async function signInWithGoogle() {}
 export async function signOutGoogle() {}
 `;
 
-function identityPlugin() {
+// A signed-in member, for the premium cases: the account is an input there, so
+// no account route is contacted and the assertions stay about the player.
+const memberIdentity = `
+const current = { uid: "member-1", email: "member@example.com", displayName: "Member", photoURL: null, getIdToken: async () => "member-token" };
+export function watchFirebaseUser(listener) { queueMicrotask(() => listener(current)); return () => {}; }
+export async function signInWithGoogle() { return current; }
+export async function signOutGoogle() {}
+`;
+const memberAccount = `
+const profile = { uid: "member-1", email: "member@example.com", name: "Member", username: "member", referralCode: "REF-MEMBER1", likedIds: [], savedIds: [], premium: true, backendBase: "https://api-intimora.vercel.app" };
+export async function verifyAccount() { return { exists: true, backend: profile.backendBase }; }
+export async function getMyAccount() { return profile; }
+export async function createAccount() { return profile; }
+export async function toggleAccountVideo() { return profile; }
+export async function getPremiumStatus() { return { status: { active: true, until: 1795400000, remainingSeconds: 9000, referralCode: "REF-MEMBER1", referrals: { total: 0, used: 0, available: 0, availableCodes: [], secondsEach: 9000, hoursEach: 2.5 } }, backend: profile.backendBase }; }
+export async function getPremiumHistory() { return { history: { periods: [], total: { seconds: 0, amountPaise: 0, bySource: {} } }, backend: profile.backendBase }; }
+export async function redeemReferrals() { return { status: null, entry: null }; }
+export async function getReferralTree() { return { direct: [], level2: [] }; }
+export const referralsEnabled = false;
+export function sanitizeReferralTree() { return { direct: [], level2: [] }; }
+`;
+
+function identityPlugin({ signedIn = false } = {}) {
   return {
     name: "vast-test-identity", enforce: "pre",
-    resolveId(id) { if (id === "../services/firebase") return "\0vast-test-identity"; },
-    load(id) { if (id === "\0vast-test-identity") return guestIdentity; },
+    resolveId(id) {
+      if (id === "../services/firebase") return "\0vast-test-identity";
+      if (signedIn && (id === "../services/account-api" || id === "./account-api")) return "\0vast-test-account";
+    },
+    load(id) {
+      if (id === "\0vast-test-identity") return signedIn ? memberIdentity : guestIdentity;
+      if (id === "\0vast-test-account") return memberAccount;
+    },
   };
 }
 
@@ -71,11 +99,11 @@ function vastXml({ skipOffset = "00:00:02", duration = "00:00:30", media = adMed
 </VAST>`;
 }
 
-async function withPlayer({ vast, cached = null, run }) {
+async function withPlayer({ vast, cached = null, premium = null, signedIn = false, run }) {
   const vite = await createViteServer({
     configFile: path.join(root, "vite.config.ts"), logLevel: "silent",
     server: { host: "127.0.0.1", port: 0, strictPort: false },
-    plugins: [identityPlugin()],
+    plugins: [identityPlugin({ signedIn })],
   });
   let browser;
   const requests = [];
@@ -135,8 +163,11 @@ async function withPlayer({ vast, cached = null, run }) {
       if (request.url() === discovery) return route.fulfill({ headers: cors, json: { ok: true, data: { server: backend } } });
       if (url.origin !== backend) return route.continue();
       if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
-      if (url.pathname === "/api/videos" || url.pathname === "/api/search") return route.fulfill({ headers: cors, json: { ok: true, data: { videos: [video], nextCursor: null } } });
-      if (url.pathname === "/api/videos/video-1") return route.fulfill({ headers: cors, json: { ok: true, data: video } });
+      // `premium` lets a test answer the catalogue with a premium shape, chosen
+      // at request time so one page load can be locked and the next unlocked.
+      const item = () => ({ ...video, ...(typeof premium === "function" ? premium() : premium ?? {}) });
+      if (url.pathname === "/api/videos" || url.pathname === "/api/search") return route.fulfill({ headers: cors, json: { ok: true, data: { videos: [item()], nextCursor: null } } });
+      if (url.pathname === "/api/videos/video-1") return route.fulfill({ headers: cors, json: { ok: true, data: item() } });
       if (url.pathname.endsWith("/thumbnail")) return route.fulfill({ headers: cors, contentType: "image/png", body: image });
       if (url.pathname.endsWith("/stream")) return route.fulfill({ headers: { ...cors, "Content-Type": "video/mp4" }, body: clip });
       return route.fulfill({ status: 404, headers: cors, json: { ok: false } });
@@ -358,4 +389,59 @@ test("an ad that cannot autoplay with sound starts muted instead of being droppe
     assert.equal(await page.locator("[data-ad-overlay]").count(), 1, "the pre-roll is still shown");
     await page.close();
   } });
+});
+
+// A premium title never gets a pre-roll — locked (trailer only) or unlocked —
+// and a locked title that has no trailer says so plainly instead of showing an
+// empty player.
+test("a premium title never gets a pre-roll, and a locked one explains itself", options, async () => {
+  const trailer = "https://api-intimora.vercel.app/api/videos/video-1/stream?kind=trailer&t=trailer-token";
+  const stream = "https://api-intimora.vercel.app/api/videos/video-1/stream?t=stream-token";
+  const shapes = [
+    { name: "locked with a trailer", item: { premium: true, locked: true, hasTrailer: true, trailerUrl: trailer, streamUrl: null }, locked: true },
+    { name: "unlocked for a premium member", item: { premium: true, locked: false, hasTrailer: true, trailerUrl: trailer, streamUrl: stream }, locked: false },
+    { name: "locked without a trailer", item: { premium: true, locked: true, hasTrailer: false, trailerUrl: null, streamUrl: null }, blocked: true },
+  ];
+  let shape = shapes[0].item;
+  await withPlayer({
+    vast: () => ({ xml: vastXml() }),
+    premium: () => shape,
+    // A member is signed in; the guest case (sign-in gate) is covered by the
+    // streaming browser test.
+    signedIn: true,
+    run: async ({ context, base, requests }) => {
+      for (const current of shapes) {
+        shape = current.item;
+        const page = await context.newPage();
+        await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+        await page.getByRole("button", { name: /I AM 18/i }).click();
+        await page.locator(".hero-banner__cta").click();
+        const player = page.locator("#player-container");
+        await player.waitFor();
+        if (current.blocked) {
+          await player.getByText(/sirf premium members ke liye/).waitFor();
+          await player.getByText(/Sign in karke premium activate karo/).waitFor();
+          assert.equal(await player.locator("video").count(), 0, `${current.name}: nothing is loaded`);
+        } else {
+          // Playback starts on the click: no ad overlay in between.
+          await page.waitForFunction(() => {
+            const element = document.querySelector("#player-container video");
+            return element && !element.paused;
+          }, undefined, { timeout: 20_000 });
+          if (current.locked) {
+            assert.match(await player.locator("video").getAttribute("src"), /kind=trailer/, `${current.name}: the trailer is what plays`);
+            assert.match(await player.innerText(), /Premium video · abhi sirf trailer/);
+            assert.match(await player.innerText(), /Sign in karke premium activate karo/);
+          } else {
+            assert.match(await player.locator("video").getAttribute("src"), /t=stream-token/, `${current.name}: the issued stream plays`);
+            assert.equal(await player.locator(".video-player__premium-note").count(), 0, `${current.name}: a full video is not labelled a trailer`);
+          }
+        }
+        assert.equal(await page.locator("[data-ad-overlay]").count(), 0, `${current.name}: no pre-roll`);
+        assert.equal(requests.filter((item) => item.kind === "tag").length, 0, `${current.name}: the ad tag was never requested`);
+        assert.equal(requests.filter((item) => item.kind === "creative").length, 0, `${current.name}: no creative was requested`);
+        await page.close();
+      }
+    },
+  });
 });

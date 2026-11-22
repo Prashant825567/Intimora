@@ -31,6 +31,47 @@ const fixtureVideo = {
 };
 
 // The backend's documented premium answers, for the fixture only.
+// A signed-in premium member. The premium cases below are about the links the
+// backend issues, not about the sign-in gate, so they open with an account.
+const memberIdentity = `
+const current = { uid: "member-1", email: "member@example.com", displayName: "Member", photoURL: null, getIdToken: async () => "member-token" };
+export function watchFirebaseUser(listener) { queueMicrotask(() => listener(current)); return () => {}; }
+export async function signInWithGoogle() { return current; }
+export async function signOutGoogle() {}
+`;
+
+// The premium cases are about the links the backend issues, so the account is an
+// input: a signed-in member whose profile is already confirmed. No account route
+// is contacted, and the playback assertions stay about playback.
+const memberAccount = `
+const profile = { uid: "member-1", email: "member@example.com", name: "Member", username: "member", referralCode: "REF-MEMBER1", referredBy: "", createdAt: 1760000000, likedIds: [], savedIds: [], premium: true, backendBase: "https://media-backend.example" };
+export const AccountRequestError = class extends Error {};
+export async function verifyAccount() { return { exists: true, backend: profile.backendBase }; }
+export async function getMyAccount() { return profile; }
+export async function createAccount() { return profile; }
+export async function toggleAccountVideo() { return profile; }
+export async function getPremiumStatus() { return { status: { active: true, until: 1795400000, remainingSeconds: 9000, referralCode: "REF-MEMBER1", referrals: { total: 0, used: 0, available: 0, availableCodes: [], secondsEach: 9000, hoursEach: 2.5 } }, backend: profile.backendBase }; }
+export async function getPremiumHistory() { return { history: { periods: [], total: { seconds: 0, amountPaise: 0, bySource: {} } }, backend: profile.backendBase }; }
+export async function redeemReferrals() { return { status: null, entry: null }; }
+export async function getReferralTree() { return { direct: [], level2: [] }; }
+export const referralsEnabled = false;
+export function sanitizeReferralTree() { return { direct: [], level2: [] }; }
+`;
+
+function memberIdentityPlugin() {
+  return {
+    name: "streaming-test-identity", enforce: "pre",
+    resolveId(id) {
+      if (id === "../services/firebase") return "\0streaming-test-identity";
+      if (id === "../services/account-api" || id === "./account-api") return "\0streaming-test-account";
+    },
+    load(id) {
+      if (id === "\0streaming-test-identity") return memberIdentity;
+      if (id === "\0streaming-test-account") return memberAccount;
+    },
+  };
+}
+
 function premiumVideo(premiumMode, format) {
   const base = { ...fixtureVideo, duration: format === "mp4" ? 30 : 20 };
   if (premiumMode === "active") {
@@ -61,7 +102,7 @@ async function availablePort() {
   return port;
 }
 
-async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null, premiumMode = null } = {}) {
+async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null, premiumMode = null, signedIn = false } = {}) {
   const clip = clips[format];
   // `premiumMode` is the backend's own premium contract:
   //   "locked"        — premium video, no active window, a trailer exists
@@ -103,6 +144,11 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         res.end(JSON.stringify(body));
       };
       if (url.pathname === "/api/get-server") return json({ ok: true, data: { server: backend } });
+      if (url.pathname === "/api/auth/verify") return json({ ok: true, data: { exists: true } });
+      if (url.pathname === "/api/auth/me") return json({ ok: true, data: { user: { uid: "member-1", email: "member@example.com", name: "Member", username: "member", referralCode: "REF-MEMBER1", likedVideos: [], savedVideos: [] } } });
+      if (url.pathname === "/api/premium/status") return json({ ok: true, data: { active: true, until: 1_795_400_000, remainingSeconds: 9000, referralCode: "REF-MEMBER1", referrals: { total: 0, used: 0, available: 0, availableCodes: [], secondsEach: 9000, hoursEach: 2.5 } } });
+      if (url.pathname === "/api/premium/history") return json({ ok: true, data: { periods: [], total: { seconds: 0, amountPaise: 0, bySource: {} } } });
+      if (url.pathname === "/api/user/referrals") return json({ ok: true, data: { tree: { code: "REF-MEMBER1", direct: [], level2: [] } } });
       if (url.pathname === "/api/videos") {
         if (state.failCatalog > 0) {
           state.failCatalog -= 1;
@@ -191,8 +237,12 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
     vite = await createViteServer({
       configFile: path.join(root, "vite.config.ts"), logLevel: "silent",
       server: { host: "127.0.0.1", port: await availablePort(), strictPort: true },
+      // The signed-in fixture replaces the identity module outright; without it the
+      // player is a guest, which is the other case the tests cover.
+      ...(signedIn ? { plugins: [memberIdentityPlugin()] } : {}),
     });
     await vite.listen();
+
     browser = await chromium.launch({
       executablePath: browserPath, headless: true,
       args: ["--no-sandbox", "--disable-dev-shm-usage", "--no-proxy-server", "--ignore-certificate-errors", "--autoplay-policy=user-gesture-required", "--host-resolver-rules=MAP media-backend.example 127.0.0.1, MAP media-discovery.example 127.0.0.1, MAP cdn-media.example 127.0.0.1"],
@@ -627,6 +677,12 @@ test("a CDN source that cannot play falls back to the byte stream", options, asy
     await watch.click();
     const media = page.locator("#player-container video");
     await media.waitFor();
+    // Playback starts on the click (this build has no pre-roll), so the media
+    // element is running by the time the URL switch is asserted.
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && video.getAttribute("src");
+    }, undefined, { timeout: 20_000 });
 
     // The catalog's CDN URL is what the media element asks for first; this file
     // host answers with a download page, so it fails and the byte stream takes
@@ -680,11 +736,70 @@ test("a playable CDN source is used and the byte stream stays untouched", option
   } finally { await fixture.close(); }
 });
 
+// A visitor who is not signed in is asked to sign in before a premium video
+// plays at all — trailer or no trailer — and the button opens the sign-in page.
+test("a premium video asks a guest to sign in before anything plays", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await player.getByText("Sign in first to watch this premium video").waitFor();
+    assert.equal(await player.locator("video").count(), 0, "nothing is loaded for a guest");
+    assert.equal(await player.locator(".video-player__signin").innerText(), "Sign in to watch");
+    assert.deepEqual(streamCalls(fixture.state), [], "not even the trailer is requested");
+    assert.deepEqual(errors, []);
+    await player.getByRole("button", { name: "Sign in to watch" }).click();
+    // The page with the Google button, not a dead end.
+    await page.getByRole("heading", { name: "Sign in to your account" }).waitFor();
+    assert.equal(new URL(page.url()).pathname, "/login");
+    await page.getByRole("button", { name: "Sign in with Google" }).waitFor();
+    assert.equal(await page.locator("#player-container").count(), 0, "the player is closed");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// A premium video without a trailer is no different for a guest: the metadata the
+// catalogue sent (poster, title) still arrives and is drawn, and the player shows
+// the sign-in message with nothing loaded behind it.
+test("a guest still sees a premium video's metadata, then the sign-in message", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked-noTrailer" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    // The card itself is drawn from the catalogue's metadata.
+    const card = page.locator(".video-card").first();
+    await card.waitFor();
+    assert.match(await card.innerText(), /Streaming fixture/, "the title comes from the catalogue");
+    assert.equal(await card.locator(".video-card__image").getAttribute("src"), `${fixture.backend}/api/videos/sample-1/thumbnail`);
+    assert.ok(fixture.state.calls.some((call) => call.path === "/api/videos/sample-1/thumbnail"), "the poster was fetched");
+
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await player.getByText("Sign in first to watch this premium video").waitFor();
+    // The player keeps the metadata visible, and there is no trailer note because
+    // there is no trailer to describe.
+    assert.equal(await player.getByText("Streaming fixture").count() >= 1, true, "the title is still on screen");
+    assert.match(await player.locator("img").first().getAttribute("src"), /thumbnail/, "the poster is the backdrop");
+    assert.equal(await player.locator("video").count(), 0, "no media element at all");
+    assert.equal(await player.locator(".video-player__trailer-note").count(), 0);
+    assert.deepEqual(streamCalls(fixture.state), [], "nothing is requested");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
 // The backend's premium contract, seen from the browser: a locked video only ever
 // offers its trailer, and an active window plays the tokenised stream it was
 // given — the app never rebuilds either link.
 test("a locked premium video plays its trailer and never asks for the stream", options, async () => {
-  const fixture = await createFixture({ premiumMode: "locked" });
+  const fixture = await createFixture({ premiumMode: "locked", signedIn: true });
   try {
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
@@ -709,7 +824,7 @@ test("a locked premium video plays its trailer and never asks for the stream", o
 });
 
 test("a locked premium video without a trailer explains itself instead of loading anything", options, async () => {
-  const fixture = await createFixture({ premiumMode: "locked-noTrailer" });
+  const fixture = await createFixture({ premiumMode: "locked-noTrailer", signedIn: true });
   try {
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
@@ -718,7 +833,9 @@ test("a locked premium video without a trailer explains itself instead of loadin
     const player = page.locator("#player-container");
     await player.waitFor();
     assert.equal(await player.locator("video").count(), 0, "nothing is played");
-    assert.match(await player.innerText(), /premium members ke liye hai/i);
+    assert.match(await player.innerText(), /Premium video · sirf premium members ke liye/);
+    assert.match(await player.innerText(), /Sign in karke premium activate karo/);
+    assert.match(await player.innerText(), /trailer bhi available nahi hai/i);
     assert.deepEqual(streamCalls(fixture.state), [], "the stream is never requested");
     assert.deepEqual(errors, []);
     await context.close();
@@ -726,7 +843,7 @@ test("a locked premium video without a trailer explains itself instead of loadin
 });
 
 test("an active premium window plays the tokenised stream the backend issued", options, async () => {
-  const fixture = await createFixture({ premiumMode: "active" });
+  const fixture = await createFixture({ premiumMode: "active", signedIn: true });
   try {
     const context = await fixture.browser.newContext();
     const { page, errors } = await openHome(fixture, context);
