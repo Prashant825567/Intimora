@@ -78,6 +78,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // sign-in. The backend stays the authority on who may watch; this only stops a
   // visitor who is not signed in from being shown a premium video player.
   const signInGate = premiumTitle && !signedIn;
+  // A premium tile that cannot give a guest anything (no trailer) is the same
+  // gate: the player shows the sign-in message and never a transport UI.
+  const gateShown = signInGate || (premiumTitle && !signedIn);
   const [source, setSource] = useState(welcomeSource);
   const sourceSwapped = useRef(false);
   const resumeAt = useRef(0);
@@ -423,7 +426,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
           onMouseLeave={() => { if (playing && !adPlaying) setShowControls(false); }}
         >
           {signInGate || lockedBlocked ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+            // One message, nothing else: the poster is a dim backdrop, and there
+            // is no transport UI (no play button, timeline or volume) because a
+            // visitor who may not watch should not see a player pretending to be
+            // one.
+            <div className="video-player__gate absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <img src={video.thumbnail} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
               <p className="relative text-white font-bold">{video.title}</p>
               {signInGate ? (
@@ -555,7 +562,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             </div>
           )}
 
-          {/* Top controls */}
+          {/* Top controls — only when there is something to control. Behind the
+              sign-in gate the message is the only thing on screen. */}
+          {!gateShown && !lockedBlocked && (
           <div
             className={`video-player__top absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${adPlaying || !showControls ? "opacity-0 pointer-events-none" : "opacity-100"}`}
             style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)" }}
@@ -573,8 +582,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
               <X className="w-5 h-5" />
             </button>
           </div>
+          )}
 
           {/* Bottom controls */}
+          {!gateShown && !lockedBlocked && (
           <div
             data-controls={adPlaying || !showControls ? "hidden" : "visible"}
             className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${adPlaying || !showControls ? "opacity-0 pointer-events-none" : "opacity-100"}`}
@@ -653,6 +664,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
               </button>
             </div>
           </div>
+          )}
         </div>
 
         {/* Video info & actions */}

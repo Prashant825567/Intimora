@@ -749,6 +749,10 @@ test("a premium video asks a guest to sign in before anything plays", options, a
     await player.waitFor();
     await player.getByText("Sign in first to watch this premium video").waitFor();
     assert.equal(await player.locator("video").count(), 0, "nothing is loaded for a guest");
+    // The message is the whole player: no play button over it, no transport UI.
+    assert.equal(await player.getByRole("button", { name: "Play video" }).count(), 0, "no play button over the message");
+    assert.equal(await player.locator('[data-controls]').count(), 0, "no timeline or volume for a video that cannot play");
+    assert.equal(await player.getByRole("slider", { name: "Seek video" }).count(), 0);
     assert.equal(await player.locator(".video-player__signin").innerText(), "Sign in to watch");
     assert.deepEqual(streamCalls(fixture.state), [], "not even the trailer is requested");
     assert.deepEqual(errors, []);
@@ -788,6 +792,8 @@ test("a guest still sees a premium video's metadata, then the sign-in message", 
     assert.equal(await player.getByText("Streaming fixture").count() >= 1, true, "the title is still on screen");
     assert.match(await player.locator("img").first().getAttribute("src"), /thumbnail/, "the poster is the backdrop");
     assert.equal(await player.locator("video").count(), 0, "no media element at all");
+    assert.equal(await player.getByRole("button", { name: "Play video" }).count(), 0, "no play button over the message");
+    assert.equal(await player.locator('[data-controls]').count(), 0, "no transport UI");
     assert.equal(await player.locator(".video-player__trailer-note").count(), 0);
     assert.deepEqual(streamCalls(fixture.state), [], "nothing is requested");
     assert.deepEqual(errors, []);
