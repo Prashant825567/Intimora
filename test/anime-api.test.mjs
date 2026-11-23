@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, animeStreamFrom, fetchAnimeRows, fetchAnimeStream, isHlsLink, parseAnimeResults } from "../src/services/anime-api.mjs";
+import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, animeStreamFrom, fetchAnimeRows, fetchAnimeStream, hlsPlayable, isHlsLink, parseAnimeResults } from "../src/services/anime-api.mjs";
 
 // The service answers with the source's own list rows. Only metadata is read:
 // id, title, poster, duration — never a media URL.
@@ -19,8 +19,8 @@ const recent = {
 test("a list row becomes cards with a derived embed URL, never a copied media link", () => {
   const cards = parseAnimeResults(recent);
   assert.deepEqual(cards, [
-    { id: "1JdXN6yeMdN", title: "Reality 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", duration: "07:03", embedUrl: "https://www.hentaicity.com/embed/1JdXN6yeMdN" },
-    { id: "OneWife001x", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", duration: "23:36", embedUrl: "https://www.hentaicity.com/embed/OneWife001x" },
+    { id: "now-that-i-can-control-reality-6-1JdXN6yeMdN", code: "1JdXN6yeMdN", title: "Reality 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", duration: "07:03", embedUrl: "https://www.hentaicity.com/embed/1JdXN6yeMdN" },
+    { id: "one-wife-1-OneWife001x", code: "OneWife001x", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", duration: "23:36", embedUrl: "https://www.hentaicity.com/embed/OneWife001x" },
   ]);
   assert.equal(cards.some((card) => JSON.stringify(card).includes("preview.webp")), false, "the hover trailer is not a card field");
   // A bare id works too; a slug without a usable id does not.
@@ -42,7 +42,8 @@ test("only a plain https poster is accepted, and a bad card is dropped not repai
       { id: "extra-1Good00003", title: "  Spaced   out  ", thumbnail: "https://cdn1.images.hentaicity.com/f/main.jpg", duration: "nonsense" },
     ] },
   });
-  assert.deepEqual(cards.map((card) => card.id), ["1Good00001", "1Good00003"], "a bare id is kept whole");
+  assert.deepEqual(cards.map((card) => card.id), ["good-1Good00001", "extra-1Good00003"], "the id the API sent is kept whole");
+  assert.deepEqual(cards.map((card) => card.code), ["1Good00001", "1Good00003"]);
   assert.equal(cards[1].title, "Spaced out");
   assert.equal(cards[1].duration, "");
   for (const broken of [null, undefined, {}, "nope", { data: null }, { data: { results: "x" } }]) {
@@ -62,7 +63,7 @@ test("the rows come back recent first, then popular, and a dead row costs only i
   });
   assert.deepEqual(asked, [`${ANIME_API_BASE}/api/hen/city/recent`, `${ANIME_API_BASE}/api/hen/city/popular/1`]);
   assert.deepEqual(rows.map((row) => row.title), ["Recent", "Popular"]);
-  assert.deepEqual(rows[1].cards.map((card) => card.id), ["1Trend0001x"]);
+  assert.deepEqual(rows[1].cards.map((card) => card.id), ["trending-1Trend0001x"]);
 
   const onlyRecent = await fetchAnimeRows({
     fetchImpl: async (url) => {
@@ -74,6 +75,36 @@ test("the rows come back recent first, then popular, and a dead row costs only i
 
   const nothing = await fetchAnimeRows({ fetchImpl: async () => { throw new TypeError("Failed to fetch"); } });
   assert.deepEqual(nothing, [], "no rows at all is an empty page, not a crash");
+});
+
+test("the card keeps the API's whole slug and the watch route asks for it whole", async () => {
+  const listed = {
+    status: "success",
+    data: { results: [
+      { id: "now-that-i-can-control-reality-with-a-mouse-cursor-i-m-gonna-click-away-on-the-girls-6-1JdXN6yeMdN", title: "Reality 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", duration: "HD07:03" },
+    ] },
+  };
+  const cards = parseAnimeResults(listed);
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].id, "now-that-i-can-control-reality-with-a-mouse-cursor-i-m-gonna-click-away-on-the-girls-6-1JdXN6yeMdN",
+    "the whole slug travels onward");
+  assert.equal(cards[0].code, "1JdXN6yeMdN", "the short tail is kept only for the embed/poster helpers");
+  assert.equal(cards[0].embedUrl, "https://www.hentaicity.com/embed/1JdXN6yeMdN");
+
+  const asked = [];
+  const url = await fetchAnimeStream(cards[0].id, {
+    fetchImpl: async (target) => {
+      asked.push(String(target));
+      return Response.json({ status: "success", data: { source: [{ src: "https://hls.hentaicity.com/a/master.m3u8", formate: "hls" }] } });
+    },
+  });
+  assert.deepEqual(asked, [`${ANIME_API_BASE}/api/hen/city/watch/${cards[0].id}`],
+    "the watch route is asked with the full slug — the short tail is a 404");
+  assert.equal(url, "https://hls.hentaicity.com/a/master.m3u8");
+
+  // A slug that is not a plain slug is refused before any request.
+  assert.equal(await fetchAnimeStream("../../etc/passwd", { fetchImpl: async () => { throw new Error("no"); } }), null);
+  assert.equal(await fetchAnimeStream("a".repeat(201), { fetchImpl: async () => { throw new Error("no"); } }), null);
 });
 
 test("the watch route's own link is the stream, and only a plain https media file qualifies", async () => {
@@ -115,8 +146,17 @@ test("the watch route's own link is the stream, and only a plain https media fil
 
 test("search runs on the cards the page already has", () => {
   const cards = parseAnimeResults(recent);
-  assert.deepEqual(animeSearch(cards, "one wife").map((card) => card.id), ["OneWife001x"]);
-  assert.deepEqual(animeSearch(cards, "REALITY").map((card) => card.id), ["1JdXN6yeMdN"]);
+  assert.deepEqual(animeSearch(cards, "one wife").map((card) => card.code), ["OneWife001x"]);
+  assert.deepEqual(animeSearch(cards, "REALITY").map((card) => card.code), ["1JdXN6yeMdN"]);
   assert.deepEqual(animeSearch(cards, "   "), []);
   assert.deepEqual(animeSearch(cards, "reality wife"), [], "every word has to match");
+});
+
+test("a playlist whose segments are refused is reported, not played", async () => {
+  const url = "https://hls.hentaicity.com/a/master.m3u8?t=1";
+  assert.equal(await hlsPlayable(url, { fetchImpl: async () => new Response("#EXTM3U", { status: 200 }) }), true);
+  assert.equal(await hlsPlayable(url, { fetchImpl: async () => new Response("denied", { status: 403 }) }), false, "a refused manifest");
+  assert.equal(await hlsPlayable(url, { fetchImpl: async () => { throw new TypeError("Failed to fetch"); } }), false, "a CORS refusal");
+  assert.equal(await hlsPlayable("https://hls.hentaicity.com/a/clip.mp4", { fetchImpl: async () => new Response("", { status: 200 }) }), false, "a plain file is not a playlist check");
+  assert.equal(await hlsPlayable("http://hls.hentaicity.com/a/master.m3u8", { fetchImpl: async () => new Response("", { status: 200 }) }), false);
 });

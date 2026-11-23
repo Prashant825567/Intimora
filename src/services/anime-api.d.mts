@@ -26,6 +26,7 @@ export function fetchAnimeRows(options?: {
 }): Promise<AnimeList[]>;
 export function animeStreamFrom(payload: unknown): string | null;
 export function isHlsLink(url: string | null | undefined): boolean;
+export function hlsPlayable(url: string, options?: Record<string, unknown>): Promise<boolean>;
 export function fetchAnimeStream(id: string, options?: {
   base?: string;
   fetchImpl?: typeof fetch;

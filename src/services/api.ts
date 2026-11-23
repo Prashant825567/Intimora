@@ -13,7 +13,7 @@ import {
 } from "./php-session.mjs";
 import { recordDiagnostic } from "./diagnostics.mjs";
 import { playbackSources } from "./media-source.mjs";
-import { fetchAnimeStream } from "./anime-api.mjs";
+import { fetchAnimeStream, hlsPlayable, isHlsLink } from "./anime-api.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
 const visitor = createVisitorRequest({
@@ -288,12 +288,16 @@ export const resolveBackendTarget = (pinned?: string) => visitor.resolveTarget(p
 // answer is the only source of an anime stream. The link is handed to the player
 // exactly as it arrived — nothing is proxied, rebuilt or cached — and the
 // <video> element then talks to the source directly.
-export type AnimeStreamReason = "ok" | "no-id" | "no-link" | "unreachable";
+// `refused` is the case the backend's own playlist shows: the manifest is sent,
+// but the source host denies the segments to this page (referrer/origin check).
+export type AnimeStreamReason = "ok" | "no-id" | "no-link" | "unreachable" | "refused";
 
 export async function fetchAnimeStreamUrl(id: string): Promise<{ url: string | null; reason: AnimeStreamReason }> {
-  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) return { url: null, reason: "no-id" };
+  if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(id)) return { url: null, reason: "no-id" };
   const url = await fetchAnimeStream(id);
-  return url ? { url, reason: "ok" } : { url: null, reason: "no-link" };
+  if (!url) return { url: null, reason: "no-link" };
+  if (isHlsLink(url) && !(await hlsPlayable(url))) return { url: null, reason: "refused" };
+  return { url, reason: "ok" };
 }
 
 export const fetchVideos = (cursor?: BackendCursor | null, limit?: number) => {

@@ -17,6 +17,8 @@ const STREAM = "https://cdn.anime.example/clip/index-720.mp4";
 // fixture serves a genuine three-segment one (see test/fixtures/README.md).
 const HLS_DIR = path.join(root, "test/fixtures/hls");
 const HOLLOW = "https://hls.anime.example/_hls/flv/0807/38331/,default,.mp4.urlset/master.m3u8?validfrom=1&hash=abc%3D";
+// The source can also refuse the playlist outright (403 / a CORS rejection).
+const REFUSED = "https://refused.anime.example/_hls/flv/0001/11111/master.m3u8?validfrom=1&hash=def";
 const SEGMENTS = ["seg0.bin", "seg1.bin", "seg2.bin"];
 const poster = '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="480" height="270" fill="#6b4f8a"/></svg>';
 
@@ -28,6 +30,7 @@ const recent = {
   data: { provider: "hentaicity", type: "recent", results: [
     { id: "reality-control-6-1JdXN6yeMdN", title: "Reality control 6", thumbnail: "https://cdn1.images.hentaicity.com/videos/0807/38331/main.jpg", duration: "HD07:03" },
     { id: "one-wife-1-OneWife001x", title: "One Wife 1", thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", duration: "23:36" },
+    { id: "refused-title-9Refused01", title: "Refused title", thumbnail: "https://cdn1.images.hentaicity.com/videos/0001/11111/main.jpg", duration: "03:00" },
   ] },
 };
 const popular = {
@@ -77,6 +80,7 @@ test("anime cards come from the live anime API, recent before popular, and play 
     const animeRequests = [];
     const streamRequests = [];
     const hlsRequests = [];
+    const refusedRequests = [];
     // What the player itself asks the source for, recorded at the network layer.
     await context.route("**/*", async (route) => {
       const request = route.request();
@@ -94,7 +98,11 @@ test("anime cards come from the live anime API, recent before popular, and play 
           // The first title answers with the playlist the service really sends;
           // the second with a plain file, so both shapes are covered.
           const id = url.pathname.split("/").pop();
-          const hls = id === "1JdXN6yeMdN";
+          // The route is asked with the whole slug; the id's tail picks the shape.
+          const hls = id.endsWith("-1JdXN6yeMdN");
+          if (id.endsWith("-9Refused01")) {
+            return route.fulfill({ headers, json: { status: "success", data: { id, source: [{ src: REFUSED, formate: "hls" }] } } });
+          }
           return route.fulfill({ headers, json: { status: "success", data: {
             id,
             source: hls
@@ -110,6 +118,10 @@ test("anime cards come from the live anime API, recent before popular, and play 
         return route.fulfill({ contentType: "text/html", body: "<html><body>partner player</body></html>" });
       }
       if (url.hostname === "cdn1.images.hentaicity.com") return route.fulfill({ contentType: "image/svg+xml", body: poster });
+      if (url.hostname === "refused.anime.example") {
+        refusedRequests.push(url.pathname);
+        return route.fulfill({ status: 403, headers, body: "denied" });
+      }
       if (url.hostname === "hls.anime.example") {
         hlsRequests.push(url.pathname);
         if (url.pathname.endsWith(".m3u8")) {
@@ -141,7 +153,7 @@ test("anime cards come from the live anime API, recent before popular, and play 
     assert.equal(await desiRow.locator(".video-card--anime").count(), 0, "no anime card in the Desi row");
     const allAnimeRow = page.getByRole("region", { name: "Anime videos" });
     await allAnimeRow.waitFor();
-    assert.equal(await allAnimeRow.locator(".video-card--anime").count(), 2, "the Anime row holds the recent cards");
+    assert.equal(await allAnimeRow.locator(".video-card--anime").count(), 3, "the Anime row holds the recent cards");
 
     await page.getByRole("button", { name: "Anime", exact: true }).click();
     await page.getByRole("heading", { name: "Anime", exact: true }).waitFor();
@@ -154,8 +166,8 @@ test("anime cards come from the live anime API, recent before popular, and play 
     await recentRow.waitFor();
     await popularRow.waitFor();
     assert.deepEqual(animeRequests, ["/api/hen/city/recent", "/api/hen/city/popular/1"], "recent is asked for first");
-    assert.equal(await page.locator(".video-card--anime").count(), 3, "one title sits in both rows");
-    assert.deepEqual(await recentRow.locator(".video-card--anime .video-card__title").allInnerTexts(), ["Reality control 6", "One Wife 1"]);
+    assert.equal(await page.locator(".video-card--anime").count(), 4, "one title sits in both rows, so four cards for five rows");
+    assert.deepEqual(await recentRow.locator(".video-card--anime .video-card__title").allInnerTexts(), ["Reality control 6", "One Wife 1", "Refused title"]);
     assert.deepEqual(await popularRow.locator(".video-card--anime .video-card__title").allInnerTexts(), ["One Wife 1"]);
     assert.equal(await page.locator("h3", { hasText: "Top Rated" }).count(), 0, "a row the API did not send is never invented");
     assert.equal(await page.locator(".video-card--anime .video-card__badge").first().innerText(), "ANIME");
@@ -193,7 +205,7 @@ test("anime cards come from the live anime API, recent before popular, and play 
     assert.equal(await dialog.getByText(/no playable file/i).count(), 0, "a playlist is a playable file, not a missing one");
     assert.match(await dialog.locator("video").getAttribute("src"), /^blob:/, "the playlist is fed to the element through hls.js (MediaSource), never as a src URL");
     assert.equal(await dialog.locator("iframe").count(), 0, "no embed frame is used any more");
-    assert.ok(streamRequests.length >= 1 && streamRequests.every((path) => path === "/api/hen/city/watch/1JdXN6yeMdN"),
+    assert.ok(streamRequests.length >= 1 && streamRequests.every((path) => path === "/api/hen/city/watch/reality-control-6-1JdXN6yeMdN"),
       `the watch route is asked for that id (got ${JSON.stringify(streamRequests)})`);
     assert.deepEqual(frames, [], "no partner/embed page is loaded for a click");
     await page.keyboard.press("Escape");
@@ -212,6 +224,18 @@ test("anime cards come from the live anime API, recent before popular, and play 
     assert.equal(await page.locator("[data-anime-via]").getAttribute("data-anime-via"), "", "a plain file needs no playlist reader");
     await page.keyboard.press("Escape");
     await fileDialog.waitFor({ state: "detached" });
+
+    // A playlist the source refuses (403 / CORS) is reported instead of leaving a
+    // stuck spinner: the link was fetched once to check, and nothing plays.
+    await page.locator(".video-card--anime").filter({ hasText: "Refused title" }).first().click();
+    const refusedDialog = page.getByRole("dialog", { name: "Anime player" });
+    await refusedDialog.waitFor();
+    await refusedDialog.getByText(/video source hamari site ko nahi de raha/i).waitFor({ timeout: 20_000 });
+    assert.ok(refusedRequests.length >= 1, "the playlist was checked once");
+    assert.equal(await refusedDialog.locator("video").count(), 0, "nothing is mounted");
+    assert.equal(await page.locator("[data-anime-src]").getAttribute("data-anime-src"), "", "no link was played");
+    await page.keyboard.press("Escape");
+    await refusedDialog.waitFor({ state: "detached" });
 
     // Search matches the cards this page already loaded, in its own section —
     // no query leaves our origin.
