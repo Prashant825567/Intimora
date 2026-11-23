@@ -46,7 +46,14 @@ export async function signOutGoogle() {}
 const memberAccount = `
 const profile = { uid: "member-1", email: "member@example.com", name: "Member", username: "member", referralCode: "REF-MEMBER1", referredBy: "", createdAt: 1760000000, likedIds: [], savedIds: [], premium: true, backendBase: "https://media-backend.example" };
 export const AccountRequestError = class extends Error {};
-export async function verifyAccount() { return { exists: true, backend: profile.backendBase }; }
+export async function verifyAccount() {
+  // The test can hold the check open: the account stays "being checked" until it
+  // sets __accountReleased.
+  while (globalThis.__accountHold === true && globalThis.__accountReleased !== true) {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return { exists: true, backend: profile.backendBase };
+}
 export async function getMyAccount() { return profile; }
 export async function createAccount() { return profile; }
 export async function toggleAccountVideo() { return profile; }
@@ -102,7 +109,7 @@ async function availablePort() {
   return port;
 }
 
-async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null, premiumMode = null, signedIn = false } = {}) {
+async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null, premiumMode = null, signedIn = false, holdAccount = false } = {}) {
   const clip = clips[format];
   // `premiumMode` is the backend's own premium contract:
   //   "locked"        — premium video, no active window, a trailer exists
@@ -251,6 +258,9 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
     return {
       state, browser, base, backend, discovery, clip,
       cdnUrl: video.cdnUrl, bytesUrl: `${backend}/api/videos/sample-1/stream`,
+      holdAccount,
+      // The member's account check is held open (see the stub above) until this.
+      async releaseAccount(page) { await page.evaluate(() => { globalThis.__accountReleased = true; }); },
       releaseMedia() {
         state.holdMedia = false;
         for (const { res, body } of state.pending.splice(0)) if (!res.destroyed) res.end(body);
@@ -796,6 +806,49 @@ test("a guest still sees a premium video's metadata, then the sign-in message", 
     assert.equal(await player.locator('[data-controls]').count(), 0, "no transport UI");
     assert.equal(await player.locator(".video-player__trailer-note").count(), 0);
     assert.deepEqual(streamCalls(fixture.state), [], "nothing is requested");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// The account check is asynchronous, and a premium video is gated until it ends:
+// the sign-in notice is on screen from the first frame, no play button appears in
+// the meantime, and nothing is requested. A signed-in member is never shown it.
+test("a premium video shows the sign-in notice while the account is still being checked", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked", signedIn: true, holdAccount: true });
+  try {
+    const context = await fixture.browser.newContext();
+    // Installed before any app module loads, so the very first account check is
+    // the one that stays open.
+    await context.addInitScript(() => { globalThis.__accountHold = true; globalThis.__accountReleased = false; });
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await player.getByText("Sign in first to watch this premium video").waitFor();
+    // While the check runs: no transport UI, nothing requested, and the button is
+    // not yet a trap for a member who is in fact signed in.
+    const button = player.locator(".video-player__signin");
+    assert.equal(await button.getAttribute("aria-busy"), "true");
+    assert.equal(await button.innerText(), "Checking your account…");
+    assert.equal(await player.getByRole("button", { name: "Play video" }).count(), 0);
+    assert.equal(await player.locator("video").count(), 0);
+    assert.deepEqual(streamCalls(fixture.state), []);
+    // The check finishes: the member's trailer plays, and the notice is gone.
+    await fixture.releaseAccount(page);
+    // The gate lifts on its own: the notice is replaced by the member's player,
+    // with the trailer the backend issued.
+    await page.waitForFunction(() => !document.querySelector(".video-player__signin"), undefined, { timeout: 20_000 });
+    assert.equal(await page.locator(".video-player__signin").count(), 0, "no sign-in notice for a member");
+    assert.match(await player.locator("video").getAttribute("src"), /kind=trailer/);
+    // A browser may not allow the deferred start without a fresh gesture (the
+    // click happened before the check answered); the play button is right there.
+    await player.getByRole("button", { name: "Play video" }).first().click();
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused;
+    }, undefined, { timeout: 20_000 });
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }

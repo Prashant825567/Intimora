@@ -28,9 +28,13 @@ interface VideoPlayerProps {
   onLike: (video: Video) => void;
   onSave: (video: Video) => void;
   actionError: string;
-  // Whether an account is signed in. A premium video is for members, so a guest
-  // is asked to sign in first — with a button that goes to the sign-in page.
+  // Whether an account is signed in, and whether that has been established yet.
+  // A premium video is for members, so a guest is asked to sign in first — with a
+  // button that goes to the sign-in page. While the account is still being checked
+  // the same notice stays up, so a signed-in visitor never sees a play button for
+  // a premium video, not even for the moment the check takes.
   signedIn: boolean;
+  accountChecking: boolean;
   onSignIn: () => void;
 }
 
@@ -52,11 +56,13 @@ function preloadHint(): "auto" | "metadata" {
     ? "metadata" : "auto";
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, onSignIn }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, accountChecking, onSignIn }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const playAttempt = useRef(0);
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A play request that arrived while the sign-in gate was up.
+  const pendingStart = useRef(false);
   const [preload] = useState(preloadHint);
   // The URL a media element is actually loading. It is the CDN file when the
   // backend offered one, and it moves to the byte stream if that link fails.
@@ -77,10 +83,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // asks for a sign-in first, and the button opens the page that carries Google
   // sign-in. The backend stays the authority on who may watch; this only stops a
   // visitor who is not signed in from being shown a premium video player.
-  const signInGate = premiumTitle && !signedIn;
+  // Until the account check finishes, a premium video is treated as gated: the
+  // notice is on screen from the first frame and nothing is requested behind it.
+  const signInGate = premiumTitle && (!signedIn || accountChecking);
   // A premium tile that cannot give a guest anything (no trailer) is the same
   // gate: the player shows the sign-in message and never a transport UI.
-  const gateShown = signInGate || (premiumTitle && !signedIn);
+  const gateShown = signInGate;
   const [source, setSource] = useState(welcomeSource);
   const sourceSwapped = useRef(false);
   const resumeAt = useRef(0);
@@ -262,8 +270,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // not answered within the short grace window, playback begins instead, so an
   // ad server can never block the video.
   const startPlayback = (v: HTMLVideoElement, automatic = false) => {
-    // Nothing starts behind the sign-in gate: no trailer, no stream, no ad.
-    if (signInGate) return;
+    // Nothing starts behind the sign-in gate: no trailer, no stream, no ad. The
+    // click is remembered though — if the gate lifts because the account check
+    // found a member, playback starts then without a second click.
+    if (signInGate) { pendingStart.current = true; return; }
     wantsPlay.current = true;
     const attempt = ++playAttempt.current;
     // No pre-roll for a premium title: playback starts on the click, with the
@@ -312,6 +322,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     }
     playContent(v, false, ++playAttempt.current);
   };
+
+  // The gate lifts when the account check says "member": whatever was asked for
+  // while it was up now starts (the trailer of a premium title, never an ad).
+  useEffect(() => {
+    if (signInGate || !pendingStart.current || !videoRef.current) return;
+    pendingStart.current = false;
+    startPlayback(videoRef.current, true);
+    // `startPlayback` reads the current state on every render; re-running on it
+    // would restart playback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signInGate]);
 
   useLayoutEffect(() => {
     // This commit follows the user's play click; shared links skip this step.
@@ -439,13 +460,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
                   <p className="relative max-w-sm text-gray-300 text-sm">
                     Premium video sirf sign-in kiye hue premium members ke liye hai. Sign in karo, premium activate karo — phir yahi video chalti hai.
                   </p>
+                  {/* The button only acts once the account check has finished, so a
+                      signed-in member is never bounced to the sign-in page. */}
                   <button
                     type="button"
-                    onClick={onSignIn}
-                    className="video-player__signin relative mt-2 rounded-full px-5 py-2 text-sm font-bold"
+                    onClick={() => { if (!accountChecking) onSignIn(); }}
+                    disabled={accountChecking}
+                    aria-busy={accountChecking || undefined}
+                    className="video-player__signin relative mt-2 rounded-full px-5 py-2 text-sm font-bold disabled:opacity-70"
                     style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
                   >
-                    Sign in to watch
+                    {accountChecking ? "Checking your account…" : "Sign in to watch"}
                   </button>
                 </>
               ) : (

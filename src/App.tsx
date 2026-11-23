@@ -747,7 +747,7 @@ function App() {
         {!accountPage && submittedQuery === null && __INTIMORA_PARTNER_MODE__ === "embed" && <PartnerEmbed mode="embed" url={__INTIMORA_PARTNER_EMBED__} />}
       </main>
       <Footer />
-      {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={closeVideo} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} signedIn={account.status === "ready"} onSignIn={signInForVideo} />}
+      {activeVideo && <VideoPlayer key={`${activeVideo.backendBase}:${activeVideo.id}:${activeVideo.videoUrl}`} video={liveLikes.withCount(activeVideo)} startOnOpen={startVideoOnOpen} onClose={closeVideo} onShare={(video) => { setShareVideo(video); setActiveVideo(null); }} liked={account.isLiked(activeVideo.id)} saved={account.isSaved(activeVideo.id)} likePending={account.pending.has(`like:${activeVideo.id}`)} savePending={account.pending.has(`save:${activeVideo.id}`)} onLike={handleLike} onSave={handleSave} actionError={actionError} signedIn={account.status === "ready"} accountChecking={account.status === "checking"} onSignIn={signInForVideo} />}
       {activeSponsored && <PartnerPlayer card={activeSponsored} onClose={() => setActiveSponsored(null)} />}
       {activeAnime && <AnimePlayer card={activeAnime} onClose={() => setActiveAnime(null)} />}
       {shareVideo && <ShareModal video={shareVideo} onClose={closeShare} />}
