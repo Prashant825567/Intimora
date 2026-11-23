@@ -46,7 +46,14 @@ export async function signOutGoogle() {}
 const memberAccount = `
 const profile = { uid: "member-1", email: "member@example.com", name: "Member", username: "member", referralCode: "REF-MEMBER1", referredBy: "", createdAt: 1760000000, likedIds: [], savedIds: [], premium: true, backendBase: "https://media-backend.example" };
 export const AccountRequestError = class extends Error {};
-export async function verifyAccount() { return { exists: true, backend: profile.backendBase }; }
+export async function verifyAccount() {
+  // The test can hold the check open: the account stays "being checked" until it
+  // sets __accountReleased.
+  while (globalThis.__accountHold === true && globalThis.__accountReleased !== true) {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return { exists: true, backend: profile.backendBase };
+}
 export async function getMyAccount() { return profile; }
 export async function createAccount() { return profile; }
 export async function toggleAccountVideo() { return profile; }
@@ -72,20 +79,24 @@ function memberIdentityPlugin() {
   };
 }
 
-function premiumVideo(premiumMode, format) {
+function premiumVideo(premiumMode, format, tokens = {}) {
+  // The links are the backend's own, and the token in them rotates: an expired
+  // link is only fixable if the next answer carries a different one.
+  const streamToken = tokens.streamToken ?? "stream-token";
+  const trailerToken = tokens.trailerToken ?? "trailer-token";
   const base = { ...fixtureVideo, duration: format === "mp4" ? 30 : 20 };
   if (premiumMode === "active") {
     return {
       ...base, premium: true, hasTrailer: true,
       // Both links carry the backend's own token; the player must use them as-is.
-      streamUrl: "/api/videos/sample-1/stream?t=stream-token",
-      trailerUrl: "/api/videos/sample-1/stream?kind=trailer&t=trailer-token",
+      streamUrl: `/api/videos/sample-1/stream?t=${streamToken}`,
+      trailerUrl: `/api/videos/sample-1/stream?kind=trailer&t=${trailerToken}`,
     };
   }
   if (premiumMode === "locked") {
     return {
       ...base, premium: true, locked: true, hasTrailer: true, streamUrl: null,
-      trailerUrl: "/api/videos/sample-1/stream?kind=trailer&t=trailer-token",
+      trailerUrl: `/api/videos/sample-1/stream?kind=trailer&t=${trailerToken}`,
     };
   }
   if (premiumMode === "locked-noTrailer") {
@@ -102,7 +113,7 @@ async function availablePort() {
   return port;
 }
 
-async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null, premiumMode = null, signedIn = false } = {}) {
+async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = false, failMedia = 0, failCatalog = 0, format = "webm", cdn = null, premiumMode = null, signedIn = false, holdAccount = false, expireStream = 0, expireTrailer = 0, unlockOnRefresh = false } = {}) {
   const clip = clips[format];
   // `premiumMode` is the backend's own premium contract:
   //   "locked"        — premium video, no active window, a trailer exists
@@ -112,7 +123,7 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
   // The catalog and detail answers carry the premium shape and, when the test
   // asks for one, the CDN link.
   const catalogVideo = () => {
-    const item = premiumVideo(premiumMode, format);
+    const item = premiumVideo(premiumMode, format, { streamToken: state.streamToken, trailerToken: state.trailerToken });
     if (video.cdnUrl) item.cdnUrl = video.cdnUrl;
     return item;
   };
@@ -121,7 +132,15 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
   let backendServer;
   let vite;
   let browser;
-  const state = { calls: [], pending: [], pendingDetails: [], holdMedia, holdAfter, holdDetail, failMedia, failCatalog };
+  const state = { calls: [], pending: [], pendingDetails: [], holdMedia, holdAfter, holdDetail, failMedia, failCatalog,
+    streamToken: "stream-token", trailerToken: "trailer-token",
+    // The number of first media requests to refuse as expired: the token rotates
+    // and the next detail answer carries the new one, which is what a link that
+    // ran out looks like from the player's side.
+    expireStream, expireTrailer,
+    // `unlockOnRefresh` is the premium window being confirmed for this member: the
+    // first detail answer is the locked shape, the next one carries a full stream.
+    unlockOnRefresh, detailAnswers: 0 };
   try {
     const key = path.join(temporaryDirectory, "test-key.pem");
     const cert = path.join(temporaryDirectory, "test-cert.pem");
@@ -158,6 +177,19 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         }
         return json({ ok: true, data: { videos: [catalogVideo()], nextCursor: null } });
       }
+      if (url.pathname === "/api/videos/sample-1/stream" && url.searchParams.get("kind") === "trailer" && state.expireTrailer > 0) {
+        state.expireTrailer -= 1;
+        state.trailerToken = "trailer-token-2";
+        res.writeHead(403, { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Link expired — reload the page" }));
+        return;
+      }
+      if (url.pathname === "/api/videos/sample-1/stream" && url.searchParams.get("kind") === "trailer" && url.searchParams.get("t") && url.searchParams.get("t") !== state.trailerToken) {
+        // An expired trailer token is refused exactly as the backend documents it.
+        res.writeHead(403, { ...cors, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Link expired — reload the page" }));
+        return;
+      }
       if (url.pathname === "/api/videos/sample-1/stream" && url.searchParams.get("kind") === "trailer") {
         // The trailer is public: it plays without any premium window.
         const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || "");
@@ -167,8 +199,14 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         return;
       }
       if (url.pathname === "/api/videos/sample-1") {
-        if (state.holdDetail) state.pendingDetails.push(() => { if (!res.destroyed) json({ ok: true, data: { ...video, views: 123 } }); });
-        else json({ ok: true, data: { ...catalogVideo(), views: 123 } });
+        // The detail answer is what the player opens with; a stale token here is
+        // exactly a link that ran out before the visitor pressed play.
+        state.detailAnswers += 1;
+        const detail = state.unlockOnRefresh && state.detailAnswers > 1
+          ? premiumVideo("active", format, { streamToken: state.streamToken, trailerToken: state.trailerToken })
+          : catalogVideo();
+        if (state.holdDetail) state.pendingDetails.push(() => { if (!res.destroyed) json({ ok: true, data: { ...detail, views: 123 } }); });
+        else json({ ok: true, data: { ...detail, views: 123 } });
         return;
       }
       if (url.pathname === "/api/videos/sample-1/thumbnail") {
@@ -187,6 +225,19 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         }
         res.writeHead(200, { ...cors, "Content-Type": `video/${format}`, "Accept-Ranges": "bytes", "Content-Length": clip.length });
         res.end(clip);
+        return;
+      }
+      if (url.pathname === "/api/videos/sample-1/stream" && url.searchParams.get("kind") !== "trailer" && state.expireStream > 0) {
+        state.expireStream -= 1;
+        state.streamToken = "stream-token-2";
+        res.writeHead(403, { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ error: "Link expired — reload the page" }));
+        return;
+      }
+      if (url.pathname === "/api/videos/sample-1/stream" && url.searchParams.get("kind") !== "trailer" && url.searchParams.get("t") && url.searchParams.get("t") !== state.streamToken) {
+        // An old token is refused; the next detail answer carries a new one.
+        res.writeHead(403, { ...cors, "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Link expired — reload the page" }));
         return;
       }
       if (url.pathname === "/api/videos/sample-1/stream") {
@@ -251,6 +302,9 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
     return {
       state, browser, base, backend, discovery, clip,
       cdnUrl: video.cdnUrl, bytesUrl: `${backend}/api/videos/sample-1/stream`,
+      holdAccount,
+      // The member's account check is held open (see the stub above) until this.
+      async releaseAccount(page) { await page.evaluate(() => { globalThis.__accountReleased = true; }); },
       releaseMedia() {
         state.holdMedia = false;
         for (const { res, body } of state.pending.splice(0)) if (!res.destroyed) res.end(body);
@@ -801,6 +855,49 @@ test("a guest still sees a premium video's metadata, then the sign-in message", 
   } finally { await fixture.close(); }
 });
 
+// The account check is asynchronous, and a premium video is gated until it ends:
+// the sign-in notice is on screen from the first frame, no play button appears in
+// the meantime, and nothing is requested. A signed-in member is never shown it.
+test("a premium video shows the sign-in notice while the account is still being checked", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked", signedIn: true, holdAccount: true });
+  try {
+    const context = await fixture.browser.newContext();
+    // Installed before any app module loads, so the very first account check is
+    // the one that stays open.
+    await context.addInitScript(() => { globalThis.__accountHold = true; globalThis.__accountReleased = false; });
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await player.getByText("Sign in first to watch this premium video").waitFor();
+    // While the check runs: no transport UI, nothing requested, and the button is
+    // not yet a trap for a member who is in fact signed in.
+    const button = player.locator(".video-player__signin");
+    assert.equal(await button.getAttribute("aria-busy"), "true");
+    assert.equal(await button.innerText(), "Checking your account…");
+    assert.equal(await player.getByRole("button", { name: "Play video" }).count(), 0);
+    assert.equal(await player.locator("video").count(), 0);
+    assert.deepEqual(streamCalls(fixture.state), []);
+    // The check finishes: the member's trailer plays, and the notice is gone.
+    await fixture.releaseAccount(page);
+    // The gate lifts on its own: the notice is replaced by the member's player,
+    // with the trailer the backend issued.
+    await page.waitForFunction(() => !document.querySelector(".video-player__signin"), undefined, { timeout: 20_000 });
+    assert.equal(await page.locator(".video-player__signin").count(), 0, "no sign-in notice for a member");
+    assert.match(await player.locator("video").getAttribute("src"), /kind=trailer/);
+    // A browser may not allow the deferred start without a fresh gesture (the
+    // click happened before the check answered); the play button is right there.
+    await player.getByRole("button", { name: "Play video" }).first().click();
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused;
+    }, undefined, { timeout: 20_000 });
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
 // The backend's premium contract, seen from the browser: a locked video only ever
 // offers its trailer, and an active window plays the tokenised stream it was
 // given — the app never rebuilds either link.
@@ -866,6 +963,128 @@ test("an active premium window plays the tokenised stream the backend issued", o
     const streams = streamCalls(fixture.state);
     assert.ok(streams.some((call) => call.search === "?t=stream-token"), "the browser asked with that token");
     assert.equal(await player.locator(".video-player__trailer-note").count(), 0, "a full video is not labelled a trailer");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// A member's stream link carries a short-lived token. The very first link the
+// backend hands out has already expired, which is the case the visitor hit: the
+// player must ask for a fresh one by itself, with nothing on screen about it.
+// A member's stream link carries a short-lived token. If the backend refuses the
+// link the player was opened with, the player must fetch a fresh one by itself and
+// keep playing — no reload prompt, nothing on screen at all.
+// A member's premium window is confirmed after the page was opened with the locked
+// answer. The trailer link is refused (expired), the fresh answer carries the full
+// stream, and the player continues with the full video instead of the trailer.
+test("a premium member gets the full video once the fresh answer carries it", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked", signedIn: true, expireTrailer: 1, unlockOnRefresh: true, format: "mp4" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 25_000 }).catch(async (error) => {
+      throw new Error(`the member never reached the full video; player says: ${(await player.innerText()).slice(0, 200)} / ${error.message}`);
+    });
+    const src = await player.locator("video").getAttribute("src");
+    assert.doesNotMatch(src, /kind=trailer/, "the full stream is playing, not the trailer");
+    assert.equal(await player.getByText(/sirf trailer/i).count(), 0, "the premium notice is gone");
+    assert.equal(await player.getByRole("alert").count(), 0);
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("an expired stream link is re-issued and playback continues by itself", options, async () => {
+  const fixture = await createFixture({ premiumMode: "active", signedIn: true, format: "mp4", expireStream: 1 });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 25_000 }).catch(async (error) => {
+      throw new Error(`the expired link never recovered; player says: ${(await player.innerText()).slice(0, 160)} / ${error.message}`);
+    });
+    assert.match(await player.locator("video").getAttribute("src"), /t=stream-token-2$/, "the player swapped to the freshly issued link");
+    assert.equal(await player.getByRole("alert").count(), 0, "no error is shown for a link that renews itself");
+    assert.equal(await player.getByText(/Reload the page|validity khatam/i).count(), 0);
+    const detailCalls = fixture.state.calls.filter((call) => call.path === "/api/videos/sample-1").length;
+    assert.ok(detailCalls >= 2, `the video was fetched again for a fresh link (got ${detailCalls} detail calls)`);
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// The same for a locked premium video's trailer: the refused trailer token is
+// replaced from the server, and the visitor is never told to reload the page.
+test("an expired trailer link is re-issued instead of asking for a reload", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked", signedIn: true, expireTrailer: 1 });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 25_000 }).catch(async (error) => {
+      throw new Error(`the trailer never recovered; player says: ${(await player.innerText()).slice(0, 160)} / ${error.message}`);
+    });
+    assert.match(await player.locator("video").getAttribute("src"), /t=trailer-token-2$/);
+    assert.equal(await player.getByText(/Reload the page/i).count(), 0, "the visitor is not told to reload");
+    assert.equal(await player.getByRole("alert").count(), 0);
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// The visitor's premium window is confirmed only after the page opened, so the
+// first answer was the locked shape. As soon as the member is confirmed, the player
+// asks for the video again by itself and plays the full stream — the trailer is a
+// stand-in until the backend says otherwise, never the ending.
+test("a member confirmed after opening is moved from the trailer to the full video", options, async () => {
+  const fixture = await createFixture({ premiumMode: "locked", signedIn: true, holdAccount: true, unlockOnRefresh: true, format: "mp4" });
+  try {
+    const context = await fixture.browser.newContext();
+    await context.addInitScript(() => { globalThis.__accountHold = true; globalThis.__accountReleased = false; });
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    assert.equal(await player.getByRole("button", { name: "Checking your account…" }).count(), 1, "the gate is on screen while the account is checked");
+    await fixture.releaseAccount(page);
+    // The member is confirmed, so the player asks for the video again by itself and
+    // the trailer source is replaced without a click.
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      const src = video?.getAttribute("src") ?? "";
+      return src.length > 0 && !src.includes("kind=trailer");
+    }, undefined, { timeout: 25_000 }).catch(async (error) => {
+      throw new Error(`the member never reached the full video; player says: ${(await player.innerText()).slice(0, 200)} / ${error.message}`);
+    });
+    const src = await player.locator("video").getAttribute("src");
+    // Starting playback still needs the visitor's own gesture in this browser.
+    await page.evaluate(() => document.querySelector('#player-container button[aria-label="Play video"]')?.click());
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 25_000 });
+    assert.doesNotMatch(src, /kind=trailer/, "the full stream is what plays for a confirmed member");
+    assert.equal(await player.getByText(/sirf trailer/i).count(), 0);
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }
