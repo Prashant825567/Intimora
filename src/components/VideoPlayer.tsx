@@ -13,6 +13,10 @@ import { VAST_CACHED_AD_URL, VAST_DECISION_GRACE_MS, VAST_LIVE_BUDGET_MS, VAST_S
 import { mediaCrossOrigin } from "../services/media-credentials.mjs";
 import { RECOVERY_DELAY_MS, shouldAutoRecover, playbackFailureMessage } from "../services/playback-recovery.mjs";
 
+// A link whose token expired is reported in the app's own words, and only after
+// the silent refresh above has failed too.
+const LINK_EXPIRED = "Is link ki validity khatam ho gayi. Ek baar Try again dabao — naya link aa jayega.";
+
 // The ad tag is a public build constant. An empty value disables pre-roll.
 const VAST_TAG = __INTIMORA_VAST_TAG_URL__;
 
@@ -36,6 +40,10 @@ interface VideoPlayerProps {
   signedIn: boolean;
   accountChecking: boolean;
   onSignIn: () => void;
+  // Stream and trailer links are short-lived tokens. When one expires the player
+  // asks the app for a freshly issued copy of this video (the backend decides
+  // what it may hand out) instead of telling the visitor to reload the page.
+  onRefreshVideo?: (video: Video) => Promise<Video | null>;
 }
 
 type BufferedRange = { start: number; end: number };
@@ -56,8 +64,16 @@ function preloadHint(): "auto" | "metadata" {
     ? "metadata" : "auto";
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, accountChecking, onSignIn }) => {
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, accountChecking, onSignIn, onRefreshVideo }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // A fresh answer from the backend (a re-issued link, or the member's full stream
+  // where the first answer only had a trailer) replaces what this player was opened
+  // with. It lives here, next to the element, so the position is kept.
+  const [refreshedVideo, setRefreshedVideo] = useState<Video | null>(null);
+  const video = refreshedVideo ?? openedVideo;
+  const refreshed = useRef(false);
+  const refreshedPlay = useRef(false);
+  const elementRef = useRef<HTMLVideoElement | null>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const playAttempt = useRef(0);
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,6 +87,23 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // request it refuses would only waste the visitor's data.
   const locked = video.locked === true && !video.videoUrl?.includes("kind=trailer") && Boolean(video.trailerUrl);
   const welcomeSource = locked ? (video.trailerUrl as string) : video.videoUrl;
+  // A 4xx on a tokenised link is an expiry even when the element only reports a
+  // generic decode error. Performance entries are read-only and cheap.
+  const refusalSeen = (_element: HTMLVideoElement, url: string | undefined) => {
+    if (typeof url !== "string" || !tokenisedLink(url) || typeof performance === "undefined" || !performance.getEntriesByName) return false;
+    try {
+      return performance.getEntriesByName(url, "resource").some((entry) => {
+        const status = (entry as PerformanceResourceTiming).responseStatus;
+        return typeof status === "number" && status >= 400;
+      });
+    } catch {
+      return false;
+    }
+  };
+
+  // Whether the current source carries a short-lived token, so an error on it may
+  // mean "expired" rather than "broken".
+  const tokenisedLink = (url: string | undefined) => typeof url === "string" && /[?&]t=/.test(url);
   // Premium video, no active window and no trailer: there is nothing to play, and
   // the backend said so. The panel explains it instead of showing a broken player.
   const lockedBlocked = video.locked === true && !video.trailerUrl && !video.videoUrl;
@@ -86,8 +119,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   // Until the account check finishes, a premium video is treated as gated: the
   // notice is on screen from the first frame and nothing is requested behind it.
   const signInGate = premiumTitle && (!signedIn || accountChecking);
-  // A premium tile that cannot give a guest anything (no trailer) is the same
-  // gate: the player shows the sign-in message and never a transport UI.
+  // The gate is the only thing on screen: no play button over the message.
   const gateShown = signInGate;
   const [source, setSource] = useState(welcomeSource);
   const sourceSwapped = useRef(false);
@@ -99,6 +131,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
   const [playbackError, setPlaybackError] = useState("");
+  const playbackErrorRef = useRef("");
+  useEffect(() => { playbackErrorRef.current = playbackError; }, [playbackError]);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [currentTime, setCurrentTime] = useState(0);
@@ -126,6 +160,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
 
   useEffect(() => { adPlayingRef.current = Boolean(adPlaying); }, [adPlaying]);
   useEffect(() => { playingRef.current = playing; }, [playing]);
+
+  // A premium title can be opened while the account is still being checked: the
+  // backend then sends the locked shape, which only carries a trailer. Once the
+  // member is confirmed, the video is asked for exactly once more, and the answer
+  // replaces the trailer if it now has the full stream.
+  const askedAfterSignIn = useRef(false);
+  useEffect(() => {
+    if (!signedIn || accountChecking || askedAfterSignIn.current || !onRefreshVideo) return;
+    if (video.premium !== true) return;
+    const onlyTrailer = video.locked === true || !video.videoUrl || video.videoUrl.includes("kind=trailer");
+    if (!onlyTrailer) return;
+    askedAfterSignIn.current = true;
+    void onRefreshVideo(video).then((fresh) => {
+      const nextSource = fresh?.videoUrl;
+      if (!fresh || !nextSource || nextSource.includes("kind=trailer")) return;
+      const at = Number.isFinite(videoRef.current?.currentTime) ? videoRef.current!.currentTime : 0;
+      installFresh(fresh, at);
+    }).catch(() => { /* The trailer keeps playing. */ });
+  }, [signedIn, accountChecking, video, onRefreshVideo]);
 
   // A different video starts with a fresh budget.
   useEffect(() => {
@@ -222,6 +275,49 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
     recoveries.current = 0;
     setSource(fallback);
     setCrossOrigin(sourceCrossOrigin(fallback, video.fallbackVideoUrl));
+    return true;
+  };
+
+  // The link this player should play from a fresh answer: a member's full stream
+  // when the backend granted one, otherwise the trailer it may offer instead.
+  const sourceFrom = (fresh: Video) => {
+    const lockedNow = fresh.locked === true && !fresh.videoUrl?.includes("kind=trailer") && Boolean(fresh.trailerUrl);
+    return lockedNow ? (fresh.trailerUrl as string) : fresh.videoUrl;
+  };
+
+  // Install that answer in place of the current one, keeping the position. The
+  // element is sitting on the dead link, so it is pointed at the new one directly;
+  // the state follows so React does not pull it back.
+  const installFresh = (fresh: Video, resume: number) => {
+    const nextSource = sourceFrom(fresh);
+    if (!nextSource) return false;
+    resumeAt.current = resume;
+    recoveries.current = 0;
+    refreshedPlay.current = true;
+    setRefreshedVideo(fresh);
+    setSource(nextSource);
+    setCrossOrigin(sourceCrossOrigin(nextSource, fresh.fallbackVideoUrl));
+    if (elementRef.current) {
+      elementRef.current.src = nextSource;
+      elementRef.current.load();
+    }
+    return true;
+  };
+
+  // A token that expired is not an error the visitor should act on: the app asks
+  // the backend for this video again, and if the answer carries a new link the
+  // player swaps to it once, from the same position. A second expiry is reported.
+  const refreshLinks = (element: HTMLVideoElement) => {
+    if (!onRefreshVideo || refreshed.current) return false;
+    refreshed.current = true;
+    const resume = Number.isFinite(element.currentTime) && element.currentTime > 0 ? element.currentTime : 0;
+    setPlaybackError("");
+    setBuffering(true);
+    void onRefreshVideo(video).then((fresh) => {
+      if (!fresh || !installFresh(fresh, resume)) { setBuffering(false); setPlaybackError(LINK_EXPIRED); return; }
+      // A fresh token means the next expiry is a new event, not a loop.
+      window.setTimeout(() => { refreshed.current = false; }, 1_000);
+    }).catch(() => { setBuffering(false); setPlaybackError(LINK_EXPIRED); });
     return true;
   };
 
@@ -356,6 +452,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
   const retryPlayback = () => {
     const v = videoRef.current;
     if (!v) return;
+    // An expired link is re-issued first: the button asks for a fresh one instead
+    // of reloading a token the server has already stopped honouring.
+    if (playbackErrorRef.current === LINK_EXPIRED) { refreshed.current = false; if (refreshLinks(v)) return; }
     // Reload only after a media error. For a blocked play request, retain any
     // data already buffered instead of starting a second download.
     recoveries.current = 0;
@@ -483,7 +582,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
             </div>
           ) : (
           <video
-            ref={videoRef}
+            ref={(node) => { videoRef.current = node; elementRef.current = node; }}
             src={source}
             poster={video.thumbnail}
             crossOrigin={crossOrigin}
@@ -515,10 +614,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
               // A failed CDN source is answered by the byte stream first; the
               // ordinary reload only runs when there is nothing to switch to.
               if (swapToFallback(element)) return;
-              if (locked) {
-                // A trailer link is short-lived on purpose. Nothing is retried
-                // here: the visitor is told to reload, which fetches a fresh one.
-                setPlaybackError("This trailer link expired. Reload the page to watch it again.");
+              // Both the stream and the trailer link carry a short-lived token.
+              // The backend issues a fresh one for this visitor; the player asks
+              // for it once, on its own, and keeps the position.
+              if (locked || tokenisedLink(source) || refusalSeen(element, source)) {
+                if (refreshLinks(element)) return;
+                setPlaybackError(LINK_EXPIRED);
                 return;
               }
               if (recoverContent(element, false)) return;
@@ -536,6 +637,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, startOnOpen, onClose, 
                 try { element.currentTime = at; } catch { /* Start from the beginning instead. */ }
               }
               if (sourceSwapped.current && wantsPlay.current && element.paused) {
+                playContent(element, false, ++playAttempt.current);
+              }
+              // A re-issued link (the old token expired) starts on its own from
+              // where the visitor was; if the browser insists on a gesture, the
+              // play button is already on screen.
+              if (refreshedPlay.current && element.paused) {
+                refreshedPlay.current = false;
                 playContent(element, false, ++playAttempt.current);
               }
             }}
