@@ -48,6 +48,8 @@ function cleanDuration(value) {
 }
 
 const SLUG = /^[A-Za-z0-9_-][A-Za-z0-9_-]*(?:-[A-Za-z0-9_-]+)*$/;
+// A stored account id: the same alphabet and length the account API accepts.
+const ID_SAFE = /^[A-Za-z0-9_-]{1,128}$/;
 
 // The API's own id is the whole slug (`…-girls-6-1JdXN6yeMdN`), and its watch
 // route needs it whole. The short tail is kept as `code`, for the embed URL and
@@ -234,4 +236,56 @@ export function animeSearch(cards, query, { limit = 24 } = {}) {
     if (matches.length >= limit) break;
   }
   return matches;
+}
+
+// An anime title has no record in our own catalogue, so a like/save on its card
+// has nothing to write to the backend — and an external id is never sent to our
+// API as if it were ours. Instead the card itself is stored: the id is namespaced
+// (`anime-…`) and a couple of `anime-…` metadata keys describe it, so the account's
+// existing `likedVideos` / `savedVideos` lists hold it next to our own videos with
+// no new endpoint and no catalogue record. The prefix keeps the two apart on both
+// sides: the backend can tell an external title from a catalogue id by that alone.
+export const ANIME_ID_PREFIX = "anime-";
+
+// The API's own slug already reads as `title-words-<code>`; keeping the words makes
+// a stored id recognisable and the slug's own `-<code>` tail survives, so an id can
+// be read back into a title. Only `[A-Za-z0-9_-]` reaches the API and a stored id,
+// which is the same alphabet the account's id list accepts.
+export function animeAccountId(card) {
+  if (!card || typeof card !== "object") return null;
+  const slug = typeof card.id === "string" ? card.id.trim() : "";
+  if (slug.length <= 200 && SLUG.test(slug)) {
+    const full = `${ANIME_ID_PREFIX}${slug}`;
+    if (ID_SAFE.test(full)) return full;
+  }
+  const code = typeof card.code === "string" && VIDEO_ID.test(card.code) ? card.code : null;
+  return code ? `${ANIME_ID_PREFIX}${code}` : null;
+}
+
+// The two metadata keys the account's own backend keeps beside an entry.
+export function animeAccountMeta(card) {
+  if (!card || typeof card !== "object") return {};
+  const meta = {};
+  const title = cleanTitle(card.title);
+  const thumbnail = httpsUrl(card.thumbnail);
+  if (title) meta["anime-title"] = title;
+  if (thumbnail) meta["anime-thumbnail"] = thumbnail;
+  return meta;
+}
+
+// A stored account entry drawn back as a card: the dashboard lists what the
+// account holds even when the source's own rows no longer carry the title. Only
+// the id, the title and the poster come from the entry; playback still asks the
+// source for the stream on click, exactly like a fresh card.
+export function animeCardFromSaved(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const id = typeof entry.id === "string" ? entry.id : "";
+  if (!id.startsWith(ANIME_ID_PREFIX)) return null;
+  const slug = id.slice(ANIME_ID_PREFIX.length);
+  if (slug.length > 200 || !SLUG.test(slug)) return null;
+  const title = cleanTitle(entry.title);
+  const thumbnail = httpsUrl(entry.thumbnail);
+  if (!title || !thumbnail || !THUMBNAIL.test(thumbnail)) return null;
+  const code = animeIdFromSlug(slug);
+  return { id: slug, code, title, thumbnail, duration: "", embedUrl: animeEmbedUrl(code) };
 }

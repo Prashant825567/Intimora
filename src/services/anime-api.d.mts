@@ -33,4 +33,8 @@ export function fetchAnimeStream(id: string, options?: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<string | null>;
+export const ANIME_ID_PREFIX: string;
+export function animeAccountId(card: AnimeCard | null | undefined): string | null;
+export function animeAccountMeta(card: AnimeCard | null | undefined): Record<string, string>;
+export function animeCardFromSaved(entry: { id: string; title: string; thumbnail: string } | null | undefined): AnimeCard | null;
 export function animeSearch(cards: AnimeCard[], query: string, options?: { limit?: number }): AnimeCard[];

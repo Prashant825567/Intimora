@@ -32,7 +32,7 @@ import {
   UNLOCK_RETRY_DELAYS_MS,
   retryWithDelays,
 } from "./services/retry.mjs";
-import { animeSearch, fetchAnimeRows, type AnimeCard as AnimeCardData, type AnimeList as AnimeListData } from "./services/anime-api.mjs";
+import { animeAccountId, animeAccountMeta, animeSearch, fetchAnimeRows, type AnimeCard as AnimeCardData, type AnimeList as AnimeListData } from "./services/anime-api.mjs";
 import { interleaveSponsored, sponsoredCards } from "./services/partner-cards.mjs";
 import type { SponsoredCard as SponsoredCardData } from "./services/partner-cards.mjs";
 import { selectExclusive, selectHomeFilter, selectNewReleases, selectTrending } from "./services/catalog-views.mjs";
@@ -391,6 +391,30 @@ function App() {
     }
     return cards;
   }, [animeRows]);
+  // The record a like/save needs for an external title. It is built from the card
+  // itself, so a card drawn from a stored account entry — where the source's own
+  // rows may no longer carry the title — behaves exactly like a fresh one. Nothing
+  // here is media: the poster, the title and the namespaced id are all the backend
+  // keeps, and the card's own click still asks the source for its stream.
+  const animeVideoRecord = (card: AnimeCardData, id: string): Video => ({
+    id,
+    title: card.title,
+    thumbnail: card.thumbnail,
+    duration: card.duration,
+    views: "",
+    viewCount: 0,
+    createdAt: null,
+    isExclusive: false,
+    likes: null,
+    category: "Anime",
+    tags: [],
+    videoUrl: "",
+    creator: "",
+    creatorAvatar: "",
+    uploadedAt: "",
+    description: "",
+  });
+
   const trending = useMemo(() => selectTrending(videos), [videos]);
   const newReleases = useMemo(() => selectNewReleases(videos, Date.now()), [videos, now]);
   const exclusive = useMemo(() => selectExclusive(videos), [videos]);
@@ -557,7 +581,7 @@ function App() {
     goTo(account.status === "ready" ? "/dashboard" : account.status === "needs-profile" ? "/profile" : "/login");
   };
 
-  const handleAccountAction = (action: "like" | "save", video: Video) => {
+  const handleAccountAction = (action: "like" | "save", video: Video, anime?: Record<string, string>) => {
     setActionError("");
     if (account.status === "checking") {
       if (!account.identity) openAccount();
@@ -568,12 +592,39 @@ function App() {
       openAccount();
       return;
     }
-    void account.toggle(action, video).then((result) => {
+    void account.toggle(action, video, anime).then((result) => {
       if (result?.count) liveLikes.record(video, result.count);
     }).catch(() => setActionError(`Could not confirm ${action}. Please refresh and check before trying again.`));
   };
   const handleSave = (video: Video) => handleAccountAction("save", video);
   const handleLike = (video: Video) => handleAccountAction("like", video);
+  // The same account actions for an external title: the record carries the
+  // namespaced id, and the metadata travels with the write.
+  // One place draws every anime card, so a like/save always has the same wiring
+  // wherever the card appears.
+  const renderAnimeCard = (card: AnimeCardData) => {
+    const id = animeAccountId(card);
+    const key = id ?? card.id;
+    return (
+      <AnimeCard
+        key={key}
+        card={card}
+        onPlay={setActiveAnime}
+        liked={id ? account.isLiked(id) : false}
+        saved={id ? account.isSaved(id) : false}
+        likePending={id ? account.pending.has(`like:${id}`) : false}
+        savePending={id ? account.pending.has(`save:${id}`) : false}
+        onLike={(item) => handleAnimeAction("like", item)}
+        onSave={(item) => handleAnimeAction("save", item)}
+      />
+    );
+  };
+
+  const handleAnimeAction = (action: "like" | "save", card: AnimeCardData) => {
+    const id = animeAccountId(card);
+    if (!id) return;
+    handleAccountAction(action, animeVideoRecord(card, id), animeAccountMeta(card));
+  };
 
   if (!accessGranted) return <AgeGate onConfirm={handleAgeConfirm} />;
 
@@ -605,7 +656,7 @@ function App() {
         )}
 
         {accountPage ? (
-          <AccountPages page={accountPage} account={account} videos={videos} catalogLoading={!apiError && (initialLoading || catalogStatus === "loading")} catalogUnavailable={apiError || catalogStatus === "partial"} onRetryCatalog={retryCatalog} renderVideos={(items) => <VideoGrid videos={items} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />} onPage={(page) => goTo(`/${page}`)} onBack={() => goTo("/")} onPremiumChanged={retryCatalog} />
+          <AccountPages page={accountPage} account={account} videos={videos} catalogLoading={!apiError && (initialLoading || catalogStatus === "loading")} catalogUnavailable={apiError || catalogStatus === "partial"} onRetryCatalog={retryCatalog} renderVideos={(items) => <VideoGrid videos={items} onPlay={handlePlayVideo} onShare={setShareVideo} onSave={handleSave} account={account} liveLikes={liveLikes} />} onPage={(page) => goTo(`/${page}`)} onBack={() => goTo("/")} onPremiumChanged={retryCatalog} renderAnime={(cards) => <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 mt-4">{cards.map((card) => renderAnimeCard(card))}</div>} />
         ) : submittedQuery !== null ? (
           <section aria-label="Search results">
             <div className="mb-6">
@@ -621,7 +672,7 @@ function App() {
                       <section aria-label="Anime results" className="mt-8">
                         <h2 className="text-white font-bold text-lg mb-4">Anime results <span className="text-gray-600 text-sm">({animeMatches.length})</span></h2>
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-                          {animeMatches.map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
+                          {animeMatches.map((card) => renderAnimeCard(card))}
                         </div>
                       </section>
                     ) : null}
@@ -729,7 +780,7 @@ function App() {
                         )}
                         {anime.length > 0 && (
                           <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4${animeCatalogue.length ? " mt-4" : ""}`}>
-                            {anime.slice(0, visibleCount).map((card) => <AnimeCard key={card.id} card={card} onPlay={setActiveAnime} />)}
+                            {anime.slice(0, visibleCount).map((card) => renderAnimeCard(card))}
                           </div>
                         )}
                       </HomeRow>
