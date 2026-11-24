@@ -40,7 +40,7 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
       <div className="mobile-overlay__content age-gate__panel relative z-10 max-w-md w-full mx-4">
         {/* Card */}
         <div
-          className="age-gate__card rounded-2xl p-8 text-center border border-yellow-800/40"
+          className="age-gate__card rounded-2xl px-8 pt-8 pb-10 text-center border border-yellow-800/40"
           style={{
             background: "linear-gradient(145deg, #111111, #0a0a0a)",
             boxShadow: "0 0 60px rgba(201,168,76,0.15), 0 0 0 1px rgba(201,168,76,0.1)",
@@ -65,7 +65,12 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
             </p>
           </div>
 
-          <p className="age-gate__terms text-gray-500 text-xs mb-6 leading-relaxed">
+          {/* Reads as the condition of the ENTER button below it, not as part of
+              the warning above: the gap above the line is what groups them. */}
+          <p
+            id="age-gate-terms"
+            className="age-gate__terms text-gray-400 text-xs mt-5 mb-6 leading-relaxed"
+          >
             By clicking "I AM 18+ – ENTER", you agree to our Terms of Service and confirm you are legally permitted
             to view adult content in your country.
           </p>
@@ -74,6 +79,7 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
           <div className="flex flex-col gap-3">
             <button
               onClick={onConfirm}
+              aria-describedby="age-gate-terms"
               className="w-full py-4 rounded-xl font-bold text-sm tracking-widest uppercase transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
               style={{
                 background: "linear-gradient(135deg, #c9a84c, #f0d080, #c9a84c)",
@@ -91,7 +97,10 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
             </button>
           </div>
 
-          <p className="age-gate__privacy text-gray-700 text-xs mt-5">Adults only • Your privacy matters</p>
+          {/* gray-700 on this card measured 1.92:1 — far below AA (4.5:1). gray-400
+              is 7.8:1. The line states a fact and offers nothing to click, so it
+              stays plain text rather than pretending to be a link. */}
+          <p className="age-gate__privacy text-gray-400 text-xs mt-6">Adults only • Your privacy matters</p>
         </div>
       </div>
     </div>
