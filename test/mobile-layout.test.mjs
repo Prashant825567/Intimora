@@ -365,7 +365,7 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
 // The 18+ gate's own rhythm: the terms line is grouped with the button it
 // describes (never with the warning above it), the card keeps breathing room
 // below its last line, and the small print is readable on the dark card.
-test("the age gate separates its terms from the warning and keeps its small print readable", {
+test("the age gate separates its terms from the warning and keeps its small print readable, in sentence case", {
   skip: browserAvailable ? false : "Install Chromium with npx playwright-core install chromium, or set CHROMIUM_PATH",
   timeout: 60_000,
 }, async () => {
@@ -450,6 +450,17 @@ test("the age gate separates its terms from the warning and keeps its small prin
     assert.equal(await page.getByRole("button", { name: /I AM 18/i }).getAttribute("aria-describedby"), "age-gate-terms");
     // Nothing in the gate pretends to be a link it is not.
     assert.equal(await page.locator(".age-gate__privacy a, .age-gate__terms a").count(), 0, "the small print offers no dead link");
+
+    // The subtitle sits above the logo block as a name, not a label: sentence case
+    // and AA contrast, so it neither shouts nor disappears.
+    const subtitle = await page.locator("#root p.age-gate__subtitle").evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { text: node.textContent.trim(), transform: style.textTransform, color: style.color };
+    });
+    assert.equal(subtitle.text, "Adult entertainment", "the subtitle is sentence case copy");
+    assert.equal(subtitle.transform, "none", "CSS does not force the line back to all-caps");
+    assert.ok(!/\b[A-Z]{2,}\b/.test(subtitle.text.replace(/Intimora/g, "")), "no run of capitals left in the line");
+    assert.ok(contrast(subtitle.color) >= 4.5, `the subtitle is readable on the card (got ${contrast(subtitle.color).toFixed(2)}:1)`);
     assert.deepEqual(errors, []);
     await page.close();
   } finally {
