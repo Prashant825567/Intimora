@@ -1,6 +1,7 @@
 import type { FirebaseUser } from "./firebase";
 import { primeBackendSelection, resolveBackendTarget } from "./api";
 import { AccountRequestError, createAuthenticatedRequest } from "./auth-request.mjs";
+import { ANIME_ID_PREFIX } from "./anime-api.mjs";
 import { readLikeCount } from "./like-counts.mjs";
 import { parsePremiumEntry, parsePremiumPeriods, parsePremiumStatus, redeemErrorCode } from "./premium.mjs";
 import { PHP_ORIGIN_OVERRIDE } from "../config/php-backend.mjs";
@@ -22,6 +23,15 @@ const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const CODE = /^[A-Za-z0-9_-]{1,80}$/;
 export const referralsEnabled = __INTIMORA_SAFE_REFERRALS__;
 
+// An external (anime) title the account keeps beside our own catalogue ids. The
+// backend stores it in the same `likedVideos`/`savedVideos` list; its `anime-title`
+// and `anime-thumbnail` metadata is all that is needed to draw its card.
+export interface SavedAnime {
+  id: string;
+  title: string;
+  thumbnail: string;
+}
+
 export interface AccountProfile {
   uid: string;
   email: string;
@@ -30,6 +40,9 @@ export interface AccountProfile {
   referralCode: string;
   likedIds: string[];
   savedIds: string[];
+  // Only the entries our own catalogue cannot draw: namespaced `anime-…` ids.
+  likedAnime: SavedAnime[];
+  savedAnime: SavedAnime[];
   // The trusted backend that verified and returned this account.
   backendBase?: string;
 }
@@ -46,6 +59,35 @@ function text(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
   return value.replace(/https?:\/\/[^\s<>"']+/gi, "[link removed]")
     .replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, max);
+}
+// A stored anime entry needs a title and an https poster to be worth drawing; the
+// id must carry the prefix that says it is not one of ours.
+function animeEntry(value: unknown): SavedAnime | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const id = typeof raw.id === "string" ? raw.id : "";
+  const title = text(raw["anime-title"], 140);
+  const thumbnail = typeof raw["anime-thumbnail"] === "string" ? raw["anime-thumbnail"] : "";
+  if (!ID.test(id) || !id.startsWith(ANIME_ID_PREFIX) || !title) return null;
+  let href = "";
+  try {
+    const url = new URL(thumbnail);
+    if (url.protocol === "https:" && !url.username && !url.password) href = url.href;
+  } catch { return null; }
+  if (!/\.(?:jpe?g|png|webp)(?:\?[^\s]*)?$/i.test(href)) return null;
+  return { id, title, thumbnail: href };
+}
+function animeEntries(value: unknown): SavedAnime[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const entries: SavedAnime[] = [];
+  for (const item of value.slice(0, 5000)) {
+    const entry = animeEntry(item);
+    if (!entry || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    entries.push(entry);
+  }
+  return entries;
 }
 function ids(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -69,8 +111,12 @@ function profileFrom(input: unknown, user: FirebaseUser): AccountProfile {
     name: text(raw.name, 100) || text(user.displayName, 100) || username,
     username,
     referralCode: code,
-    likedIds: ids(raw.likedVideos),
-    savedIds: ids(raw.savedVideos),
+    // An anime entry is drawn from its metadata, not from an id alone, so the two
+    // lists are split here: catalogue ids stay in `likedIds`/`savedIds`.
+    likedIds: ids(raw.likedVideos).filter((id) => !id.startsWith(ANIME_ID_PREFIX)),
+    savedIds: ids(raw.savedVideos).filter((id) => !id.startsWith(ANIME_ID_PREFIX)),
+    likedAnime: animeEntries(raw.likedAnime ?? raw.likedVideos),
+    savedAnime: animeEntries(raw.savedAnime ?? raw.savedVideos),
   };
 }
 
@@ -102,17 +148,37 @@ export async function createAccount(user: FirebaseUser, input: { name: string; u
   return backend;
 }
 
-export async function toggleAccountVideo(user: FirebaseUser, action: "like" | "save", id: string, active: boolean, backend?: string) {
+export async function toggleAccountVideo(
+  user: FirebaseUser,
+  action: "like" | "save",
+  id: string,
+  active: boolean,
+  backend?: string,
+  // Only for an external (anime) title: the two metadata keys the account stores
+  // beside the entry, in the same `likedVideos`/`savedVideos` list.
+  meta?: Record<string, string>,
+) {
   if (!ID.test(id)) throw new AccountRequestError();
   // Current backends ignore the body and toggle. Upgraded backends should set
   // this desired state idempotently, so a repeated request cannot undo a like.
-  const { data } = await request(`/api/videos/${id}/${action}`, { method: "POST", token: await token(user), backend, body: { active } });
+  const body: Record<string, unknown> = { active };
+  if (meta && id.startsWith(ANIME_ID_PREFIX)) {
+    for (const key of ["anime-title", "anime-thumbnail"] as const) {
+      if (typeof meta[key] === "string" && meta[key]) body[key] = meta[key];
+    }
+  }
+  const { data } = await request(`/api/videos/${id}/${action}`, { method: "POST", token: await token(user), backend, body });
   const key = action === "like" ? "liked" : "saved";
   const listKey = action === "like" ? "likedVideos" : "savedVideos";
   if (typeof data[key] !== "boolean" || (data[listKey] !== undefined && !Array.isArray(data[listKey]))) throw new AccountRequestError();
+  const list = data[listKey];
   return {
     active: data[key] as boolean,
-    ids: data[listKey] === undefined ? undefined : ids(data[listKey]),
+    // The list as the backend now holds it. Every id in it is kept — including an
+    // `anime-…` one, which is what the caller filters on.
+    ids: list === undefined ? undefined : ids(list),
+    // The anime entries the same answer carries, when it sends them.
+    anime: list === undefined ? undefined : animeEntries(list),
     count: action === "like" ? readLikeCount(id, data) : null,
   };
 }

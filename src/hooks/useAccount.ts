@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FirebaseUser } from "../services/firebase";
 import { signInWithGoogle, signOutGoogle, watchFirebaseUser } from "../services/firebase";
 import { createAccount, getMyAccount, toggleAccountVideo, verifyAccount } from "../services/account-api";
-import type { AccountProfile } from "../services/account-api";
+import type { AccountProfile, SavedAnime } from "../services/account-api";
+import { ANIME_ID_PREFIX } from "../services/anime-api.mjs";
 import { AccountRequestError } from "../services/auth-request.mjs";
 import type { Video } from "../data/mockVideos";
 
@@ -118,14 +119,22 @@ export function useAccount(enabled: boolean) {
     }
   }, [state.status]);
 
-  const toggle = useCallback(async (action: "like" | "save", video: Video) => {
+  // `video` may be an external title: its id is the namespaced `anime-…` one and
+  // `anime` carries the metadata the account stores with it. Everything else — the
+  // queue, the optimistic state, the rollback — is the same path as a catalogue
+  // video, because the backend keeps both in the same list.
+  const toggle = useCallback(async (action: "like" | "save", video: Video, anime?: Record<string, string>) => {
     const user = currentUser.current;
     const sequence = generation.current;
     if (!user || state.status !== "ready" || !state.profile) throw new AccountRequestError();
     const key = `${action}:${video.id}`;
     if (pendingRef.current.has(key)) return;
     const field = action === "like" ? "likedIds" : "savedIds";
-    const desired = !state.profile[field].includes(video.id);
+    const animeField = action === "like" ? "likedAnime" : "savedAnime";
+    const listed = video.id.startsWith(ANIME_ID_PREFIX)
+      ? state.profile[animeField].some((entry) => entry.id === video.id)
+      : state.profile[field].includes(video.id);
+    const desired = !listed;
     pendingRef.current.add(key);
     optimisticRef.current.set(key, desired);
     setPending(new Set(pendingRef.current));
@@ -135,7 +144,7 @@ export function useAccount(enabled: boolean) {
     // serialized until the backend has atomic per-user/video operations.
     const operation = mutationQueue.current.then(async () => {
       if (!stillCurrent()) return;
-      const result = await toggleAccountVideo(user, action, video.id, desired, video.backendBase);
+      const result = await toggleAccountVideo(user, action, video.id, desired, video.backendBase, anime);
       if (!stillCurrent()) return;
       setState((previous) => {
         if (previous.status !== "ready" || previous.profile?.uid !== user.uid) return previous;
@@ -143,7 +152,22 @@ export function useAccount(enabled: boolean) {
         // return the complete list. Keep this ID correct in either format.
         const next = new Set(result.ids ?? previous.profile[field]);
         if (result.active) next.add(video.id); else next.delete(video.id);
-        return { ...previous, profile: { ...previous.profile, [field]: [...next] } };
+        // An anime id is never left in the catalogue list: it has no catalogue
+        // record, so it lives in this account's own anime list instead.
+        const nextAnime = new Map(previous.profile[animeField].map((entry) => [entry.id, entry]));
+        if (video.id.startsWith(ANIME_ID_PREFIX)) {
+          next.delete(video.id);
+          if (result.active) nextAnime.set(video.id, { id: video.id, title: video.title, thumbnail: video.thumbnail });
+          else nextAnime.delete(video.id);
+        }
+        return {
+          ...previous,
+          profile: {
+            ...previous.profile,
+            [field]: [...next].filter((id) => !id.startsWith(ANIME_ID_PREFIX)),
+            [animeField]: [...nextAnime.values()],
+          },
+        };
       });
       return result;
     });
@@ -161,8 +185,11 @@ export function useAccount(enabled: boolean) {
     }
   }, [state.profile, state.status]);
 
-  const isLiked = (id: string) => optimistic.get(`like:${id}`) ?? (state.profile?.likedIds.includes(id) ?? false);
-  const isSaved = (id: string) => optimistic.get(`save:${id}`) ?? (state.profile?.savedIds.includes(id) ?? false);
+  const holds = (list: SavedAnime[] | undefined, id: string) => (list ?? []).some((entry) => entry.id === id);
+  const isLiked = (id: string) => optimistic.get(`like:${id}`)
+    ?? (state.profile?.likedIds.includes(id) || holds(state.profile?.likedAnime, id));
+  const isSaved = (id: string) => optimistic.get(`save:${id}`)
+    ?? (state.profile?.savedIds.includes(id) || holds(state.profile?.savedAnime, id));
   return { ...state, signingIn, pending, isLiked, isSaved, login, logout, retry, complete, toggle };
 }
 

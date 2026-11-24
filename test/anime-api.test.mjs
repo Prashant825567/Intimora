@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ANIME_API_BASE, animeEmbedUrl, animeIdFromSlug, animeSearch, animeStreamFrom, fetchAnimeRows, fetchAnimeStream, hlsPlayable, isHlsLink, parseAnimeResults } from "../src/services/anime-api.mjs";
+import { ANIME_API_BASE, animeAccountId, animeAccountMeta, animeCardFromSaved, animeEmbedUrl, animeIdFromSlug, animeSearch, animeStreamFrom, fetchAnimeRows, fetchAnimeStream, hlsPlayable, isHlsLink, parseAnimeResults } from "../src/services/anime-api.mjs";
 
 // The service answers with the source's own list rows. Only metadata is read:
 // id, title, poster, duration — never a media URL.
@@ -159,4 +159,45 @@ test("a playlist whose segments are refused is reported, not played", async () =
   assert.equal(await hlsPlayable(url, { fetchImpl: async () => { throw new TypeError("Failed to fetch"); } }), false, "a CORS refusal");
   assert.equal(await hlsPlayable("https://hls.hentaicity.com/a/clip.mp4", { fetchImpl: async () => new Response("", { status: 200 }) }), false, "a plain file is not a playlist check");
   assert.equal(await hlsPlayable("http://hls.hentaicity.com/a/master.m3u8", { fetchImpl: async () => new Response("", { status: 200 }) }), false);
+});
+
+// A title from the anime source has no record in our own catalogue, so its like or
+// save is stored by the account itself under a namespaced id — never as if the
+// source's id were one of ours.
+test("an anime card gets an account id and metadata that cannot be mistaken for ours", () => {
+  const card = {
+    id: "one-wife-1-OneWife001x", code: "OneWife001x", title: "One Wife 1",
+    thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg", duration: "23:36",
+  };
+  assert.equal(animeAccountId(card), "anime-one-wife-1-OneWife001x");
+  assert.match(animeAccountId(card), /^[A-Za-z0-9_-]{1,128}$/, "the account API's own alphabet");
+  assert.deepEqual(animeAccountMeta(card), {
+    "anime-title": "One Wife 1",
+    "anime-thumbnail": "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg",
+  });
+  // An unusable slug falls back to the code, and an unusable card has no id at all
+  // rather than a made-up one.
+  assert.equal(animeAccountId({ id: "not a slug!", code: "AbC123xyz" }), "anime-AbC123xyz");
+  assert.equal(animeAccountId({ id: "not a slug!" }), null);
+  assert.equal(animeAccountId(null), null);
+  // Only a plain https poster is stored.
+  assert.deepEqual(animeAccountMeta({ title: "T", thumbnail: "http://insecure.example/a.jpg" }), { "anime-title": "T" });
+});
+
+test("a stored anime entry is drawn back as a card, from its id, title and poster only", () => {
+  const card = animeCardFromSaved({
+    id: "anime-one-wife-1-OneWife001x", title: "One Wife 1",
+    thumbnail: "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg",
+  });
+  assert.equal(card.id, "one-wife-1-OneWife001x");
+  assert.equal(card.code, "OneWife001x");
+  assert.equal(card.title, "One Wife 1");
+  assert.equal(card.duration, "", "a stored entry never invents a duration");
+  assert.equal(card.embedUrl, "https://www.hentaicity.com/embed/OneWife001x");
+  // Anything that is not one of these entries is refused, so nothing else can be
+  // drawn as an anime card.
+  assert.equal(animeCardFromSaved({ id: "own-one", title: "Our own", thumbnail: "https://x.example/a.jpg" }), null);
+  assert.equal(animeCardFromSaved({ id: "anime-x", title: "", thumbnail: "https://x.example/a.jpg" }), null);
+  assert.equal(animeCardFromSaved({ id: "anime-x", title: "T", thumbnail: "https://x.example/a.html" }), null);
+  assert.equal(animeCardFromSaved(null), null);
 });

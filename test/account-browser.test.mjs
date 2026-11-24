@@ -94,6 +94,8 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
     publicCounts: Object.fromEntries(videos.map((video) => [video.id, { likes: video.likes, version: 1 }])),
     failCounts: false, delayCounts: 0, holdNextCounts: false, countReleases: [], completedCounts: 0,
     failReferrals: false, holdMutations: false, mutationReleases: [], missingLikes: [],
+    // Every like/save the page sent, with its body.
+    mutations: [],
     // The premium window the backend reports, and the redemptions it accepted.
     redeemCalls: [],
     premiumPeriods: [],
@@ -230,7 +232,7 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
       if (state.alreadyExistsOnCreate) return route.fulfill({ status: 400, headers: cors, json: { ok: false, error: "User already exists" } });
       return route.fulfill({ headers: cors, json: { ok: true, data: { user: state.profile } } });
     }
-    const mutation = /^\/api\/videos\/(video-one|video-two)\/(like|save)$/.exec(url.pathname);
+    const mutation = /^\/api\/videos\/(video-one|video-two|anime-[A-Za-z0-9_-]{1,120})\/(like|save)$/.exec(url.pathname);
     if (mutation) {
       state.activeMutations += 1;
       state.maxMutations = Math.max(state.maxMutations, state.activeMutations);
@@ -243,9 +245,17 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
       }
       const field = mutation[2] === "like" ? "likedVideos" : "savedVideos";
       const list = state.profile[field];
-      const index = list.indexOf(mutation[1]);
-      const active = liveLikes ? req.postDataJSON().active : index < 0;
-      if (active && index < 0) list.push(mutation[1]);
+      const body = req.postDataJSON() ?? {};
+      // The live backend keeps a list of ids; an anime entry carries its own title
+      // and poster beside the id. Both shapes are stored, keyed by the id.
+      const keyOf = (entry) => (typeof entry === "string" ? entry : entry?.id);
+      const index = list.findIndex((entry) => keyOf(entry) === mutation[1]);
+      const active = liveLikes ? body.active : index < 0;
+      state.mutations = state.mutations ?? [];
+      state.mutations.push({ id: mutation[1], action: mutation[2], body });
+      if (active && index < 0) list.push(mutation[1].startsWith("anime-")
+        ? { id: mutation[1], "anime-title": body["anime-title"], "anime-thumbnail": body["anime-thumbnail"] }
+        : mutation[1]);
       if (!active && index >= 0) list.splice(index, 1);
       if (liveLikes && mutation[2] === "like" && active !== (index >= 0)) {
         const count = state.publicCounts[mutation[1]];
@@ -829,6 +839,60 @@ test("privacy-safe referrals use the verified backend and retry a temporary fail
 
 // The premium window is the backend's: the dashboard shows what it says and
 // redeems the referrals it says are available.
+// An external (anime) title has no catalogue record, so the account keeps it. The
+// live backend answers `/api/auth/me` with `likedVideos`/`savedVideos` holding either
+// a plain id or an entry that carries its own `anime-title`/`anime-thumbnail`; both
+// must end up on the dashboard without hiding the rest of the list.
+test("anime entries survive the account read, draw their own cards and are removed the same way", browserOptions, async () => {
+  const animeEntry = {
+    id: "anime-one-wife-1-OneWife001x",
+    "anime-title": "One Wife 1",
+    "anime-thumbnail": "https://cdn1.images.hentaicity.com/videos/0739/38322/main.jpg",
+  };
+  const fixture = await createFixture({ exists: true, ownProfile: profile({
+    likedVideos: [animeEntry, "video-one"],
+    savedVideos: [animeEntry],
+  }) });
+  const { page, state, base } = fixture;
+  try {
+    await page.goto(`${base}/dashboard`);
+    await page.getByRole("button", { name: "Sign in with Google" }).click();
+    await page.getByRole("heading", { name: "Viewer Name" }).waitFor();
+    const liked = page.getByRole("region", { name: "Liked videos" });
+    const saved = page.getByRole("region", { name: "Saved videos" });
+
+    // The catalogue video and the anime title are both drawn, in the same list, and
+    // neither is reported as a missing video.
+    await liked.getByText("First video").waitFor();
+    await liked.getByText("One Wife 1").waitFor();
+    await saved.getByText("One Wife 1").waitFor();
+    assert.equal(await page.getByText("Some liked videos are currently unavailable.").count(), 0);
+    assert.equal(await page.getByText("Some saved videos are currently unavailable.").count(), 0);
+    // The count is the whole list, not only the part the catalogue can draw.
+    assert.match(await liked.locator("h2").innerText(), /Liked videos\s+2/, "an anime entry counts as a liked video");
+    assert.match(await saved.locator("h2").innerText(), /Saved videos\s+1/);
+    // It is drawn from the stored poster, nowhere else.
+    assert.match(await liked.locator(".video-card--anime img").first().getAttribute("src"), /cdn1\.images\.hentaicity\.com/);
+    assert.equal(await liked.locator(".video-card--anime").count(), 1);
+    assert.equal(await saved.locator(".video-card--anime").count(), 1);
+    // An anime id is never handed to the catalogue grid as if it were one of ours.
+    assert.equal(await liked.getByText(/^anime-one-wife/).count(), 0);
+
+    // Removing it sends the same route with the same id and the desired state.
+    await liked.getByRole("button", { name: "Unlike anime" }).click();
+    await page.waitForFunction(() => document.querySelectorAll('[aria-label="Unlike anime"]').length === 0);
+    const removal = state.mutations.at(-1);
+    assert.deepEqual({ id: removal.id, action: removal.action, active: removal.body.active }, {
+      id: animeEntry.id, action: "like", active: false,
+    });
+    await liked.getByText("No liked videos yet.").count().then((count) => {
+      assert.equal(count, 0, "the other liked video is still listed");
+    });
+    await liked.getByText("First video").waitFor();
+    assert.deepEqual(fixture.errors, []);
+  } finally { await fixture.close(); }
+});
+
 test("the dashboard shows the premium window and redeems referrals through the backend", browserOptions, async () => {
   const fixture = await createFixture({ exists: true, ownProfile: profile({}) });
   const { page, state, base } = fixture;

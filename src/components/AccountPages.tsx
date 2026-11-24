@@ -3,6 +3,8 @@ import type { FormEvent, ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Bookmark, Check, Copy, Heart, Loader2, LogOut, ShieldCheck, Users } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import type { AccountController } from "../hooks/useAccount";
+import type { AnimeCard as AnimeCardData } from "../services/anime-api.mjs";
+import { animeCardFromSaved } from "../services/anime-api.mjs";
 import { getReferralTree, referralsEnabled } from "../services/account-api";
 import type { ReferralTree } from "../services/account-api";
 import ReferralFlow from "./ReferralFlow";
@@ -19,6 +21,9 @@ interface Props {
   catalogUnavailable: boolean;
   onRetryCatalog: () => void;
   renderVideos: (videos: Video[]) => ReactNode;
+  // Anime titles the account keeps: they are drawn from their own stored entry, so
+  // the dashboard never waits for the source's rows.
+  renderAnime?: (cards: AnimeCardData[]) => ReactNode;
   onPage: (page: AccountPage) => void;
   onBack: () => void;
   // A premium purchase or redemption changes the stream links the catalogue
@@ -29,7 +34,7 @@ interface Props {
 const validName = (value: string) => value.trim().length >= 1 && value.trim().length <= 100;
 const validUsername = (value: string) => /^[A-Za-z0-9_]{3,30}$/.test(value.trim());
 
-export default function AccountPages({ page, account, videos, catalogLoading, catalogUnavailable, onRetryCatalog, renderVideos, onPage, onBack, onPremiumChanged }: Props) {
+export default function AccountPages({ page, account, videos, catalogLoading, catalogUnavailable, onRetryCatalog, renderVideos, renderAnime, onPage, onBack, onPremiumChanged }: Props) {
   const [name, setName] = useState(account.identity?.displayName || "");
   const [username, setUsername] = useState("");
   const [referral, setReferral] = useState("");
@@ -193,6 +198,11 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
   const saved = profile.savedIds.flatMap((id) => videoById.has(id) ? [videoById.get(id)!] : []);
   const missingLiked = profile.likedIds.length - liked.length;
   const missingSaved = profile.savedIds.length - saved.length;
+  // The account's anime entries, each drawn from the entry itself.
+  const likedAnime = profile.likedAnime.flatMap((entry) => { const card = animeCardFromSaved(entry); return card ? [card] : []; });
+  const savedAnime = profile.savedAnime.flatMap((entry) => { const card = animeCardFromSaved(entry); return card ? [card] : []; });
+  const hasLiked = profile.likedIds.length + profile.likedAnime.length;
+  const hasSaved = profile.savedIds.length + profile.savedAnime.length;
 
   return (
     <section className="dashboard" aria-label="Your dashboard">
@@ -211,13 +221,17 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
       </div>
       {catalogUnavailable && (profile.likedIds.length > 0 || profile.savedIds.length > 0) && <div className="catalog-status" role="status"><span>We could not check the full video catalog.</span><button type="button" className="catalog-status__retry" onClick={onRetryCatalog}>Retry</button></div>}
       <section className="dashboard__section" aria-label="Liked videos">
-        <h2><Heart size={19} /> Liked videos <span>{profile.likedIds.length}</span></h2>
-        {liked.length ? renderVideos(liked) : <p className="dashboard__empty">{!profile.likedIds.length ? "No liked videos yet." : catalogLoading ? "Loading videos…" : "Liked videos are currently unavailable."}</p>}
+        <h2><Heart size={19} /> Liked videos <span>{hasLiked}</span></h2>
+        {liked.length ? renderVideos(liked) : !profile.likedIds.length && !catalogLoading && !likedAnime.length ? <p className="dashboard__empty">No liked videos yet.</p> : null}
+        {!liked.length && profile.likedIds.length > 0 && (catalogLoading ? <p className="dashboard__empty">Loading videos…</p> : <p className="dashboard__empty">Liked videos are currently unavailable.</p>)}
+        {likedAnime.length > 0 && (renderAnime ? renderAnime(likedAnime) : null)}
         {!catalogLoading && liked.length > 0 && missingLiked > 0 && <p className="account-hint">Some liked videos are currently unavailable.</p>}
       </section>
       <section className="dashboard__section" aria-label="Saved videos">
-        <h2><Bookmark size={19} /> Saved videos <span>{profile.savedIds.length}</span></h2>
-        {saved.length ? renderVideos(saved) : <p className="dashboard__empty">{!profile.savedIds.length ? "No saved videos yet." : catalogLoading ? "Loading videos…" : "Saved videos are currently unavailable."}</p>}
+        <h2><Bookmark size={19} /> Saved videos <span>{hasSaved}</span></h2>
+        {saved.length ? renderVideos(saved) : !profile.savedIds.length && !catalogLoading && !savedAnime.length ? <p className="dashboard__empty">No saved videos yet.</p> : null}
+        {!saved.length && profile.savedIds.length > 0 && (catalogLoading ? <p className="dashboard__empty">Loading videos…</p> : <p className="dashboard__empty">Saved videos are currently unavailable.</p>)}
+        {savedAnime.length > 0 && (renderAnime ? renderAnime(savedAnime) : null)}
         {!catalogLoading && saved.length > 0 && missingSaved > 0 && <p className="account-hint">Some saved videos are currently unavailable.</p>}
       </section>
       <section className="dashboard__section" aria-label="Referral network">

@@ -180,7 +180,10 @@ test("anime cards come from the live anime API, recent before popular, and play 
     assert.equal(await page.locator(".anime-card__tags").count(), 0, "no tags are invented");
     assert.match(await page.locator(".video-card--anime img").first().getAttribute("src"), /cdn1\.images\.hentaicity\.com/);
     assert.equal(await page.locator(".video-card--anime").first().innerText().then((text) => text.includes("07:03")), true);
-    assert.equal(await page.locator(".video-card--anime").first().getByRole("button", { name: /save|like/i }).count(), 0, "an external title has no backend id, so it offers no like/save");
+    // The account's own actions sit on the card, but they never claim to be the
+    // source's: an external title is stored under a namespaced `anime-…` id.
+    assert.equal(await page.locator(".video-card--anime").first().getByRole("button", { name: "Like anime" }).count(), 1);
+    assert.equal(await page.locator(".video-card--anime").first().getByRole("button", { name: "Save anime" }).count(), 1);
 
     // A click asks the service's watch route and plays what it returns. The live
     // titles answer with an HLS playlist, so the click plays the service's own
