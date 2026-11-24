@@ -322,3 +322,41 @@ test("the visitor log uses the PHP cookie and hands over to the unlock page inst
   assert.equal(posted.init.redirect, "follow");
   assert.deepEqual(unlocks, [{ path: "/api/visit", challenge: true }], "the visitor is sent to the host's own unlock page");
 });
+
+// A Vercel deployment can refuse a call on its own: a WAF rule, a rate limit, or a
+// host that answers the browser only from one region. Retrying the same call on the
+// same host cannot help, and a visitor must not be sent through a lock page for it —
+// so the refusal is reported as such, with the host's own status.
+test("a call the host itself refuses is reported as refused, not retried forever", async () => {
+  const refused = [];
+  const cases = [
+    { status: 403, body: { error: "Forbidden" }, contentType: "application/json" },
+    { status: 401, body: { error: "Unauthorized" }, contentType: "application/json" },
+    { status: 404, body: { ok: false }, contentType: "application/json" },
+    // Vercel's own HTML error page, which is not this backend's JSON contract.
+    { status: 403, body: "<html>Access denied</html>", contentType: "text/html" },
+  ];
+  for (const item of cases) {
+    const unlocks = [];
+    const request = client({
+      fetcher: async (url) => url === discoveryUrl
+        ? Response.json({ ok: true, data: { server: backendA } })
+        : new Response(typeof item.body === "string" ? item.body : JSON.stringify(item.body), {
+          status: item.status, headers: { "Content-Type": item.contentType },
+        }),
+      requestUnlock: (info) => { unlocks.push(info); return false; },
+    });
+    await assert.rejects(
+      () => request.requestJson("/api/videos/local-1"),
+      (error) => {
+        assert.equal(error.refused, true, `a ${item.status} is a refusal`);
+        assert.equal(error.detailFailed, true, "the caller can tell it apart from a missing video");
+        assert.equal(error.status, item.status, "the host's own status is kept");
+        return true;
+      },
+    );
+    refused.push(item.status);
+    assert.deepEqual(unlocks, [], "a refused answer never triggers a lock-page navigation");
+  }
+  assert.deepEqual(refused, [403, 401, 404, 403]);
+});

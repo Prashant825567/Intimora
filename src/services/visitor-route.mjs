@@ -176,6 +176,13 @@ export function createVisitorRequest(options = {}) {
       // that is what the unlock flow is for.
       const contentType = response.headers.get("content-type") || "";
       const challenge = contentType.toLowerCase().includes("text/html");
+      // A 401/403 is the host refusing this visitor's request itself (a WAF rule, a
+      // host-level block, a rate limit). Retrying the same call on the same backend
+      // cannot help, so the caller is told the reason and can try another one. A
+      // 404 is passed through the same way: the id is simply not there.
+      if (response.status === 401 || response.status === 403 || response.status === 404) {
+        return { failed: true, invalidate: false, challenge, status: response.status, refused: true };
+      }
       if (!response.ok) return { failed: true, invalidate: response.status >= 500, challenge, status: response.status };
       if (challenge) return { failed: true, invalidate: false, challenge: true, status: response.status };
       let body;
@@ -300,6 +307,15 @@ export function createVisitorRequest(options = {}) {
       });
     }
     if (result.failed) {
+      // A host that refused the call on its own (WAF, rate limit, missing route)
+      // is not a broken backend for everyone: the failure names it, and the visitor
+      // is not sent through a lock page for it.
+      if (result.refused) {
+        // `detailFailed` tells the caller this host answered but refused the
+        // request itself, which is not the same as "the video is gone".
+        const failure = Object.assign(new Error(UNAVAILABLE), { status: result.status, refused: true, detailFailed: true });
+        throw failure;
+      }
       // Optional count polling must not disrupt catalog routing. A stale
       // response for an older backend must not erase a newer selection either.
       if (!counts && result.invalidate && generation === requestGeneration && cached?.backend === backend) clear();

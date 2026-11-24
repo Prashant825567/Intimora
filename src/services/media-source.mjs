@@ -74,3 +74,24 @@ export function playbackSources(video, backend, id) {
   }
   return { videoUrl: bytes };
 }
+
+// A trailer the backend points at directly. The tokenised form
+// (`/stream?kind=trailer&t=…`, `mediaLinkFrom` in `api.ts`) is handled there; this
+// is the other shape the premium answers really send — a plain media file, either a
+// CDN/object-storage URL or a path on the backend's own origin
+// (`/storage/trailers/<file>.mp4`, `/cdn/trailers/…`).
+//
+// The rule is the same one playback uses: HTTPS only, no credentials, no fragment,
+// and the link must actually be a media file. A page (`bestfile.io/<id>/file`) can
+// never be a trailer, so it is dropped rather than handed to an element that would
+// only fail. Nothing is proxied and the URL is used exactly as received.
+export function trailerSource(raw, backend) {
+  const url = resolveHttps(raw, backend);
+  if (!url) return null;
+  const params = [...url.searchParams.keys()];
+  // A tokenised stream link keeps its own validation in `mediaLinkFrom`; it must
+  // not be accepted here, where a token is not checked.
+  if (url.pathname.includes("/stream") || params.length) return null;
+  if (!MEDIA_FILE.test(url.pathname)) return null;
+  return url.href;
+}

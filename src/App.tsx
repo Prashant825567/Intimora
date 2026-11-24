@@ -167,6 +167,9 @@ function App() {
   }, [accessGranted]);
   const catalogFinishedAt = useRef(0);
   const sharedVideoRequest = useRef<{ id: string; promise: ReturnType<typeof fetchVideoDetail> } | null>(null);
+  // The last detail call a host refused on its own, so the visitor can be told the
+  // reason when it stops playback from being counted (the card still plays).
+  const [detailNotice, setDetailNotice] = useState("");
   const locallyOpenedVideo = useRef<string | null>(null);
   const returnFromWatch = useRef("/");
   const searchRequest = useRef(0);
@@ -213,6 +216,7 @@ function App() {
       setActiveVideo(null);
       setShareVideo(null);
       setActionError("");
+      setDetailNotice("");
       setSharedVideoUnavailable(false);
     };
     window.addEventListener("popstate", onPopState);
@@ -360,7 +364,9 @@ function App() {
     // failure is retried once before "This video is currently unavailable."
     retryWithDelays(async (attempt) => {
       const result = attempt === 0 ? await first : await fetchVideoDetail(id);
-      if (!result.video) throw new Error("unavailable");
+      // A host that refused the call is worth one retry (it may be a rate limit);
+      // a 404 is the video genuinely not being there.
+      if (!result.video) throw Object.assign(new Error("unavailable"), { refused: result.refused, status: result.status });
       return result;
     }, { delays: SHARED_LINK_RETRY_DELAYS_MS }).then(({ video, backend }) => {
       if (cancelled || !video) return;
@@ -518,6 +524,7 @@ function App() {
       setLocation({ pathname: path, search: "" });
       setShareVideo(null);
       setActionError("");
+      setDetailNotice("");
       setSharedVideoUnavailable(false);
     }
     // "Watch now" and card play are explicit user actions. Try to start on
@@ -530,7 +537,16 @@ function App() {
       const promise = fetchVideoDetail(video.id, video.backendBase);
       if (path) sharedVideoRequest.current = { id: video.id, promise };
       const detail = await promise;
-      if (detail.video?.views === undefined) return;
+      if (!detail.video) {
+        // The host refused the detail call (a WAF rule, a rate limit, a backend
+        // that is down). The card's own links still play, so the player the
+        // visitor just opened is left alone and only the view count is missing.
+        if (detail.refused && detail.status !== 404) {
+          setDetailNotice(`Detail call refused by the backend (HTTP ${detail.status ?? "?"}) — the video still plays from the card's link, but its view was not counted.`);
+        }
+        return;
+      }
+      if (detail.video.views === undefined) return;
       const viewCount = detail.video.views;
       const update = (item: Video) => item.id === video.id && item.backendBase === video.backendBase
         ? { ...item, viewCount, views: formatViews(viewCount) } : item;
@@ -549,7 +565,12 @@ function App() {
   const refreshActiveVideo = async (video: Video): Promise<Video | null> => {
     try {
       const detail = await fetchVideoDetail(video.id, video.backendBase);
-      if (!detail.video) return null;
+      if (!detail.video) {
+        // A refused detail answer does not take the trailer away: the catalogue
+        // already carries a public trailer link (it is public on purpose), so that
+        // is what is handed back. The full stream is never invented here.
+        return detail.refused && video.trailerUrl ? { ...video, videoUrl: "" } : null;
+      }
       const fresh = mapApiVideoToVideo(detail.video, detail.backend ?? video.backendBase ?? "");
       if (!fresh.videoUrl && !fresh.trailerUrl) return null;
       // The player installs this answer itself; `activeVideo` is left alone so the
@@ -651,6 +672,10 @@ function App() {
       <Navbar searchQuery={searchQuery} onSearchChange={handleSearchChange} onSearchSubmit={handleSearch} activeView={activeBrowseView} onNavigate={navigate} accountLabel={account.status === "ready" ? "Account dashboard" : "Sign in"} accountInitial={account.profile?.name.charAt(0).toUpperCase()} onAccountClick={openAccount} />
       <main className="site-main max-w-[1600px] mx-auto px-4 pt-24 pb-10">
         {actionError && !activeVideo && <p role="alert" className="account-action-error sticky top-20 z-40">{actionError}</p>}
+        {/* A refused detail call is not a playback failure: the card's own link is
+            already playing. It is said plainly, once, so the missing view count is
+            never mistaken for a broken video. */}
+        {detailNotice && !activeVideo && <p role="status" className="catalog-status">{detailNotice}</p>}
         {sharedVideoUnavailable && !accountPage && !initialLoading && !apiError && (
           <p role="status" className="mb-4 text-center text-sm text-gray-400">This video is currently unavailable.</p>
         )}
