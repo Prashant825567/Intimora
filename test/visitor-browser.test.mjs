@@ -138,13 +138,13 @@ test("browser calls public discovery and backends directly, with per-tab routing
 
     await pageA.reload();
     await pageA.locator(".hero-banner__image").first().waitFor();
-    assert.equal(state.discoveries, 2, "reload reuses this tab's unexpired selection");
+    assert.equal(state.discoveries, 2, "a reload reuses the stored selection, so no new discovery");
 
     const popupPromise = pageA.waitForEvent("popup");
     await pageA.evaluate(() => window.open("/", "_blank"));
     const popup = await popupPromise;
     await popup.locator(".hero-banner__image").first().waitFor();
-    assert.equal(state.discoveries, 3, "a new tab discovers independently even if sessionStorage was copied");
+    assert.equal(state.discoveries, 2, "a new tab of the same visitor keeps the server it already had");
     await popup.close();
 
     const original = labels[0];
@@ -154,7 +154,8 @@ test("browser calls public discovery and backends directly, with per-tab routing
       return (await api.fetchVideos()).data.nextCursor;
     });
     assert.equal(cursor.backend, backends[original]);
-    await pageA.evaluate(() => { window.__timeOffset = 61_000; });
+    // A day later the stored selection has run out, so the next call asks again.
+    await pageA.evaluate(() => { window.__timeOffset = 24 * 60 * 60 * 1000 + 1_000; });
     state.forcedNext = renewed;
     const search = pageA.getByRole("textbox", { name: "Search videos" });
     await search.fill("demo");
@@ -162,7 +163,7 @@ test("browser calls public discovery and backends directly, with per-tab routing
     await search.press("Enter");
     await searchResponse;
     await pageA.getByText("Search results for").waitFor();
-    assert.equal(state.discoveries, 4);
+    assert.equal(state.discoveries, 3);
     assert.ok(state.calls.some((call) => call.label === renewed && call.path === "/api/search"));
     const paged = await pageA.evaluate(async (savedCursor) => {
       const api = await import("/src/services/api.ts");
