@@ -45,6 +45,9 @@ export function parsePremiumStatus(payload) {
     // An inactive window has no end date worth showing.
     until: active ? epoch(data.until) : 0,
     remainingSeconds: active ? seconds(data.remainingSeconds) : 0,
+    // The server's own clock at the moment it answered. It is what makes the
+    // countdown drift-proof: the visitor's device clock is never trusted.
+    serverNow: epoch(data.serverNow),
     referralCode: text(data.referralCode, 80),
     referrals: {
       total: Number.isFinite(total) && total > 0 ? Math.floor(total) : 0,
@@ -60,6 +63,26 @@ export function parsePremiumStatus(payload) {
 // How long a redemption of `count` referrals buys. The backend computes the real
 // period; this is the same arithmetic it documents, used only for the button's
 // label before the request is sent.
+// The time left, in seconds, at the moment `now` (a Date.now() value in ms). The
+// end date is the server's, so a device clock that is minutes off still shows the
+// right countdown; the server's own `remainingSeconds` is the fallback only when
+// the answer carries no end date. An ended window is 0, never negative.
+export function premiumSecondsLeft(status, now = 0) {
+  if (!status || status.active !== true) return 0;
+  const ms = Number.isFinite(now) ? now : 0;
+  // Server time moves to the visitor's timeline: the answer's clock plus the time
+  // that has passed since it arrived.
+  if (status.until > 0 && status.serverNow > 0 && ms > 0) {
+    const serverMs = status.serverNow * 1000 + Math.max(0, ms - (status.receivedAt || ms));
+    const left = Math.floor((status.until * 1000 - serverMs) / 1000);
+    return left > 0 ? Math.min(left, MAX_SECONDS) : 0;
+  }
+  if (status.until > 0 && status.serverNow > 0) {
+    return Math.min(Math.max(status.until - status.serverNow, 0), MAX_SECONDS);
+  }
+  return seconds(status.remainingSeconds);
+}
+
 export function redemptionSeconds(status, count) {
   const each = status?.referrals?.secondsEach ?? 0;
   const n = Number.isInteger(count) && count > 0 ? count : 0;
