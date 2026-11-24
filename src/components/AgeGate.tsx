@@ -52,7 +52,10 @@ const AgeGate: React.FC<AgeGateProps> = ({ onConfirm }) => {
           </div>
 
           <h1 className="age-gate__title brand-wordmark mb-1">Intimora</h1>
-          <p className="age-gate__subtitle text-gray-500 text-xs tracking-widest uppercase mb-8">Adult Entertainment</p>
+          {/* Sentence case, not all-caps: nineteen characters set in caps read as a
+              label and cost word-shape recognition. gray-500 would measure 4.10:1 on
+              this card, under AA for 12px text, so the line uses gray-400 (7.2:1). */}
+          <p className="age-gate__subtitle text-gray-400 text-xs tracking-wide mb-8">Adult entertainment</p>
 
           {/* Age warning */}
           <div className="age-gate__warning flex items-center gap-2 bg-yellow-900/20 border border-yellow-800/30 rounded-xl p-4 mb-6 text-left">
