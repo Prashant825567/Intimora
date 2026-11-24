@@ -266,6 +266,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
   // it is the same video, so one silent switch keeps playback going; the position
   // is kept and playback resumes from metadata without another click. Only one
   // switch is ever made, so a broken pair can never loop.
+  //
+  // While a locked video is playing its trailer, the byte stream behind it is the
+  // *full* video, not the trailer: the backend refuses it without a premium
+  // window, so switching there would replace a working trailer with a 403. A
+  // trailer that needs recovering is re-asked from the backend instead
+  // (`refreshLinks`), using the token the fresh answer carries.
   const swapToFallback = (element: HTMLVideoElement) => {
     if (locked) return false;
     const fallback = video.fallbackVideoUrl;
@@ -280,9 +286,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
 
   // The link this player should play from a fresh answer: a member's full stream
   // when the backend granted one, otherwise the trailer it may offer instead.
+  // The same rule as `welcomeSource`, so a refreshed answer can never start playing
+  // a full stream this visitor is not allowed to see.
   const sourceFrom = (fresh: Video) => {
     const lockedNow = fresh.locked === true && !fresh.videoUrl?.includes("kind=trailer") && Boolean(fresh.trailerUrl);
-    return lockedNow ? (fresh.trailerUrl as string) : fresh.videoUrl;
+    if (lockedNow) return fresh.trailerUrl as string;
+    // A locked title whose stream link is missing still has its trailer to play;
+    // an empty answer keeps the player on what it already has.
+    return fresh.videoUrl || fresh.trailerUrl || "";
   };
 
   // Install that answer in place of the current one, keeping the position. The

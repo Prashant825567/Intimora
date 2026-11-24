@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { byteStreamUrl, looksLikeMediaFile, playbackSources } from "../src/services/media-source.mjs";
+import { byteStreamUrl, looksLikeMediaFile, playbackSources, trailerSource } from "../src/services/media-source.mjs";
 
 const BACKEND = "https://intimora-api2.site.je";
 const BYTES = `${BACKEND}/api/videos/local-1/stream`;
@@ -71,4 +71,24 @@ test("a relative CDN path is resolved against the backend", () => {
 test("the byte stream URL is built once, without a trailing slash", () => {
   assert.equal(byteStreamUrl(`${BACKEND}/`, "local-1"), BYTES);
   assert.equal(byteStreamUrl("not a url", "local-1"), "not a url/api/videos/local-1/stream");
+});
+
+// The premium answers send a trailer as a plain media file as well as the
+// tokenised stream link. Both are the backend's own; a page or a script never is.
+test("a trailer is accepted only as a plain https media file on our side", () => {
+  assert.equal(trailerSource("/storage/trailers/t1.mp4", BACKEND), `${BACKEND}/storage/trailers/t1.mp4`);
+  assert.equal(trailerSource("/cdn/trailers/9f2a.webm", BACKEND), `${BACKEND}/cdn/trailers/9f2a.webm`);
+  assert.equal(trailerSource("https://files.cdn-host.com/tr/a.mp4", BACKEND), "https://files.cdn-host.com/tr/a.mp4");
+  // A tokenised stream link is not this shape: it is validated, with its token, in
+  // `mediaLinkFrom`, and must not slip through here where no token is checked.
+  assert.equal(trailerSource(`${BACKEND}/api/videos/local-1/stream?kind=trailer&t=abc`, BACKEND), null);
+  assert.equal(trailerSource(`${BACKEND}/api/videos/local-1/stream?t=abc`, BACKEND), null);
+  // Not a media file, not https, not ours.
+  assert.equal(trailerSource("https://bestfile.io/abc/file", BACKEND), null);
+  assert.equal(trailerSource("/storage/trailers/notes.txt", BACKEND), null);
+  assert.equal(trailerSource("http://files.cdn-host.com/a.mp4", BACKEND), null);
+  assert.equal(trailerSource("https://user:pass@files.cdn-host.com/a.mp4", BACKEND), null);
+  assert.equal(trailerSource("javascript:alert(1)", BACKEND), null);
+  assert.equal(trailerSource(null, BACKEND), null);
+  assert.equal(trailerSource("/storage/trailers/a.mp4", ""), null);
 });

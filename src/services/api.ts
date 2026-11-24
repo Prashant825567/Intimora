@@ -12,7 +12,7 @@ import {
   setActiveTarget,
 } from "./php-session.mjs";
 import { recordDiagnostic } from "./diagnostics.mjs";
-import { playbackSources } from "./media-source.mjs";
+import { playbackSources, trailerSource } from "./media-source.mjs";
 import { fetchAnimeStream, hlsPlayable, isHlsLink } from "./anime-api.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
@@ -174,6 +174,36 @@ function hasPremiumMetadata(video: Record<string, unknown>): boolean {
   return labels.some(premiumLabel);
 }
 
+function metadataValue(video: Record<string, unknown>, key: string): unknown {
+  const own = video[key];
+  if (own !== undefined && own !== null) return own;
+  const value = video.metadata;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return own;
+  const nested = value as Record<string, unknown>;
+  const direct = nested[key];
+  if (direct !== undefined && direct !== null) return direct;
+  // Some uploads keep the media facts one level deeper, under `media`.
+  const media = nested.media;
+  return media && typeof media === "object" && !Array.isArray(media)
+    ? (media as Record<string, unknown>)[key]
+    : direct;
+}
+// A link that may live on the record, in `metadata`, or in `metadata.media`; it is
+// kept only when it is a plain string, exactly as `mediaLink` requires.
+function metadataLink(video: Record<string, unknown>, key: string): string | undefined {
+  const value = metadataValue(video, key);
+  return typeof value === "string" ? mediaLink(value) : undefined;
+}
+
+function metadataFlag(video: Record<string, unknown>, key: string): boolean | undefined {
+  const value = metadataValue(video, key);
+  if (value === true || value === 1) return true;
+  if (value === false || value === 0) return false;
+  if (typeof value === "string") return ["true", "1", "yes"].includes(value.trim().toLowerCase()) ? true
+    : ["false", "0", "no", ""].includes(value.trim().toLowerCase()) ? false : undefined;
+  return undefined;
+}
+
 function publicVideo(input: unknown): ApiVideo | null {
   if (!input || typeof input !== "object") return null;
   const video = input as Record<string, unknown>;
@@ -191,9 +221,12 @@ function publicVideo(input: unknown): ApiVideo | null {
     exclusive: hasExclusiveMetadata(video),
     premium: hasPremiumMetadata(video),
     locked: video.locked === true,
-    hasTrailer: video.hasTrailer === true,
-    trailerUrl: mediaLink(video.trailerUrl),
-    trailerSize: nonnegativeNumber(video.trailerSize),
+    // Some answers carry the trailer inside `metadata` instead of on the record.
+    // Both places are read, the record winning, so a trailer that exists is never
+    // missed — a missing trailer is what made a locked video unplayable.
+    hasTrailer: video.hasTrailer === true || metadataFlag(video, "hasTrailer") === true,
+    trailerUrl: metadataLink(video, "trailerUrl"),
+    trailerSize: nonnegativeNumber(video.trailerSize) ?? nonnegativeNumber(metadataValue(video, "trailerSize")),
     creator: safeText(video.creator, 200),
     uploadedAt: safeText(video.uploadedAt, 100),
     createdAt: timestampMs(video.createdAt) ?? timestampMs(video.uploadedAt),
@@ -323,9 +356,25 @@ export async function fetchLikeCounts(ids: string[], backend: string, signal?: A
   return parseLikeCounts(body?.data, ids);
 }
 
+// The detail answer carries the view count and the media links. A host can refuse
+// the call itself (a WAF rule, a rate limit, a blocked visitor): that is reported
+// as `detailFailed` instead of a generic failure, because the card the visitor
+// already has is still good — the player must not be taken away for it.
 export async function fetchVideoDetail(id: string, backend?: string) {
-  const result = await visitor.requestJson(videoPath(id), undefined, backend);
-  return { ok: true as const, video: publicVideo(result.body?.data), backend: result.backend };
+  try {
+    const result = await visitor.requestJson(videoPath(id), undefined, backend);
+    return { ok: true as const, video: publicVideo(result.body?.data), backend: result.backend, detailFailed: false };
+  } catch (error) {
+    const refused = typeof error === "object" && error !== null && (error as { detailFailed?: boolean }).detailFailed === true;
+    return {
+      ok: false as const,
+      video: null,
+      backend: backend ?? "",
+      detailFailed: true,
+      status: refused ? (error as { status?: number }).status : undefined,
+      refused,
+    };
+  }
 }
 
 export async function shareVideo(id: string, backend?: string) {
@@ -352,17 +401,32 @@ export function mediaLinkFrom(raw: unknown, backend: string, kind: "stream" | "t
   let url: URL;
   try { url = new URL(value); } catch { return null; }
   if (url.protocol !== "https:" || url.origin !== base.origin) return null;
-  if (url.username || url.password || url.hash) return null;
+  if (url.username || url.password) return null;
   if (!/^\/api\/videos\/[A-Za-z0-9_-]{1,128}\/stream$/.test(url.pathname)) return null;
-  const token = url.searchParams.get("t");
-  if (!token || token.length > 512 || url.searchParams.getAll("t").length !== 1) return null;
+  // The query may carry only the token, plus `kind=trailer` on a trailer link.
   for (const key of url.searchParams.keys()) {
     if (key !== "t" && !(kind === "trailer" && key === "kind")) return null;
   }
   if (kind === "trailer" && url.searchParams.get("kind") !== "trailer") return null;
   if (kind === "stream" && url.searchParams.get("kind") !== null) return null;
+  const tokens = url.searchParams.getAll("t");
+  if (tokens.length > 1) return null;
+  if (tokens.length === 1) {
+    const token = tokens[0];
+    if (!token || token.length > 512) return null;
+    return url.href;
+  }
+  // No `t` in the query: the token may instead be the fragment a media element
+  // sends (`#t=<token>`, or the bare token some deploy scripts build). It is the
+  // backend's own token either way, and nothing else may ride along with it.
+  const hash = url.hash.replace(/^#/, "");
+  if (!hash || hash.length > 512 || !/^[A-Za-z0-9._~-]+$/.test(hash)) return null;
   return url.href;
 }
+
+// Exported for the trailer tests only: the payload and the backend go in, the
+// mapped record comes out, with no network involved.
+export const publicVideoForTest = publicVideo;
 
 export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video => {
   // Validate the id the same way every other media URL does before it is used.
@@ -389,11 +453,17 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     // A locked video gets a tokenised stream when the visitor's premium window is
     // open; otherwise the backend sends no stream at all and the player must not
     // build one itself — it would only be refused.
+    // A locked video without a trailer has nothing to play: the backend sent no
+    // stream link and no trailer, so the player says so instead of asking for a
+    // stream it knows will be refused. A locked video *with* a trailer keeps the
+    // byte path behind the trailer, exactly as the tokenised form does.
     videoUrl: mediaLinkFrom(apiVideo.streamUrl, backend, "stream")
-      ?? (apiVideo.locked === true && !apiVideo.trailerUrl ? "" : playback.videoUrl),
+      ?? (apiVideo.locked === true && !(apiVideo.trailerUrl && trailerSource(apiVideo.trailerUrl, backend)) && !apiVideo.hasTrailer ? "" : playback.videoUrl),
     fallbackVideoUrl: playback.fallbackVideoUrl,
     locked: apiVideo.locked === true,
-    trailerUrl: mediaLinkFrom(apiVideo.trailerUrl, backend, "trailer"),
+    // The tokenised stream form, or the direct media file the newer answers send.
+    // Only the first keeps its token; the second carries none.
+    trailerUrl: mediaLinkFrom(apiVideo.trailerUrl, backend, "trailer") ?? trailerSource(apiVideo.trailerUrl, backend),
     backendBase: backend,
     creator: apiVideo.creator || "Intimora",
     creatorAvatar: "/logo.png",

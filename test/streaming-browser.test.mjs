@@ -99,6 +99,14 @@ function premiumVideo(premiumMode, format, tokens = {}) {
       trailerUrl: `/api/videos/sample-1/stream?kind=trailer&t=${trailerToken}`,
     };
   }
+  if (premiumMode === "direct-trailer") {
+    // The other shape the premium answers send: a plain media file on the backend,
+    // not the tokenised stream route. It must play exactly like the tokenised one.
+    return {
+      ...base, premium: true, locked: true, hasTrailer: true, streamUrl: null,
+      trailerUrl: "/storage/trailers/sample-1.mp4",
+    };
+  }
   if (premiumMode === "locked-noTrailer") {
     return { ...base, premium: true, locked: true, hasTrailer: false, streamUrl: null, trailerUrl: null };
   }
@@ -132,7 +140,7 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
   let backendServer;
   let vite;
   let browser;
-  const state = { calls: [], pending: [], pendingDetails: [], holdMedia, holdAfter, holdDetail, failMedia, failCatalog,
+  const state = { calls: [], pending: [], pendingDetails: [], holdMedia, holdAfter, holdDetail, failMedia, failCatalog, refuseDetail: 0,
     streamToken: "stream-token", trailerToken: "trailer-token",
     // The number of first media requests to refuse as expired: the token rotates
     // and the next detail answer carries the new one, which is what a link that
@@ -190,6 +198,15 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         res.end(JSON.stringify({ error: "Link expired — reload the page" }));
         return;
       }
+      // A trailer that is a plain file on the backend (the direct shape) is served
+      // from its own path; a locked video's full stream stays refused without a
+      // premium window, which is exactly why the player must never swap to it.
+      if (url.pathname === "/storage/trailers/sample-1.mp4") {
+        state.directTrailerCalls = (state.directTrailerCalls ?? 0) + 1;
+        res.writeHead(200, { ...cors, "Content-Type": `video/${format}`, "Accept-Ranges": "bytes", "Content-Length": clip.length });
+        res.end(clip);
+        return;
+      }
       if (url.pathname === "/api/videos/sample-1/stream" && url.searchParams.get("kind") === "trailer") {
         // The trailer is public: it plays without any premium window.
         const match = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || "");
@@ -199,6 +216,14 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
         return;
       }
       if (url.pathname === "/api/videos/sample-1") {
+        // A Vercel deployment can refuse this call on its own (a WAF rule, a rate
+        // limit). The card's links are still good, so the player must survive it.
+        if (state.refuseDetail > 0) {
+          state.refuseDetail -= 1;
+          res.writeHead(403, { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" });
+          res.end(JSON.stringify({ error: "Forbidden" }));
+          return;
+        }
         // The detail answer is what the player opens with; a stale token here is
         // exactly a link that ran out before the visitor pressed play.
         state.detailAnswers += 1;
@@ -816,6 +841,68 @@ test("a premium video asks a guest to sign in before anything plays", options, a
     assert.equal(new URL(page.url()).pathname, "/login");
     await page.getByRole("button", { name: "Sign in with Google" }).waitFor();
     assert.equal(await page.locator("#player-container").count(), 0, "the player is closed");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// A detail call the host refuses itself (a WAF rule, a rate limit, a host that
+// answers the browser only from one region) must not cost the visitor the video:
+// the catalogue already carries a working stream link, so the player stays open and
+// only the view count is missing. The refusal is reported once, by reason.
+test("a refused detail call keeps the video playing and says why", options, async () => {
+  const fixture = await createFixture({ format: "mp4" });
+  fixture.state.refuseDetail = 1;
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    await player.locator("video").waitFor();
+    // The card's own link plays: nothing was taken away because the detail call
+    // was refused.
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && video.readyState >= 2;
+    }, undefined, { timeout: 20_000 });
+    assert.equal(await player.getByText(/currently unavailable/i).count(), 0, "the player is not replaced by an error");
+    assert.equal(await player.locator("video").count(), 1);
+    // The refusal is named, not hidden: the view count could not be counted.
+    await player.getByRole("button", { name: "Close video player" }).click();
+    await player.waitFor({ state: "detached" });
+    await page.getByRole("status").filter({ hasText: /refused by the backend \(HTTP 403\)/ }).first().waitFor();
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+// The premium answers can point at a plain trailer file instead of the tokenised
+// stream route. That link was dropped in the mapping step before it ever reached
+// the player, so the video promised a trailer and had nothing to play. It must now
+// play exactly like the tokenised form — and the full stream must never be asked
+// for, because the backend refuses it without a premium window.
+test("a locked video plays a direct trailer file, never the refused full stream", options, async () => {
+  const fixture = await createFixture({ premiumMode: "direct-trailer", signedIn: true });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    await player.waitFor();
+    const media = player.locator("video");
+    await media.waitFor();
+    assert.equal(await media.getAttribute("src"), `${fixture.backend}/storage/trailers/sample-1.mp4`,
+      "the trailer the backend sent is what plays, exactly as sent");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && video.readyState >= 2;
+    }, undefined, { timeout: 20_000 });
+    assert.ok((fixture.state.directTrailerCalls ?? 0) >= 1, "the direct trailer was fetched");
+    assert.ok(!fixture.state.calls.some((call) => call.path === "/api/videos/sample-1/stream"),
+      "the full stream is never requested for a locked video");
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }
