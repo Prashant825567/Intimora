@@ -165,7 +165,9 @@ export async function getPremiumStatus(user: FirebaseUser, backend?: string) {
   const result = await request("/api/premium/status", { token: await token(user), backend });
   const status = parsePremiumStatus(result.data);
   if (!status) throw new AccountRequestError();
-  return { status, backend: result.backend };
+  // Stamped here, at the one place an answer arrives: the countdown needs to know
+  // how long ago the server's clock was read.
+  return { status: { ...status, receivedAt: Date.now() }, backend: result.backend };
 }
 
 export async function getPremiumHistory(user: FirebaseUser, backend?: string) {

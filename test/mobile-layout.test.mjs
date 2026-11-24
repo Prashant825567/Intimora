@@ -361,3 +361,99 @@ test("phone layouts stay within the viewport while desktop styling is preserved"
     await server.close();
   }
 });
+
+// The 18+ gate's own rhythm: the terms line is grouped with the button it
+// describes (never with the warning above it), the card keeps breathing room
+// below its last line, and the small print is readable on the dark card.
+test("the age gate separates its terms from the warning and keeps its small print readable", {
+  skip: browserAvailable ? false : "Install Chromium with npx playwright-core install chromium, or set CHROMIUM_PATH",
+  timeout: 60_000,
+}, async () => {
+  const server = await createViteServer({
+    configFile: path.join(root, "vite.config.ts"),
+    logLevel: "silent",
+    server: { host: "127.0.0.1", port: await availablePort(), strictPort: true },
+  });
+  let browser;
+  try {
+    await server.listen();
+    const address = server.httpServer.address();
+    const base = `http://127.0.0.1:${address.port}`;
+    browser = await chromium.launch({ executablePath: browserPath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await mockApi(page);
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await page.evaluate(() => sessionStorage.removeItem("intimora_age_verified"));
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.locator(".age-gate__card").waitFor();
+
+    const gaps = await page.evaluate(() => {
+      const box = (selector) => document.querySelector(selector)?.getBoundingClientRect();
+      const warning = box(".age-gate__warning");
+      const terms = box(".age-gate__terms");
+      const card = box(".age-gate__card");
+      const privacy = box(".age-gate__privacy");
+      const enter = document.querySelector(".age-gate__card button")?.getBoundingClientRect();
+      return {
+        above: warning && terms ? Math.round(terms.top - warning.bottom) : -1,
+        below: terms && enter ? Math.round(enter.top - terms.bottom) : -1,
+        cardBottom: card && privacy ? Math.round(card.bottom - privacy.bottom) : -1,
+        privacyColor: getComputedStyle(document.querySelector(".age-gate__privacy")).color,
+        termsColor: getComputedStyle(document.querySelector(".age-gate__terms")).color,
+      };
+    });
+    // A larger gap above than the warning keeps below is what groups the sentence
+    // with the ENTER button instead of the warning box.
+    assert.ok(gaps.above >= 16, `the terms line keeps room above it (got ${gaps.above}px)`);
+    assert.ok(gaps.below >= 16, `the terms line stays off the ENTER button (got ${gaps.below}px)`);
+    assert.ok(gaps.cardBottom >= 20, `the card keeps bottom padding under the small print (got ${gaps.cardBottom}px)`);
+    // Measured against the card's own dark surface: gray-400 is 7.8:1, far past
+    // the 4.5:1 AA floor the previous gray-700 (1.92:1) missed.
+    // Chromium reports Tailwind v4 colours as `oklch(...)`, older builds as `rgb(...)`.
+    // Both are brought to linear-light RGB before the WCAG ratio is taken.
+    const luminance = (color) => {
+      const raw = color.match(/[\d.]+/g)?.map(Number) ?? [];
+      if (color.startsWith("oklch")) {
+        const [l, c, h] = raw;
+        const a = c * Math.cos((h * Math.PI) / 180);
+        const b = c * Math.sin((h * Math.PI) / 180);
+        const lms = [
+          (l + 0.3963377774 * a + 0.2158037573 * b) ** 3,
+          (l - 0.1055613458 * a - 0.0638541728 * b) ** 3,
+          (l - 0.0894841775 * a - 1.291485548 * b) ** 3,
+        ];
+        const [r, g, bl] = [
+          4.0767416621 * lms[0] - 3.3077115913 * lms[1] + 0.2309699292 * lms[2],
+          -1.2684380046 * lms[0] + 2.6097574011 * lms[1] - 0.3413193965 * lms[2],
+          -0.0041960863 * lms[0] - 0.7034186147 * lms[1] + 1.707614701 * lms[2],
+        ].map((value) => Math.min(1, Math.max(0, value)));
+        return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+      }
+      const [r, g, b] = raw.slice(0, 3).map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (color) => {
+      // The card paints a gradient from #111111 to #0a0a0a; the lighter stop is
+      // the worst case, so the ratio is taken against that one.
+      const card = luminance("rgb(17, 17, 17)");
+      return (luminance(color) + 0.05) / (card + 0.05);
+    };
+    for (const [name, color] of [["terms", gaps.termsColor], ["privacy", gaps.privacyColor]]) {
+      assert.ok(contrast(color) >= 4.5, `${name} line is readable on the card (got ${contrast(color).toFixed(2)}:1)`);
+    }
+    // The terms line is announced together with the button it describes.
+    assert.equal(await page.getByRole("button", { name: /I AM 18/i }).getAttribute("aria-describedby"), "age-gate-terms");
+    // Nothing in the gate pretends to be a link it is not.
+    assert.equal(await page.locator(".age-gate__privacy a, .age-gate__terms a").count(), 0, "the small print offers no dead link");
+    assert.deepEqual(errors, []);
+    await page.close();
+  } finally {
+    if (browser) await browser.close();
+    await server.close();
+  }
+});

@@ -98,7 +98,7 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
     redeemCalls: [],
     premiumPeriods: [],
     premium: {
-      active: false, until: 0, remainingSeconds: 0, referralCode: "REF-U1X9",
+      active: false, until: 0, remainingSeconds: 0, serverNow: 0, referralCode: "REF-U1X9",
       referrals: { total: 4, used: 2, available: 2, availableCodes: ["REF-A1B2C3", "REF-D4E5F6"], secondsEach: 9000, hoursEach: 2.5 },
     },
   };
@@ -183,7 +183,10 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
       state.premium = {
         ...state.premium,
         active: true,
-        until: 1795400000,
+        // The live answer: an absolute end date plus the server's own clock, so the
+        // panel can count down without asking again.
+        until: Math.floor(Date.now() / 1000) + seconds,
+        serverNow: Math.floor(Date.now() / 1000),
         remainingSeconds: seconds,
         referrals: { ...state.premium.referrals, available: state.premium.referrals.available - count, used: state.premium.referrals.used + count },
       };
@@ -864,6 +867,48 @@ test("the dashboard shows the premium window and redeems referrals through the b
       await page.setViewportSize({ width, height: 844 });
       await assertFits(page);
     }
+    assert.deepEqual(fixture.errors, []);
+  } finally { await fixture.close(); }
+});
+
+// The window counts down on the visitor's screen from the server's own clock: the
+// number moves every second without a request, and the moment the server's end
+// date passes the panel says the window is over — no reload, no stale "active".
+test("the premium window counts down live and ends on the server's own clock", browserOptions, async () => {
+  const fixture = await createFixture({ exists: true, ownProfile: profile({}) });
+  const { page, state, base } = fixture;
+  try {
+    // A window that is open and about to close, in the backend's own shape.
+    state.premium = {
+      ...state.premium,
+      active: true,
+      until: Math.floor(Date.now() / 1000) + 4,
+      serverNow: Math.floor(Date.now() / 1000),
+      remainingSeconds: 4,
+    };
+    await page.goto(`${base}/dashboard`);
+    await page.getByRole("button", { name: "Sign in with Google" }).click();
+    const premium = page.getByRole("region", { name: "Premium" });
+    await premium.waitFor();
+    // The countdown starts from the server's clock and moves on its own. The first
+    // reading is caught as a number that later goes down, so a slow machine that
+    // renders at 3s cannot fail the test.
+    const live = page.locator(".premium-panel__state--active");
+    await live.waitFor();
+    const read = async () => Number((await live.innerText()).match(/(\d+)s baaki/)?.[1]);
+    const statusCalls = () => state.calls.filter((call) => call.path === "/api/premium/status").length;
+    const before = statusCalls();
+    const first = await read();
+    assert.ok(Number.isFinite(first) && first > 0 && first <= 4, `the countdown starts from the answer (got ${first})`);
+    await page.waitForFunction((expected) => {
+      const text = document.querySelector(".premium-panel__state--active")?.textContent ?? "";
+      const seconds = Number(text.match(/(\d+)s baaki/)?.[1]);
+      return Number.isFinite(seconds) && seconds < expected;
+    }, first, { timeout: 5_000 });
+    assert.equal(statusCalls(), before, "the countdown ticks without asking the server again");
+    // Past the end date the window is over, even though the last answer said active.
+    await premium.getByText(/Premium window khatam ho gaya/).waitFor({ timeout: 10_000 });
+    await premium.getByRole("button", { name: /Use 1 referral/ }).waitFor();
     assert.deepEqual(fixture.errors, []);
   } finally { await fixture.close(); }
 });

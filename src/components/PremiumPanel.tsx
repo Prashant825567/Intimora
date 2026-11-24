@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import type { FirebaseUser } from "../services/firebase";
 import { getPremiumHistory, getPremiumStatus, redeemReferrals } from "../services/account-api";
-import { formatPremiumWindow, redeemErrorMessage, redemptionSeconds } from "../services/premium.mjs";
+import { formatPremiumWindow, premiumSecondsLeft, redeemErrorMessage, redemptionSeconds } from "../services/premium.mjs";
 import type { PremiumHistory, PremiumStatus } from "../services/premium.mjs";
 import { AccountRequestError } from "../services/auth-request.mjs";
 
@@ -25,6 +25,26 @@ export default function PremiumPanel({ user, backend, onChanged }: Props) {
   const [busy, setBusy] = useState(0);
   const [message, setMessage] = useState("");
   const [revision, setRevision] = useState(0);
+  // One tick per second only while a window is open: the countdown is drawn from
+  // the server's `until`/`serverNow`, so it keeps moving with no extra requests.
+  const [now, setNow] = useState(() => Date.now());
+  const activeWindow = status?.active === true;
+
+  useEffect(() => {
+    if (!activeWindow) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [activeWindow]);
+
+  // A window that was already open is re-read once a minute, quietly, so the page
+  // never disagrees with the server for long — and a window the backend has since
+  // closed (or extended) shows up without a reload. No spinner, no scroll jump.
+  useEffect(() => {
+    if (!activeWindow) return;
+    const timer = setInterval(() => setRevision((value) => value + 1), 60_000);
+    return () => clearInterval(timer);
+  }, [activeWindow]);
 
   useEffect(() => {
     let active = true;
@@ -67,7 +87,10 @@ export default function PremiumPanel({ user, backend, onChanged }: Props) {
   };
 
   const available = status?.referrals.available ?? 0;
-  const active = status?.active === true;
+  const active = activeWindow;
+  // What the visitor reads: the live count until the server's end date. Falls to
+  // 0 (and the panel switches to "not active") the moment it runs out.
+  const secondsLeft = premiumSecondsLeft(status, now);
   const open = (count: number) => redemptionSeconds(status, count);
 
   return (
@@ -81,10 +104,14 @@ export default function PremiumPanel({ user, backend, onChanged }: Props) {
           </div>
         ) : status ? (
           <>
-            {active ? (
+            {active && secondsLeft > 0 ? (
               <p className="premium-panel__state premium-panel__state--active" role="status">
-                <ShieldCheck className="inline w-4 h-4" /> Premium active · {formatPremiumWindow(status.remainingSeconds)} baaki
+                <ShieldCheck className="inline w-4 h-4" /> Premium active · {formatPremiumWindow(secondsLeft)} baaki
               </p>
+            ) : active ? (
+              // The countdown reached the server's end date: the window is over,
+              // and the panel says so before the next status read confirms it.
+              <p className="premium-panel__state" role="status">Premium window khatam ho gaya — premium videos ka sirf trailer chalega.</p>
             ) : (
               <p className="premium-panel__state" role="status">Premium active nahi hai — premium videos ka sirf trailer chalega.</p>
             )}

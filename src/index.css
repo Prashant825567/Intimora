@@ -538,7 +538,7 @@ img {
   }
 
   .age-gate__card {
-    padding: 1.25rem;
+    padding: 1.25rem 1.25rem 1.75rem;
   }
 
   .age-gate__logo-wrap {
@@ -564,8 +564,13 @@ img {
     padding: 0.75rem;
   }
 
-  .age-gate__privacy {
+  /* The terms line belongs to the ENTER button, not to the warning above it. */
+  .age-gate__terms {
     margin-top: 1rem;
+  }
+
+  .age-gate__privacy {
+    margin-top: 1.5rem;
   }
 
   /* A phone shows the poster alone — the reference is a banner, not a text
