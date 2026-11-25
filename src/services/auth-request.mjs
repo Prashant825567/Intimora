@@ -7,7 +7,7 @@ const VIDEO_ACTION = /^\/api\/videos\/[A-Za-z0-9_-]{1,128}\/(?:like|save)$/;
 // spec forbids them on OPTIONS), which is exactly what a free host's JavaScript
 // check answers with an HTML page — and an HTML page has no CORS headers.
 const GET_ROUTES = new Set(["/api/auth/me", "/api/user/referrals", "/api/premium/status", "/api/premium/history"]);
-const POST_ROUTES = new Set(["/api/auth/verify", "/api/auth/profile", "/api/premium/redeem"]);
+const POST_ROUTES = new Set(["/api/auth/verify", "/api/auth/profile", "/api/premium/redeem", "/api/premium/viewer"]);
 const ACCOUNT_ROUTES = new Set([...GET_ROUTES, ...POST_ROUTES]);
 // A "simple" content type: no preflight, and the JSON travels as plain text.
 const SIMPLE_CONTENT_TYPE = "text/plain";

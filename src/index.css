@@ -1026,6 +1026,15 @@ img {
 .premium-panel__history li { display: flex; justify-content: space-between; gap: 0.75rem; padding: 0.45rem 0.7rem; border: 1px solid #2c2822; border-radius: 0.55rem; color: #d6d0c6; font-size: 0.82rem; text-transform: capitalize; }
 .premium-panel__history li span:last-child { color: #e8cf85; font-variant-numeric: tabular-nums; }
 .dashboard__empty { padding: 1.25rem; border: 1px dashed #3b352b; border-radius: 0.8rem; color: #aaa49a; font-size: 0.875rem; line-height: 1.5; }
+/* One dashboard, four sections: the premium window and the referral code stay
+   visible, and the rest is split into tabs instead of one endless page. */
+.dashboard__tabs { display: flex; gap: 0.4rem; margin: 1.5rem 0 0.25rem; padding-bottom: 0.35rem; overflow-x: auto; border-bottom: 1px solid #2b2620; }
+.dashboard__tab { display: inline-flex; flex: none; align-items: center; gap: 0.4rem; padding: 0.55rem 0.95rem; border: 1px solid transparent; border-radius: 999px 999px 0 0; color: #aaa49a; font-size: 0.85rem; font-weight: 700; white-space: nowrap; }
+.dashboard__tab:hover { color: #f0d080; }
+.dashboard__tab.is-active { border-color: #554525; border-bottom-color: transparent; background: #1c1811; color: #f0d080; }
+.dashboard__tab span { padding: 0 0.4rem; border-radius: 999px; background: #2a2520; color: #d8b759; font-size: 0.7rem; }
+.dashboard__more { display: inline-flex; align-items: center; gap: 0.35rem; margin-top: 0.85rem; color: #d8b759; font-size: 0.82rem; font-weight: 700; }
+.dashboard__more:hover { color: #f0d080; }
 /* Referral flow: small nodes joined by arrows, like a workflow canvas. The
    connectors are CSS borders on a nested list, so the tree reflows instead of
    cropping on a narrow screen. */

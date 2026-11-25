@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FirebaseUser } from "../services/firebase";
 import { signInWithGoogle, signOutGoogle, watchFirebaseUser } from "../services/firebase";
-import { createAccount, getMyAccount, toggleAccountVideo, verifyAccount } from "../services/account-api";
+import { createAccount, getMyAccount, primePremiumViewer, toggleAccountVideo, verifyAccount } from "../services/account-api";
+import { setViewerRefresher } from "../services/premium-viewer.mjs";
 import type { AccountProfile, SavedAnime } from "../services/account-api";
 import { ANIME_ID_PREFIX } from "../services/anime-api.mjs";
 import { AccountRequestError } from "../services/auth-request.mjs";
@@ -184,6 +185,25 @@ export function useAccount(enabled: boolean) {
       }
     }
   }, [state.profile, state.status]);
+
+  // Keep the signed viewer token alive for as long as this tab is signed in, so
+  // a video opened after hours in the background is still answered as this
+  // account's premium instead of arriving as a guest.
+  useEffect(() => {
+    const user = state.identity;
+    if (!enabled || !user) { setViewerRefresher(null); return; }
+    const refresh = () => primePremiumViewer(user);
+    setViewerRefresher(refresh);
+    void refresh().catch(() => {});
+    const timer = setInterval(() => { void refresh().catch(() => {}); }, 20 * 60 * 1000);
+    const onVisibility = () => { if (document.visibilityState === "visible") void refresh().catch(() => {}); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      setViewerRefresher(null);
+    };
+  }, [enabled, state.identity]);
 
   const holds = (list: SavedAnime[] | undefined, id: string) => (list ?? []).some((entry) => entry.id === id);
   // The signed-in visitor's Firebase token, for the one public read whose answer

@@ -13,6 +13,7 @@ import {
 } from "./php-session.mjs";
 import { recordDiagnostic } from "./diagnostics.mjs";
 import { playbackSources, trailerSource } from "./media-source.mjs";
+import { ensureViewerToken, viewerQuery } from "./premium-viewer.mjs";
 import { fetchAnimeStream, hlsPlayable, isHlsLink } from "./anime-api.mjs";
 import { LIKE_COUNT_BATCH_SIZE, parseLikeCounts } from "./like-counts.mjs";
 
@@ -305,8 +306,17 @@ const formatDate = (createdAt: number | undefined): string => {
   return `${Math.floor(diff / 31536000)} years ago`;
 };
 
+// The video reads carry the signed viewer token when this tab has one, so the
+// backend can shape premium answers for the account on a preflight-free GET.
+function withViewer(path: string): string {
+  const viewer = viewerQuery();
+  if (!viewer) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}${viewer}`;
+}
+
 async function catalog(path: string, pinnedBackend?: string): Promise<CatalogResponse> {
-  const { body, backend, invalidate } = await visitor.requestJson(path, undefined, pinnedBackend);
+  await ensureViewerToken();
+  const { body, backend, invalidate } = await visitor.requestJson(withViewer(path), undefined, pinnedBackend);
   if (!Array.isArray(body?.data?.videos)) {
     // The server answered, but not in the shape this client reads. That is a
     // different problem from a check page, so it is reported as one.
@@ -388,8 +398,12 @@ export async function fetchLikeCounts(ids: string[], backend: string, signal?: A
 // (a guest) the call is exactly what it was before.
 export async function fetchVideoDetail(id: string, backend?: string, token?: string) {
   const headers = typeof token === "string" && token ? { Authorization: `Bearer ${token}` } : undefined;
+  // A host behind a browser check refuses the preflight that Authorization
+  // header would trigger, so the account also travels as a short-lived signed
+  // viewer token. That one is a plain query parameter and needs no preflight.
+  await ensureViewerToken();
   try {
-    const result = await visitor.requestJson(videoPath(id), headers ? { headers } : undefined, backend);
+    const result = await visitor.requestJson(withViewer(videoPath(id)), headers ? { headers } : undefined, backend);
     return { ok: true as const, video: publicVideo(result.body?.data), backend: result.backend, detailFailed: false };
   } catch (error) {
     const refused = typeof error === "object" && error !== null && (error as { detailFailed?: boolean }).detailFailed === true;

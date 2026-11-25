@@ -47,9 +47,13 @@ function apiUrl(base, path, method, body) {
     if (action && method !== "POST") return null;
     if (visit && method !== "POST") return null;
     if (!action && !visit && method !== "GET") return null;
-    const allowedParams = route.pathname === "/api/videos" ? ["cursor", "limit"]
-      : route.pathname === "/api/search" ? ["q"]
-        : route.pathname === "/api/likes/counts" ? ["ids"] : [];
+    // `viewer` is the short-lived signed token that lets a premium answer be
+    // shaped for this account; it is scoped to the video reads only.
+    const videoDetail = /^\/api\/videos\/[A-Za-z0-9_-]{1,128}$/.test(route.pathname);
+    const allowedParams = route.pathname === "/api/videos" ? ["cursor", "limit", "viewer"]
+      : route.pathname === "/api/search" ? ["q", "viewer"]
+        : videoDetail ? ["viewer"]
+          : route.pathname === "/api/likes/counts" ? ["ids"] : [];
     for (const key of route.searchParams.keys()) {
       if (!allowedParams.includes(key) || route.searchParams.getAll(key).length !== 1) return null;
     }

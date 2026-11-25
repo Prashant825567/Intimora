@@ -34,7 +34,10 @@ interface Props {
 const validName = (value: string) => value.trim().length >= 1 && value.trim().length <= 100;
 const validUsername = (value: string) => /^[A-Za-z0-9_]{3,30}$/.test(value.trim());
 
+type DashboardTab = "overview" | "liked" | "saved" | "referrals";
+
 export default function AccountPages({ page, account, videos, catalogLoading, catalogUnavailable, onRetryCatalog, renderVideos, renderAnime, onPage, onBack, onPremiumChanged }: Props) {
+  const [tab, setTab] = useState<DashboardTab>("overview");
   const [name, setName] = useState(account.identity?.displayName || "");
   const [username, setUsername] = useState("");
   const [referral, setReferral] = useState("");
@@ -61,7 +64,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
     let cancelled = false;
     setTree(null);
     setTreeError(false);
-    if (page !== "dashboard" || !identity || !ownCode || !referralsEnabled) {
+    if (page !== "dashboard" || tab !== "referrals" || !identity || !ownCode || !referralsEnabled) {
       setTreeLoading(false);
       return;
     }
@@ -72,7 +75,7 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
       if (!cancelled) setTreeError(true);
     }).finally(() => { if (!cancelled) setTreeLoading(false); });
     return () => { cancelled = true; };
-  }, [page, identity, ownCode, profileBackend, treeRevision]);
+  }, [page, tab, identity, ownCode, profileBackend, treeRevision]);
 
   const submitProfile = (event: FormEvent) => {
     event.preventDefault();
@@ -219,32 +222,68 @@ export default function AccountPages({ page, account, videos, catalogLoading, ca
         <div><span>Your referral code</span><strong>{profile.referralCode}</strong><small>Share this code with someone you invite.</small></div>
         <button type="button" onClick={copyCode} aria-label="Copy referral code">{copied ? <Check size={17} /> : <Copy size={17} />} {copied ? "Copied" : "Copy"}</button>
       </div>
-      {catalogUnavailable && (profile.likedIds.length > 0 || profile.savedIds.length > 0) && <div className="catalog-status" role="status"><span>We could not check the full video catalog.</span><button type="button" className="catalog-status__retry" onClick={onRetryCatalog}>Retry</button></div>}
-      <section className="dashboard__section" aria-label="Liked videos">
-        <h2><Heart size={19} /> Liked videos <span>{hasLiked}</span></h2>
-        {liked.length ? renderVideos(liked) : !profile.likedIds.length && !catalogLoading && !likedAnime.length ? <p className="dashboard__empty">No liked videos yet.</p> : null}
-        {!liked.length && profile.likedIds.length > 0 && (catalogLoading ? <p className="dashboard__empty">Loading videos…</p> : <p className="dashboard__empty">Liked videos are currently unavailable.</p>)}
-        {likedAnime.length > 0 && (renderAnime ? renderAnime(likedAnime) : null)}
-        {!catalogLoading && liked.length > 0 && missingLiked > 0 && <p className="account-hint">Some liked videos are currently unavailable.</p>}
-      </section>
-      <section className="dashboard__section" aria-label="Saved videos">
-        <h2><Bookmark size={19} /> Saved videos <span>{hasSaved}</span></h2>
-        {saved.length ? renderVideos(saved) : !profile.savedIds.length && !catalogLoading && !savedAnime.length ? <p className="dashboard__empty">No saved videos yet.</p> : null}
-        {!saved.length && profile.savedIds.length > 0 && (catalogLoading ? <p className="dashboard__empty">Loading videos…</p> : <p className="dashboard__empty">Saved videos are currently unavailable.</p>)}
-        {savedAnime.length > 0 && (renderAnime ? renderAnime(savedAnime) : null)}
-        {!catalogLoading && saved.length > 0 && missingSaved > 0 && <p className="account-hint">Some saved videos are currently unavailable.</p>}
-      </section>
-      <section className="dashboard__section" aria-label="Referral network">
-        <h2><Users size={19} /> Your referral network</h2>
-        {referralsEnabled && !treeLoading && !treeError && tree && <button type="button" className="catalog-status__retry" onClick={() => setTreeRevision((revision) => revision + 1)}>Refresh referrals</button>}
-        {!referralsEnabled ? <p className="dashboard__empty">Referral details are temporarily unavailable while privacy protection is updated.</p>
-          : treeLoading ? <p className="dashboard__empty">Loading referrals…</p>
-            : treeError ? <div className="dashboard__empty"><p role="alert">Could not load referrals right now.</p><button type="button" className="catalog-status__retry" onClick={() => setTreeRevision((revision) => revision + 1)}>Retry referrals</button></div>
-              : tree?.direct.length ? <>
-                <p className="account-hint">Direct: {tree.direct.length} · Level 2: {tree.level2.length}</p>
-                <ReferralFlow tree={tree} ownName={profile.name} ownCode={profile.referralCode} />
-              </> : <p className="dashboard__empty">No referrals yet. Share your code to invite someone.</p>}
-      </section>
+      <div className="dashboard__tabs" role="tablist" aria-label="Dashboard sections">
+        {([["overview", "Overview"], ["liked", "Liked"], ["saved", "Saved"], ["referrals", "Referrals"]] as const).map(([key, label]) => (
+          <button key={key} type="button" role="tab" aria-selected={tab === key} className={`dashboard__tab ${tab === key ? "is-active" : ""}`} onClick={() => setTab(key)}>
+            {label}
+            {key === "liked" && <span>{hasLiked}</span>}
+            {key === "saved" && <span>{hasSaved}</span>}
+          </button>
+        ))}
+      </div>
+
+      {catalogUnavailable && tab !== "referrals" && (profile.likedIds.length > 0 || profile.savedIds.length > 0) && <div className="catalog-status" role="status"><span>We could not check the full video catalog.</span><button type="button" className="catalog-status__retry" onClick={onRetryCatalog}>Retry</button></div>}
+
+      {tab === "overview" && (
+        <>
+          <section className="dashboard__section" aria-label="Recently liked videos">
+            <h2><Heart size={19} /> Recently liked <span>{hasLiked}</span></h2>
+            {liked.length ? renderVideos(liked.slice(0, 6)) : !profile.likedIds.length && !catalogLoading && !likedAnime.length ? <p className="dashboard__empty">No liked videos yet.</p> : null}
+            {likedAnime.length > 0 && (renderAnime ? renderAnime(likedAnime.slice(0, 6)) : null)}
+            {hasLiked > 6 && <button type="button" className="dashboard__more" onClick={() => setTab("liked")}>See all {hasLiked} liked <ArrowRight size={15} /></button>}
+          </section>
+          <section className="dashboard__section" aria-label="Recently saved videos">
+            <h2><Bookmark size={19} /> Recently saved <span>{hasSaved}</span></h2>
+            {saved.length ? renderVideos(saved.slice(0, 6)) : !profile.savedIds.length && !catalogLoading && !savedAnime.length ? <p className="dashboard__empty">No saved videos yet.</p> : null}
+            {savedAnime.length > 0 && (renderAnime ? renderAnime(savedAnime.slice(0, 6)) : null)}
+            {hasSaved > 6 && <button type="button" className="dashboard__more" onClick={() => setTab("saved")}>See all {hasSaved} saved <ArrowRight size={15} /></button>}
+          </section>
+        </>
+      )}
+
+      {tab === "liked" && (
+        <section className="dashboard__section" aria-label="Liked videos">
+          <h2><Heart size={19} /> Liked videos <span>{hasLiked}</span></h2>
+          {liked.length ? renderVideos(liked) : !profile.likedIds.length && !catalogLoading && !likedAnime.length ? <p className="dashboard__empty">No liked videos yet.</p> : null}
+          {!liked.length && profile.likedIds.length > 0 && (catalogLoading ? <p className="dashboard__empty">Loading videos…</p> : <p className="dashboard__empty">Liked videos are currently unavailable.</p>)}
+          {likedAnime.length > 0 && (renderAnime ? renderAnime(likedAnime) : null)}
+          {!catalogLoading && liked.length > 0 && missingLiked > 0 && <p className="account-hint">Some liked videos are currently unavailable.</p>}
+        </section>
+      )}
+
+      {tab === "saved" && (
+        <section className="dashboard__section" aria-label="Saved videos">
+          <h2><Bookmark size={19} /> Saved videos <span>{hasSaved}</span></h2>
+          {saved.length ? renderVideos(saved) : !profile.savedIds.length && !catalogLoading && !savedAnime.length ? <p className="dashboard__empty">No saved videos yet.</p> : null}
+          {!saved.length && profile.savedIds.length > 0 && (catalogLoading ? <p className="dashboard__empty">Loading videos…</p> : <p className="dashboard__empty">Saved videos are currently unavailable.</p>)}
+          {savedAnime.length > 0 && (renderAnime ? renderAnime(savedAnime) : null)}
+          {!catalogLoading && saved.length > 0 && missingSaved > 0 && <p className="account-hint">Some saved videos are currently unavailable.</p>}
+        </section>
+      )}
+
+      {tab === "referrals" && (
+        <section className="dashboard__section" aria-label="Referral network">
+          <h2><Users size={19} /> Your referral network</h2>
+          {referralsEnabled && !treeLoading && !treeError && tree && <button type="button" className="catalog-status__retry" onClick={() => setTreeRevision((revision) => revision + 1)}>Refresh referrals</button>}
+          {!referralsEnabled ? <p className="dashboard__empty">Referral details are temporarily unavailable while privacy protection is updated.</p>
+            : treeLoading ? <p className="dashboard__empty">Loading referrals…</p>
+              : treeError ? <div className="dashboard__empty"><p role="alert">Could not load referrals right now.</p><button type="button" className="catalog-status__retry" onClick={() => setTreeRevision((revision) => revision + 1)}>Retry referrals</button></div>
+                : tree?.direct.length ? <>
+                  <p className="account-hint">Direct: {tree.direct.length} · Level 2: {tree.level2.length}</p>
+                  <ReferralFlow tree={tree} ownName={profile.name} ownCode={profile.referralCode} />
+                </> : <p className="dashboard__empty">No referrals yet. Share your code to invite someone.</p>}
+        </section>
+      )}
     </section>
   );
 }

@@ -4,6 +4,7 @@ import { AccountRequestError, createAuthenticatedRequest } from "./auth-request.
 import { ANIME_ID_PREFIX } from "./anime-api.mjs";
 import { readLikeCount } from "./like-counts.mjs";
 import { parsePremiumEntry, parsePremiumPeriods, parsePremiumStatus, redeemErrorCode } from "./premium.mjs";
+import { setViewerToken } from "./premium-viewer.mjs";
 import { PHP_ORIGIN_OVERRIDE } from "../config/php-backend.mjs";
 import { activeTarget, requestPhpUnlock } from "./php-session.mjs";
 
@@ -93,9 +94,51 @@ function ids(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.slice(0, 5000).filter((id): id is string => typeof id === "string" && ID.test(id)))];
 }
-async function token(user: FirebaseUser) {
-  try { return await user.getIdToken(); }
-  catch { throw new AccountRequestError("unauthorized"); }
+// A tab can stay open for hours. Firebase then answers getIdToken() with the
+// token it still has in memory, and a server that sees an expired one treats a
+// premium account as a guest. The expiry is read from the JWT itself: a token
+// that has expired, or is about to, is force-refreshed before it is sent.
+const REFRESH_MARGIN_MS = 5 * 60 * 1000;
+
+function tokenExpiresAtMs(value: string): number {
+  const part = value.split(".")[1];
+  if (!part) return 0;
+  try {
+    const padded = part.replace(/-/g, "+").replace(/_/g, "/");
+    const json = JSON.parse(atob(padded + "=".repeat((4 - (padded.length % 4)) % 4)));
+    const exp = Number(json?.exp);
+    return Number.isFinite(exp) ? exp * 1000 : 0;
+  } catch { return 0; }
+}
+
+async function token(user: FirebaseUser, force = false) {
+  try {
+    const current = await user.getIdToken();
+    if (!force && current && tokenExpiresAtMs(current) - Date.now() > REFRESH_MARGIN_MS) return current;
+    return await user.getIdToken(true);
+  } catch { throw new AccountRequestError("unauthorized"); }
+}
+
+// One retry with a freshly minted token: a request rejected as unauthorized is
+// the one case where repeating it with the same token can never succeed.
+async function authorized<T>(user: FirebaseUser, run: (value: string) => Promise<T>): Promise<T> {
+  try {
+    return await run(await token(user));
+  } catch (error) {
+    if (!(error instanceof AccountRequestError) || error.code !== "unauthorized") throw error;
+    return await run(await token(user, true));
+  }
+}
+
+// Exchange the Firebase token for the short-lived signed viewer token the video
+// reads carry. The account hook owns when this runs; the API layer only asks for
+// a fresh one when the token it holds has expired.
+export async function primePremiumViewer(user: FirebaseUser): Promise<void> {
+  const result = await authorized(user, (value) => request("/api/premium/viewer", { method: "POST", token: value }));
+  const raw = result.data as Record<string, unknown>;
+  const viewer = typeof raw.viewer === "string" ? raw.viewer : "";
+  if (!viewer) throw new AccountRequestError();
+  setViewerToken(viewer, Number(raw.until) || 0);
 }
 
 function profileFrom(input: unknown, user: FirebaseUser): AccountProfile {
@@ -121,13 +164,13 @@ function profileFrom(input: unknown, user: FirebaseUser): AccountProfile {
 }
 
 export async function verifyAccount(user: FirebaseUser, backend?: string) {
-  const result = await request("/api/auth/verify", { method: "POST", token: await token(user), backend });
+  const result = await authorized(user, (value) => request("/api/auth/verify", { method: "POST", token: value, backend }));
   if (typeof result.data.exists !== "boolean") throw new AccountRequestError();
   return { exists: result.data.exists, backend: result.backend };
 }
 
 export async function getMyAccount(user: FirebaseUser, backend?: string) {
-  const result = await request("/api/auth/me", { token: await token(user), backend });
+  const result = await authorized(user, (value) => request("/api/auth/me", { token: value, backend }));
   return { ...profileFrom(result.data.user, user), backendBase: result.backend };
 }
 
@@ -137,10 +180,10 @@ export async function createAccount(user: FirebaseUser, input: { name: string; u
   // helper still validates this origin against the trusted allowlist.
   const backend = await primeBackendSelection();
   try {
-    await request("/api/auth/profile", {
-      method: "POST", token: await token(user), backend,
+    await authorized(user, (value) => request("/api/auth/profile", {
+      method: "POST", token: value, backend,
       body: { name: input.name, username: input.username, referralCode: input.referralCode?.trim() || "" },
-    });
+    }));
   } catch (error) {
     // A previous registration may have succeeded despite a lost response.
     if (!(error instanceof AccountRequestError) || error.code !== "already_exists") throw error;
@@ -167,7 +210,7 @@ export async function toggleAccountVideo(
       if (typeof meta[key] === "string" && meta[key]) body[key] = meta[key];
     }
   }
-  const { data } = await request(`/api/videos/${id}/${action}`, { method: "POST", token: await token(user), backend, body });
+  const { data } = await authorized(user, (value) => request(`/api/videos/${id}/${action}`, { method: "POST", token: value, backend, body }));
   const key = action === "like" ? "liked" : "saved";
   const listKey = action === "like" ? "likedVideos" : "savedVideos";
   if (typeof data[key] !== "boolean" || (data[listKey] !== undefined && !Array.isArray(data[listKey]))) throw new AccountRequestError();
@@ -228,7 +271,7 @@ export function sanitizeReferralTree(raw: unknown, ownCode: string): ReferralTre
 // (a GET, or a POST on a PHP host — the shared request helper picks) and shows
 // exactly what came back; nothing here decides entitlement.
 export async function getPremiumStatus(user: FirebaseUser, backend?: string) {
-  const result = await request("/api/premium/status", { token: await token(user), backend });
+  const result = await authorized(user, (value) => request("/api/premium/status", { token: value, backend }));
   const status = parsePremiumStatus(result.data);
   if (!status) throw new AccountRequestError();
   // Stamped here, at the one place an answer arrives: the countdown needs to know
@@ -237,7 +280,7 @@ export async function getPremiumStatus(user: FirebaseUser, backend?: string) {
 }
 
 export async function getPremiumHistory(user: FirebaseUser, backend?: string) {
-  const result = await request("/api/premium/history", { token: await token(user), backend });
+  const result = await authorized(user, (value) => request("/api/premium/history", { token: value, backend }));
   return { history: parsePremiumPeriods(result.data), backend: result.backend };
 }
 
@@ -247,7 +290,7 @@ export async function redeemReferrals(user: FirebaseUser, count: number, backend
   const n = Number.isInteger(count) && count > 0 && count <= 50 ? count : 0;
   if (!n) throw new AccountRequestError("too_few");
   try {
-    const result = await request("/api/premium/redeem", { method: "POST", token: await token(user), backend, body: { count: n } });
+    const result = await authorized(user, (value) => request("/api/premium/redeem", { method: "POST", token: value, backend, body: { count: n } }));
     return { entry: parsePremiumEntry(result.data), status: parsePremiumEntry(result.data)?.status ?? null, backend: result.backend };
   } catch (error) {
     if (error instanceof AccountRequestError) throw new AccountRequestError(redeemErrorCode(error.code));
@@ -260,6 +303,6 @@ export async function getReferralTree(user: FirebaseUser, ownCode: string, backe
   // sends can never be rendered. `INTIMORA_PUBLIC_SAFE_REFERRALS=0` turns the
   // whole request off for a backend that has not been fixed yet.
   if (!referralsEnabled) throw new AccountRequestError();
-  const { data } = await request("/api/user/referrals", { token: await token(user), backend });
+  const { data } = await authorized(user, (value) => request("/api/user/referrals", { token: value, backend }));
   return sanitizeReferralTree(data.tree, ownCode);
 }
