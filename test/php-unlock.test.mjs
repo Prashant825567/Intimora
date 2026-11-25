@@ -9,9 +9,12 @@ import {
 } from "../src/config/php-backend.mjs";
 import { setPhpMediaOrigin, mediaCrossOrigin } from "../src/services/media-credentials.mjs";
 import {
+  clearUnlockAttempt,
   completeUnlockReturn,
   confirmUnlockSession,
+  hasProvenSession,
   isChallengeContentType,
+  provenSessionThisLoad,
   markUnlockAttempt,
   readUnlockState,
   requestUnlockNavigation,
@@ -46,6 +49,7 @@ test("an unconfirmed window retries a bounded number of times, then stops", () =
   const storage = memoryStorage();
   const now = 1_700_000_000_000;
   const guard = (at) => shouldRequestUnlock({ storage, now: at, freshMs: UNLOCK_FRESH_MS });
+  clearUnlockAttempt(storage);
 
   assert.equal(guard(now), true, "first visit may ask");
   for (let tryIndex = 1; tryIndex <= UNLOCK_MAX_TRIES; tryIndex += 1) {
@@ -66,9 +70,9 @@ test("an unconfirmed window retries a bounded number of times, then stops", () =
     "a temporary outage heals itself instead of locking the tab for six hours",
   );
   assert.equal(
-    guard(lastTry + UNLOCK_FRESH_MS + 1),
+    guard(lastTry + UNLOCK_MAX_TRIES * UNLOCK_RETRY_MS + 1),
     true,
-    "a new window is also allowed once the host's session would have expired",
+    "a later visit is asked again instead of inheriting yesterday's cookie",
   );
 });
 
@@ -80,17 +84,22 @@ test("two redirects never follow each other inside the minimum gap", () => {
   assert.equal(shouldRequestUnlock({ storage, now: now + UNLOCK_MIN_GAP_MS + 1, freshMs: UNLOCK_FRESH_MS }), true);
 });
 
-test("a confirmed session keeps the window quiet for the host's lifetime", () => {
+test("a session proven by this page load is quiet, a stored one from an earlier visit is not", () => {
   const storage = memoryStorage();
   const now = 1_700_000_000_000;
+  // Yesterday's visit left `ok: true` behind. The cookie may even still be alive,
+  // but the visit is new — and the host's check is what registers the visitor, so
+  // it runs again instead of being skipped for six hours.
+  storage.setItem("intimora_unlock_v1", JSON.stringify({ at: now - 3_600_000, tries: 0, ok: true }));
+  assert.equal(hasProvenSession({ storage, now }), false, "a previous visit's proof does not carry over");
+  assert.equal(shouldRequestUnlock({ storage, now, freshMs: UNLOCK_FRESH_MS }), true, "the new visit meets the check");
+
+  // This page load proves the cookie: no second unlock while it stays open.
   confirmUnlockSession(storage, { now });
   assert.deepEqual(readUnlockState(storage), { at: now, tries: 0, ok: true });
+  assert.equal(hasProvenSession({ storage, now: now + 60_000 }), true);
   assert.equal(shouldRequestUnlock({ storage, now: now + 60_000, freshMs: UNLOCK_FRESH_MS }), false);
-  assert.equal(
-    shouldRequestUnlock({ storage, now: now + UNLOCK_FRESH_MS + 1, freshMs: UNLOCK_FRESH_MS }),
-    true,
-    "the cookie is re-earned before the host's six hours run out",
-  );
+  assert.equal(provenSessionThisLoad(), true);
 });
 
 test("a refusal the browser caused is not retried in a loop, but it is not a six-hour lockout either", () => {

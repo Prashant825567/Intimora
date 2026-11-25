@@ -18,6 +18,10 @@ let returnedThisLoad = false;
 const MIN_GAP_MS = 4_000;
 const MAX_TRIES = 3;
 const CLOCK_SLACK_MS = 60_000;
+// How long a cookie proven by this page load stays trusted while the page remains
+// open. It follows the host's six-hour session: the check runs once per visit, not
+// once per request, and a tab that outlives the cookie meets the check again.
+const IN_PAGE_PROOF_MS = 5.5 * 60 * 60 * 1000;
 
 function safely(action, fallback = null) {
   try {
@@ -60,16 +64,30 @@ export function markUnlockAttempt(storage, { now = Date.now(), blocked = false, 
 // The first PHP answer that actually arrived proves the cookie works; from then
 // on this window is quiet until the host's six-hour session would have expired.
 export function confirmUnlockSession(storage, { now = Date.now() } = {}) {
+  provenThisLoad = true;
   write(storage, { at: now, tries: 0, ok: true });
 }
 
-// A PHP answer that arrived once already proved the host's cookie works. Used to
-// tell "the cookie is missing" (worth the host's own unlock page) apart from
-// "the host answers without a CORS header" (its server, not its cookie).
+// Whether the cookie was proven by *this* page load. The cookie itself can live for
+// hours, but a new visit to a PHP-backed site is a new visit: the host's check is
+// also what registers the visitor there, so it runs once per visit rather than once
+// per cookie. This flag is module state, so a reload, a new tab or a return tomorrow
+// starts without it — and the stored `ok` from yesterday can never suppress today's
+// check.
+let provenThisLoad = false;
+
+// Exported for the diagnostic trace only: what the current page load has proven.
+export function provenSessionThisLoad() {
+  return provenThisLoad;
+}
+
 export function hasProvenSession({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000 } = {}) {
   const state = readUnlockState(storage);
   const at = Number(state.at);
   if (state.ok !== true || !Number.isFinite(at) || at <= 0) return false;
+  // A session proven on an earlier page load does not carry over: the next visit
+  // meets the host's check again (see `provenThisLoad`).
+  if (!provenThisLoad) return false;
   if (now < at - CLOCK_SLACK_MS) return true;
   return now - at <= freshMs;
 }
@@ -92,10 +110,16 @@ export function shouldRequestUnlock({ storage, now = Date.now(), freshMs = 5.5 *
   // No attempt yet, or a clock that jumped backwards: a fresh one is allowed.
   if (!Number.isFinite(at) || at <= 0) return true;
   if (now < at - CLOCK_SLACK_MS) return true;
-  // A proven session lasts the host's six hours; an attempt that never produced
-  // an answer expires quickly, so a temporary outage heals itself instead of
-  // leaving the tab dead for the rest of the day.
-  if (state.ok === true) return now - at > freshMs;
+  // An entry written by an earlier visit is the first thing a new visit hits: it is
+  // not this page's proof, so the host's check runs once for the new visit. (Inside
+  // this page load the proof is in `provenThisLoad`, and the minutes after it are
+  // handled below.)
+  if (!provenThisLoad && (state.ok === true || now - at > retryMs)) return true;
+  // A session proven by *this* page load is quiet for as long as the page is open
+  // (the stored `ok` alone proves nothing about a new visit). An attempt that never
+  // produced an answer expires quickly, so a temporary outage heals itself instead
+  // of leaving the tab dead.
+  if (state.ok === true) return !provenThisLoad || now - at > Math.max(freshMs, IN_PAGE_PROOF_MS);
   if (now - at > retryMs) return true;
   if (minGapMs > 0 && now - at < minGapMs) return false;
   const tries = Number(state.tries);
