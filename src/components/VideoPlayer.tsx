@@ -95,7 +95,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
   // only wins when the link itself carries no trailer marker.
   const serverSaysTrailer = video.playbackType === "trailer";
   const trailerOnly = locked || serverSaysTrailer || playingTrailer(locked ? video.trailerUrl : video.videoUrl);
-  const welcomeSource = locked ? (video.trailerUrl as string) : video.videoUrl;
+  // What this player opens with: the trailer when the backend calls the title
+  // locked, otherwise the link the answer carried — and the trailer when it carried
+  // no full link at all. A premium title with neither is the panel case below.
+  const welcomeSource = locked ? (video.trailerUrl as string) : (video.videoUrl || (video.trailerUrl as string) || "");
   // A 4xx on a tokenised link is an expiry even when the element only reports a
   // generic decode error. Performance entries are read-only and cheap.
   const refusalSeen = (_element: HTMLVideoElement, url: string | undefined) => {
@@ -113,14 +116,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
   // Whether the current source carries a short-lived token, so an error on it may
   // mean "expired" rather than "broken".
   const tokenisedLink = (url: string | undefined) => typeof url === "string" && /[?&]t=/.test(url);
-  // Premium video, no active window and no trailer: there is nothing to play, and
-  // the backend said so. The panel explains it instead of showing a broken player.
-  const lockedBlocked = video.locked === true && !video.trailerUrl && !video.videoUrl;
   // A premium title never gets a pre-roll — not the trailer, not the full video.
   // It is premium whether the backend marked the title (`premium`) or answered
   // that this visitor may not see it (`locked`); either way an ad has no place
   // in front of it.
   const premiumTitle = video.premium === true || video.locked === true;
+  // Premium video, no active window and no trailer: there is nothing to play, and
+  // the backend said so. The panel explains it instead of showing a broken player.
+  const lockedBlocked = premiumTitle && !video.trailerUrl && !video.videoUrl;
   // Who may watch what is the backend's answer, never a sign-in gate in the player:
   // a premium title returns its full stream for an active member and the locked
   // shape (a trailer) for everyone else, and those links are what plays. So a guest

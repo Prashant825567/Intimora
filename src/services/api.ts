@@ -455,6 +455,26 @@ export function mediaLinkFrom(raw: unknown, backend: string, kind: "stream" | "t
 // mapped record comes out, with no network involved.
 export const publicVideoForTest = publicVideo;
 
+// The titles where the backend, not the player, decides which link exists: the
+// `locked` verdict on this answer (this visitor may not see it in full), or a
+// premium record. `publicVideo` has already merged the flag, the category and the
+// tag into `premium`, so reading it here is the same decision the player makes.
+function premiumTitleOf(apiVideo: ApiVideo): boolean {
+  return apiVideo.premium === true || apiVideo.locked === true;
+}
+
+// The link this title may play in full, or an empty string when the backend did
+// not issue one for this answer. Nothing here invents a stream link: a premium
+// title with no issued link plays its trailer (or shows the panel that says it
+// has neither), instead of asking `/stream` for a JSON refusal.
+function streamLink(apiVideo: ApiVideo, backend: string): string {
+  const issued = mediaLinkFrom(apiVideo.streamUrl, backend, "stream");
+  if (issued) return issued;
+  if (premiumTitleOf(apiVideo)) return "";
+  const playback = playbackSources(apiVideo, backend, apiVideo.id);
+  return playback.videoUrl;
+}
+
 export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video => {
   // Validate the id the same way every other media URL does before it is used.
   videoPath(apiVideo.id);
@@ -482,11 +502,17 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     // build one itself — it would only be refused.
     // A locked video without a trailer has nothing to play: the backend sent no
     // stream link and no trailer, so the player says so instead of asking for a
-    // stream it knows will be refused. A locked video *with* a trailer keeps the
-    // byte path behind the trailer, exactly as the tokenised form does.
-    videoUrl: mediaLinkFrom(apiVideo.streamUrl, backend, "stream")
-      ?? (apiVideo.locked === true && !(apiVideo.trailerUrl && trailerSource(apiVideo.trailerUrl, backend)) && !apiVideo.hasTrailer ? "" : playback.videoUrl),
-    fallbackVideoUrl: playback.fallbackVideoUrl,
+    // stream it knows will be refused.
+    //
+    // A premium title only ever plays a link the backend issued for this answer
+    // (its tokenised `streamUrl`, or the trailer). The bare `/stream` route is
+    // never put in an `src` for it: without a token that route answers with a
+    // small JSON error (`content-type: application/json`, ~58 bytes), and a media
+    // element can only render that as "media could not be loaded" on an otherwise
+    // playable title. That is exactly what happened on premium videos when the
+    // detail call did not carry a link.
+    videoUrl: streamLink(apiVideo, backend),
+    fallbackVideoUrl: premiumTitleOf(apiVideo) ? undefined : playback.fallbackVideoUrl,
     locked: apiVideo.locked === true,
     // The tokenised stream form, or the direct media file the newer answers send.
     // Only the first keeps its token; the second carries none.
