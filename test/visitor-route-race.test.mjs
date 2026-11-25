@@ -50,7 +50,9 @@ test("a failing pinned request never erases a newer backend selection", async ()
   };
   const visitor = createVisitorRequest({ discoveryUrl, fetcher, storage: null, now: () => now, monotonicNow: () => now });
   await visitor.requestJson("/api/videos");
-  now += 60_001;
+  // A day later the stored choice has run out, so the next call discovers a new
+  // server — while a pinned request is still waiting on the old one.
+  now += 24 * 60 * 60 * 1000 + 1;
   const oldPage = visitor.requestJson("/api/videos?cursor=old", undefined, backendA);
   await started.promise;
   assert.equal(await visitor.selectBackend(), backendB);

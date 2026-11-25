@@ -208,7 +208,7 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
       if (found && state.switchAfterVerify) {
         state.switchAfterVerify = false;
         state.selected = backendB;
-        await page.evaluate(() => { window.__timeOffset = 61_000; });
+        await page.evaluate(() => { window.__timeOffset = 24 * 60 * 60 * 1000 + 1_000; });
       }
       return route.fulfill({ headers: cors, json: { ok: true, data: { exists: found } } });
     }
@@ -227,7 +227,7 @@ async function createFixture({ exists = false, ownProfile = profile(), safeRefer
       state.profile = profile({ name: input.name, username: input.username });
       if (state.switchAfterCreate) {
         state.selected = backendB;
-        await page.evaluate(() => { window.__timeOffset = 61_000; });
+        await page.evaluate(() => { window.__timeOffset = 24 * 60 * 60 * 1000 + 1_000; });
       }
       if (state.alreadyExistsOnCreate) return route.fulfill({ status: 400, headers: cors, json: { ok: false, error: "User already exists" } });
       return route.fulfill({ headers: cors, json: { ok: true, data: { user: state.profile } } });
@@ -397,7 +397,7 @@ test("new users complete name, unique username and optional referral; actions us
     await page.getByRole("link", { name: "Home", exact: true }).click();
     await page.locator(".video-card__play").first().waitFor();
     state.selected = backendB;
-    await page.evaluate(() => { window.__timeOffset = 61_000; });
+    await page.evaluate(() => { window.__timeOffset = 24 * 60 * 60 * 1000 + 1_000; });
     const search = page.getByRole("textbox", { name: "Search videos" });
     await search.fill("First");
     const searched = page.waitForResponse((response) => response.url().startsWith(`${backendB}/api/search?`));
@@ -661,7 +661,7 @@ test("a malicious discovery selection cannot receive a Firebase token", browserO
     assert.ok(!state.calls.some((call) => call.origin === evil && call.path.startsWith("/api/auth/")));
     assert.ok(!(await page.locator("body").innerText()).includes(evil));
     state.selected = backendA;
-    await page.evaluate(() => { window.__timeOffset = 61_000; });
+    await page.evaluate(() => { window.__timeOffset = 24 * 60 * 60 * 1000 + 1_000; });
     await page.getByRole("button", { name: "Try again" }).click();
     await page.getByRole("heading", { name: "Complete your profile" }).waitFor();
   } finally { await fixture.close(); }

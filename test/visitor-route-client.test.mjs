@@ -21,7 +21,7 @@ function client(options) {
   return createVisitorRequest({ discoveryUrl, ...options });
 }
 
-test("tabs discover independently, deduplicate concurrency, and expire within 60 seconds", async () => {
+test("tabs discover independently, deduplicate concurrency, and reuse the stored choice across visits", async () => {
   const calls = [];
   let discoveries = 0;
   let now = 1_700_000_000_000;
@@ -58,18 +58,45 @@ test("tabs discover independently, deduplicate concurrency, and expire within 60
   assert.equal((await reloaded.requestJson("/api/videos")).backend, a1.backend);
   assert.equal(discoveries, 2, "the same tab may reuse its unexpired selection on reload");
 
+  // A refresh, a new tab, and a return visit all keep the visitor's own server:
+  // the load balancer is asked once, not once per page load.
+  // Each arrival is its own page load: a new client, the page's own storage.
+  const reloadedAgain = client({ ...common, storage: storageA });
+  assert.equal((await reloadedAgain.requestJson("/api/videos")).backend, a1.backend);
   const copiedStorage = memoryStorage(storageA.snapshot());
-  const newTab = client({ ...common, storage: copiedStorage, reuseStoredSelection: false });
-  await newTab.requestJson("/api/videos");
-  assert.equal(discoveries, 3, "a new navigation must not reuse a copied sessionStorage entry");
+  const newTab = client({ ...common, storage: copiedStorage });
+  assert.equal((await newTab.requestJson("/api/videos")).backend, a1.backend);
+  assert.equal(discoveries, 2, "a stored choice is reused, so no new discovery");
 
-  now += 59_999;
-  assert.equal((await a.requestJson("/api/videos")).backend, a1.backend);
-  assert.equal(discoveries, 3);
-  now += 1;
-  await a.requestJson("/api/videos");
-  assert.equal(discoveries, 4, "the selection expires at 60 seconds, not after a later response");
-  assert.ok(JSON.parse(storageA.getItem("intimora_direct_backend_v1")).expiresAt <= now + 60_000);
+  // Well past a minute, still the same server; the stored entry lasts a day.
+  now += 3_600_000;
+  assert.equal((await reloadedAgain.requestJson("/api/videos")).backend, a1.backend);
+  assert.equal(discoveries, 2);
+  const stored = JSON.parse(storageA.getItem("intimora_direct_backend_v1"));
+  assert.ok(stored.expiresAt <= stored.selectedAt + 24 * 60 * 60 * 1000, "stored for a day");
+  assert.ok(stored.expiresAt >= now, "and still valid an hour later");
+
+  // A tab keeps its selection for the whole day too: the load balancer is not
+  // asked again just because time passed while the page stayed open.
+  const long = client({ ...common, storage: null, now: () => now, monotonicNow: () => now });
+  const longFirst = await long.requestJson("/api/videos");
+  now += 6 * 60 * 60 * 1000;
+  assert.equal((await long.requestJson("/api/videos")).backend, longFirst.backend);
+  assert.equal(discoveries, 3, "one discovery for the whole day, and none for the long-lived tab");
+  // A failed request is what makes the next one ask again.
+  let discoveriesHere = 0;
+  let failNext = false;
+  const failed = client({ ...common, storage: null, now: () => now, monotonicNow: () => now, fetcher: async (url) => {
+    if (url === discoveryUrl) { discoveriesHere += 1; return Response.json({ ok: true, data: { server: backendB } }); }
+    if (failNext) { failNext = false; return Response.json({ ok: false }, { status: 503 }); }
+    return Response.json({ ok: true, data: { videos: [] } });
+  } });
+  assert.equal((await failed.requestJson("/api/videos")).backend, backendB);
+  assert.equal(discoveriesHere, 1);
+  failNext = true;
+  await assert.rejects(failed.requestJson("/api/videos"));
+  assert.equal((await failed.requestJson("/api/videos")).backend, backendB);
+  assert.equal(discoveriesHere, 2, "a failure forces a fresh discovery");
 });
 
 test("storage denial uses a per-tab memory cache and backend failures remain generic", async () => {
@@ -100,11 +127,13 @@ test("storage denial uses a per-tab memory cache and backend failures remain gen
 test("a slow discovery body cannot extend the original deadline", async () => {
   let now = 1_700_000_000_000;
   let discoveries = 0;
+  const day = 24 * 60 * 60 * 1000;
   const fetcher = async (url) => {
     if (url !== discoveryUrl) return Response.json({ ok: true });
     const selected = ++discoveries === 1 ? backendA : backendB;
     const response = Response.json({ ok: true, data: { server: selected } });
     if (discoveries === 1) {
+      // Ten seconds pass while the answer is read.
       const parse = response.json.bind(response);
       response.json = async () => { now += 10_000; return parse(); };
     }
@@ -112,7 +141,9 @@ test("a slow discovery body cannot extend the original deadline", async () => {
   };
   const visitor = client({ fetcher, storage: null, now: () => now, monotonicNow: () => now });
   assert.equal((await visitor.requestJson("/api/videos")).backend, backendA);
-  now += 49_999;
+  // The day is measured from when discovery started, so the ten seconds spent
+  // reading the answer are already spent — not added on top.
+  now += day - 10_001;
   assert.equal((await visitor.requestJson("/api/search?q=x")).backend, backendA);
   now += 1;
   assert.equal((await visitor.requestJson("/api/search?q=x")).backend, backendB);
@@ -134,7 +165,7 @@ test("pinned requests use their original backend while a new selection is discov
   };
   const visitor = client({ fetcher, storage: null, now: () => now, monotonicNow: () => now });
   assert.equal((await visitor.requestJson("/api/videos")).backend, backendA);
-  now += 60_001;
+  now += 24 * 60 * 60 * 1000 + 1;
   assert.equal((await visitor.requestJson("/api/videos?cursor=next%20page", undefined, backendA)).backend, backendA);
   assert.equal(await visitor.selectBackend(), backendB);
   assert.equal((await visitor.requestJson("/api/search?q=new")).backend, backendB);
@@ -187,7 +218,8 @@ test("untrusted stored timestamps cannot extend a route and backward clocks expi
   let now = 100_000;
   let discoveries = 0;
   const storage = memoryStorage({
-    intimora_direct_backend_v1: JSON.stringify({ backend: backendA, selectedAt: now, expiresAt: now + 600_000 }),
+    // A claim longer than a day is not one this app ever writes, so it is refused.
+    intimora_direct_backend_v1: JSON.stringify({ backend: backendA, selectedAt: now, expiresAt: now + 48 * 60 * 60 * 1000 }),
   });
   const fetcher = async (url) => url === discoveryUrl
     ? Response.json({ ok: true, data: { server: ++discoveries % 2 ? backendB : backendA } })
@@ -359,4 +391,80 @@ test("a call the host itself refuses is reported as refused, not retried forever
     assert.deepEqual(unlocks, [], "a refused answer never triggers a lock-page navigation");
   }
   assert.deepEqual(refused, [403, 401, 404, 403]);
+});
+
+// Z5: one public read answers differently when the backend knows who is asking,
+// so the signed-in visitor's bearer token travels on that request — and nothing
+// else does. A guest's request is byte-for-byte the call it always was.
+test("only a bearer token is forwarded on a detail read, and a stale one is retried without", async () => {
+  const calls = [];
+  let rejectTokenOnce = true;
+  const fetcher = async (url, init) => {
+    calls.push({ url, init });
+    if (url === discoveryUrl) return Response.json({ ok: true, data: { server: backendA } });
+    const auth = init.headers?.Authorization;
+    if (auth && rejectTokenOnce) {
+      rejectTokenOnce = false;
+      return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+    return Response.json({ ok: true, data: { id: "v-1" } });
+  };
+  const c = client({ fetcher, storage: memoryStorage(), now: () => 1_700_000_000_000, monotonicNow: () => 1_700_000_000_000 });
+
+  const detail = await c.requestJson("/api/videos/v-1", { headers: { Authorization: "Bearer a.b.c-d_e~f" } });
+  assert.equal(detail.backend, backendA, "the retry still returns a video");
+  const detailCalls = calls.filter((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(detailCalls.length, 2, "a 401 on a tokenised read is retried once");
+  assert.equal(detailCalls[0].init.headers.Authorization, "Bearer a.b.c-d_e~f");
+  assert.equal(detailCalls[1].init.headers, undefined, "the retry carries no token");
+
+  // A guest: no headers at all, and nothing is invented for them.
+  calls.length = 0;
+  await c.requestJson("/api/videos/v-1");
+  const guestCall = calls.find((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(guestCall.init.headers, undefined, "a guest's detail read carries no header");
+
+  // Anything that is not a bearer token is dropped, never forwarded.
+  for (const headers of [
+    { Authorization: "Basic dXNlcjpwYXNz" },
+    { Cookie: "session=abc" },
+    { Authorization: "Bearer " },
+    { Authorization: "Bearer has spaces" },
+  ]) {
+    calls.length = 0;
+    await c.requestJson("/api/videos/v-1", { headers });
+    const call = calls.find((item) => item.url === `${backendA}/api/videos/v-1`);
+    assert.equal(call.init.headers, undefined, `dropped: ${JSON.stringify(headers)}`);
+  }
+
+  // The token is never put in the URL.
+  assert.ok(calls.every((call) => !call.url.includes("a.b.c-d_e~f")));
+
+  // A host whose preflight refuses `Authorization` looks like a CORS failure, not a
+  // status: that is retried without the token too, so playback still gets an answer.
+  calls.length = 0;
+  let refusedHeaderOnce = true;
+  const corsFetcher = async (url, init) => {
+    calls.push({ url, init });
+    if (url === discoveryUrl) return Response.json({ ok: true, data: { server: backendA } });
+    if (init.headers?.Authorization && refusedHeaderOnce) {
+      refusedHeaderOnce = false;
+      throw new TypeError("Failed to fetch");
+    }
+    return Response.json({ ok: true, data: { id: "v-1" } });
+  };
+  const corsClient = client({ fetcher: corsFetcher, storage: memoryStorage(), now: () => 1_700_000_000_000, monotonicNow: () => 1_700_000_000_000 });
+  const afterCors = await corsClient.requestJson("/api/videos/v-1", { headers: { Authorization: "Bearer a.b.c" } });
+  assert.equal(afterCors.backend, backendA, "the un-tokenised answer is still used");
+  const corsCalls = calls.filter((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(corsCalls.length, 2);
+  assert.equal(corsCalls[1].init.headers, undefined, "the retry carries no token");
+
+  // That backend is not asked twice for every later play: the tab remembers that
+  // it will not take the token, so the next read is the public one straight away.
+  calls.length = 0;
+  await corsClient.requestJson("/api/videos/v-1", { headers: { Authorization: "Bearer a.b.c" } });
+  const later = calls.filter((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(later.length, 1, "one request, not a refusal and then a retry");
+  assert.equal(later[0].init.headers, undefined);
 });

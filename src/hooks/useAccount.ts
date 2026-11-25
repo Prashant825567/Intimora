@@ -186,11 +186,21 @@ export function useAccount(enabled: boolean) {
   }, [state.profile, state.status]);
 
   const holds = (list: SavedAnime[] | undefined, id: string) => (list ?? []).some((entry) => entry.id === id);
+  // The signed-in visitor's Firebase token, for the one public read whose answer
+  // depends on who is asking: a premium video's detail (full stream for an active
+  // member, the locked shape — a trailer — for everyone else). A guest gets null,
+  // so that call is made exactly as before.
+  const videoDetailToken = useCallback(async (): Promise<string | undefined> => {
+    const user = currentUser.current;
+    if (!user || state.status !== "ready") return undefined;
+    try { return await user.getIdToken(); } catch { return undefined; }
+  }, [state.status]);
+
   const isLiked = (id: string) => optimistic.get(`like:${id}`)
     ?? (state.profile?.likedIds.includes(id) || holds(state.profile?.likedAnime, id));
   const isSaved = (id: string) => optimistic.get(`save:${id}`)
     ?? (state.profile?.savedIds.includes(id) || holds(state.profile?.savedAnime, id));
-  return { ...state, signingIn, pending, isLiked, isSaved, login, logout, retry, complete, toggle };
+  return { ...state, signingIn, pending, isLiked, isSaved, login, logout, retry, complete, toggle, videoDetailToken };
 }
 
 export type AccountController = ReturnType<typeof useAccount>;

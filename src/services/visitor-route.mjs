@@ -1,14 +1,32 @@
 import { publicBackendBase, publicHttpsUrl } from "./public-url.mjs";
 
 const STORAGE_KEY = "intimora_direct_backend_v1";
-const MAX_TTL_MS = 60_000;
+// How long one discovery answer is used for. It is stored, so a reload, a new tab
+// and a return visit all keep the visitor's own server instead of asking the load
+// balancer again. A failed request clears it early, which is how a server that has
+// gone away is noticed.
+const MAX_TTL_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const UNAVAILABLE = "Content is temporarily unavailable";
 const ROUTE = /^\/api\/(?:search|likes\/counts|visit|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/share)?)?)$/;
 const VIDEO_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_LIKE_COUNTS_BYTES = 32_768;
 
-function isReloadOrHistoryNavigation() {
+// The one header a public read may carry: a bearer token, so the backend can
+// answer for this visitor. Anything else (`Cookie`, `Authorization: Basic …`, a
+// password) is dropped rather than forwarded.
+function forwardedHeaders(headers) {
+  if (!headers || typeof headers !== "object") return undefined;
+  const value = headers.Authorization ?? headers.authorization;
+  if (typeof value !== "string") return undefined;
+  if (!/^Bearer [A-Za-z0-9._~+/=-]{1,8192}$/.test(value)) return undefined;
+  return { Authorization: value };
+}
+
+// The visitor's own arrival does not change which server is theirs: a reload, a
+// new tab and a later visit all reuse the stored selection. The navigation type is
+// kept as a diagnostic only, so a fresh discovery can be asked for deliberately.
+export function isReloadOrHistoryNavigation() {
   try {
     const entry = globalThis.performance?.getEntriesByType("navigation")?.[0];
     return entry?.type === "reload" || entry?.type === "back_forward";
@@ -54,8 +72,9 @@ function apiUrl(base, path, method, body) {
 }
 
 // Every tab keeps its own selection. The cache is an optimization, not an
-// identity or an authorization mechanism. New navigations do not restore a
-// copied sessionStorage entry; a reload can reuse this tab's unexpired entry.
+// identity or an authorization mechanism. Stored entries are reused across
+// reloads, new tabs and later visits (a day); the entry a running tab works from
+// is refreshed every few minutes, so a backend that has gone away is noticed.
 export function createVisitorRequest(options = {}) {
   const discoveryUrl = publicHttpsUrl(options.discoveryUrl);
   // Temporary testing mode: one fixed PHP origin instead of discovery. The
@@ -83,12 +102,18 @@ export function createVisitorRequest(options = {}) {
   const getStorage = options.storage === undefined
     ? () => { try { return globalThis.sessionStorage; } catch { return null; } }
     : () => options.storage;
-  const reuseStoredSelection = options.reuseStoredSelection ?? isReloadOrHistoryNavigation();
+  // A stored selection is the visitor's, so it is reused on any arrival — the
+  // site asked for its server once and does not need to ask again. The option
+  // stays available so a caller can force a fresh discovery.
+  const reuseStoredSelection = options.reuseStoredSelection ?? true;
   let cached;
   let monotonicDeadline = 0;
   let loaded = false;
   let bootstrap;
   let generation = 0;
+  // The backend that has already refused this tab's bearer token, so it is not
+  // offered again there (see `requestJson`).
+  let tokenRejectedFor;
 
   function clear() {
     generation += 1;
@@ -109,12 +134,9 @@ export function createVisitorRequest(options = {}) {
             && Number.isFinite(entry.expiresAt) && entry.selectedAt <= timestamp
             && entry.expiresAt <= entry.selectedAt + MAX_TTL_MS && entry.expiresAt > timestamp) {
             cached = { backend, php: entry.php === true, selectedAt: entry.selectedAt, expiresAt: entry.expiresAt };
-            monotonicDeadline = monotonicNow() + Math.min(entry.expiresAt - timestamp, MAX_TTL_MS);
+            monotonicDeadline = monotonicNow() + Math.max(0, entry.expiresAt - timestamp);
           }
         } catch { /* Keep an in-memory cache when storage is unavailable. */ }
-      } else {
-        // sessionStorage may have been copied from an opener or duplicated tab.
-        try { getStorage()?.removeItem(STORAGE_KEY); } catch { /* Storage can be disabled. */ }
       }
     }
     if (cached && (now() < cached.selectedAt || now() >= cached.expiresAt || monotonicNow() >= monotonicDeadline)) clear();
@@ -126,7 +148,9 @@ export function createVisitorRequest(options = {}) {
     const expiresAt = selectedAt + MAX_TTL_MS;
     if (!Number.isFinite(timestamp) || timestamp < selectedAt || timestamp >= expiresAt) throw new Error(UNAVAILABLE);
     cached = { backend, php: php === true, selectedAt, expiresAt };
-    monotonicDeadline = monotonicNow() + (expiresAt - timestamp);
+    // Measured from when discovery started, not from when its answer was read, so a
+    // slow answer cannot extend the selection.
+    monotonicDeadline = monotonicNow() + Math.max(0, expiresAt - timestamp);
     generation += 1;
     try { getStorage()?.setItem(STORAGE_KEY, JSON.stringify(cached)); } catch { /* In-memory selection still works. */ }
   }
@@ -145,7 +169,7 @@ export function createVisitorRequest(options = {}) {
     }
   }
 
-  async function readJson(url, method, { signal, counts = false, php = false, requestBody } = {}) {
+  async function readJson(url, method, { signal, counts = false, php = false, requestBody, headers: extraHeaders } = {}) {
     const controller = new AbortController();
     const abort = () => controller.abort();
     if (signal?.aborted) abort();
@@ -158,8 +182,8 @@ export function createVisitorRequest(options = {}) {
         // preflight. A preflight carries no cookies, and a free host answers one
         // without cookies with its HTML check instead of JSON.
         ...(method === "POST"
-          ? { headers: { "Content-Type": "text/plain" }, body: typeof requestBody === "string" ? requestBody : "{}" }
-          : {}),
+          ? { headers: { "Content-Type": "text/plain", ...(extraHeaders || {}) }, body: typeof requestBody === "string" ? requestBody : "{}" }
+          : (extraHeaders ? { headers: extraHeaders } : {})),
         mode: "cors",
         // Cookies travel only to a backend the load balancer flagged as PHP; an
         // ordinary backend stays credential-free exactly as before.
@@ -294,7 +318,27 @@ export function createVisitorRequest(options = {}) {
     if (!url) throw new Error(UNAVAILABLE);
     const requestGeneration = generation;
     const counts = new URL(path, "https://route.invalid").pathname === "/api/likes/counts";
-    const result = await readJson(url, method, { signal: init.signal, counts, php, requestBody: body });
+    // A caller may pass one header (`Authorization: Bearer <firebase token>`) for a
+    // public read the backend answers differently when it knows who is asking. The
+    // value is never stored, logged or put anywhere but this request; a password
+    // or any other header name is not passed along, so this stays the one case.
+    // Once a backend has shown that it will not take the token (a CORS preflight
+    // that does not allow `Authorization`, or a 401/403), this tab stops sending
+    // it there: the answer is the same public one, without asking the same counting
+    // route twice for every later play.
+    const forwarded = backend === tokenRejectedFor ? undefined : forwardedHeaders(init.headers);
+    let result = await readJson(url, method, { signal: init.signal, counts, php, requestBody: body, headers: forwarded });
+    // A signed-in visitor's token can simply have run out between two requests, and
+    // a host that has not allowed `Authorization` through its CORS preflight refuses
+    // the call before the backend ever sees it. The caller cannot fix either from
+    // here, but the answer must still be a video rather than an error: the same
+    // request is asked once more without the token, and the public answer (the
+    // trailer, or the locked shape) is what comes back. One retry, never a loop.
+    if (result.failed && forwarded && (result.network
+      || (result.refused && (result.status === 401 || result.status === 403)))) {
+      tokenRejectedFor = backend;
+      result = await readJson(url, method, { signal: init.signal, counts, php, requestBody: body });
+    }
     if (onOutcome) {
       onOutcome({
         path,

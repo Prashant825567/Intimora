@@ -430,7 +430,7 @@ test("a premium title never gets a pre-roll, and a locked one explains itself", 
           }, undefined, { timeout: 20_000 });
           if (current.locked) {
             assert.match(await player.locator("video").getAttribute("src"), /kind=trailer/, `${current.name}: the trailer is what plays`);
-            assert.match(await player.innerText(), /Premium video · abhi sirf trailer/);
+            assert.match(await player.innerText(), /Trailer · full video premium members ke liye/);
             assert.match(await player.innerText(), /Sign in karke premium activate karo/);
           } else {
             assert.match(await player.locator("video").getAttribute("src"), /t=stream-token/, `${current.name}: the issued stream plays`);
