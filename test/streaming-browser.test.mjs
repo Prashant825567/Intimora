@@ -109,6 +109,18 @@ function premiumVideo(premiumMode, format, tokens = {}) {
       trailerUrl: "/storage/trailers/sample-1.mp4", type: "trailer",
     };
   }
+  if (premiumMode === "premium-bare") {
+    // The answer the user's DevTools showed: a premium title, not `locked`, with no
+    // tokenised `streamUrl` and no trailer. Nothing here may become a bare
+    // `/stream` request — that route answers with ~58 bytes of JSON and the player
+    // would show a black box for a video that is simply not granted.
+    return { ...base, premium: true, locked: false, hasTrailer: false, streamUrl: null, trailerUrl: null };
+  }
+  if (premiumMode === "premium-trailer-only") {
+    // Same answer, but the title does have a trailer: the trailer must play and the
+    // bare `/stream` route must never be asked for.
+    return { ...base, premium: true, locked: false, hasTrailer: true, streamUrl: null, trailerUrl: `/api/videos/sample-1/stream?kind=trailer&t=${trailerToken}` };
+  }
   if (premiumMode === "locked-noTrailer") {
     return { ...base, premium: true, locked: true, hasTrailer: false, streamUrl: null, trailerUrl: null };
   }
@@ -1015,6 +1027,44 @@ test("a locked premium video without a trailer explains itself instead of loadin
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }
+});
+
+// The shape the user's DevTools showed on a premium title: the answer carries no
+// tokenised stream, and the player asked `/api/videos/<id>/stream` bare. That route
+// answers with a small JSON error (~58 bytes, `content-type: application/json`), so
+// the element reported "media could not be loaded" on a working backend. The bare
+// route must never be requested for a premium title: the trailer plays when there
+// is one, and the honest panel is shown when there is not.
+test("a premium title with no issued link never asks the bare stream route", options, async () => {
+  for (const [premiumMode, trailerExpected] of [["premium-trailer-only", true], ["premium-bare", false]]) {
+    const fixture = await createFixture({ premiumMode, signedIn: true });
+    try {
+      const context = await fixture.browser.newContext();
+      const { page, errors } = await openHome(fixture, context);
+      await page.getByRole("button", { name: /I AM 18/i }).click();
+      await page.locator(".video-card__play").first().click();
+      const player = page.locator("#player-container");
+      await player.waitFor();
+      if (trailerExpected) {
+        const media = player.locator("video");
+        await media.waitFor();
+        assert.match(await media.getAttribute("src"), /kind=trailer/, `${premiumMode}: the trailer is what plays`);
+        await page.waitForFunction(() => {
+          const video = document.querySelector("#player-container video");
+          return video && !video.paused && video.currentTime > 0.05;
+        }, undefined, { timeout: 20_000 });
+      } else {
+        // Nothing was issued, so nothing is invented: the panel explains it.
+        assert.equal(await player.locator("video").count(), 0, `${premiumMode}: no media element on a refused route`);
+        await player.getByText(/trailer bhi available nahi hai/i).waitFor();
+      }
+      const bare = streamCalls(fixture.state).filter((call) => !call.search.includes("kind=trailer"));
+      assert.deepEqual(bare, [], `${premiumMode}: the bare /stream route is never requested`);
+      assert.equal(await page.getByText(/could not be (played|loaded)/i).count(), 0, `${premiumMode}: no media error`);
+      assert.deepEqual(errors, []);
+      await context.close();
+    } finally { await fixture.close(); }
+  }
 });
 
 test("an active premium window plays the tokenised stream the backend issued", options, async () => {

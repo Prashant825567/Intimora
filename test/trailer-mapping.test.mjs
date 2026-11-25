@@ -40,9 +40,25 @@ test("a premium answer's trailer survives mapping, from the record or from metad
   assert.equal(publicVideoForTest(raw).hasTrailer, true);
   const fromMetadata = mapped(raw);
   assert.equal(fromMetadata.trailerUrl, file);
-  // A locked video with a trailer is playable: the byte path sits behind it, so a
-  // trailer that dies mid-play can still be retried instead of a dead player.
-  assert.equal(fromMetadata.videoUrl, `${backend}/api/videos/v-1/stream`);
+  // A premium/locked video never gets the bare `/stream` route as its source: that
+  // route answers without a token with a small JSON error (~58 bytes,
+  // `content-type: application/json`), which a media element can only report as
+  // "media could not be loaded". The trailer is what plays, and it is re-asked from
+  // the backend when it expires — never swapped to a stream that would be refused.
+  assert.equal(fromMetadata.videoUrl, "");
+  assert.equal(fromMetadata.fallbackVideoUrl, undefined);
+  assert.equal(fromMetadata.trailerUrl, file);
+
+  // A premium window that is open arrives with its tokenised stream, and that link
+  // is used exactly as issued.
+  const open = mapped({ ...record, locked: false, premium: true, streamUrl: "/api/videos/v-1/stream?t=abc" });
+  assert.equal(open.videoUrl, `${backend}/api/videos/v-1/stream?t=abc`);
+  assert.equal(open.fallbackVideoUrl, undefined, "a premium title has no bare-stream fallback");
+  // A premium title with no issued link and a trailer still plays the trailer and
+  // never builds a stream link of its own.
+  const noLink = mapped({ ...record, locked: false, premium: true, streamUrl: null });
+  assert.equal(noLink.videoUrl, "", "nothing is invented for a premium title");
+  assert.equal(noLink.trailerUrl, file);
 
   // Still refused: a page, a script, another origin's token, plain http.
   assert.equal(mapped({ ...record, trailerUrl: "https://bestfile.io/abc/file" }).trailerUrl, null);
