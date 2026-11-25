@@ -392,3 +392,79 @@ test("a call the host itself refuses is reported as refused, not retried forever
   }
   assert.deepEqual(refused, [403, 401, 404, 403]);
 });
+
+// Z5: one public read answers differently when the backend knows who is asking,
+// so the signed-in visitor's bearer token travels on that request — and nothing
+// else does. A guest's request is byte-for-byte the call it always was.
+test("only a bearer token is forwarded on a detail read, and a stale one is retried without", async () => {
+  const calls = [];
+  let rejectTokenOnce = true;
+  const fetcher = async (url, init) => {
+    calls.push({ url, init });
+    if (url === discoveryUrl) return Response.json({ ok: true, data: { server: backendA } });
+    const auth = init.headers?.Authorization;
+    if (auth && rejectTokenOnce) {
+      rejectTokenOnce = false;
+      return Response.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+    return Response.json({ ok: true, data: { id: "v-1" } });
+  };
+  const c = client({ fetcher, storage: memoryStorage(), now: () => 1_700_000_000_000, monotonicNow: () => 1_700_000_000_000 });
+
+  const detail = await c.requestJson("/api/videos/v-1", { headers: { Authorization: "Bearer a.b.c-d_e~f" } });
+  assert.equal(detail.backend, backendA, "the retry still returns a video");
+  const detailCalls = calls.filter((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(detailCalls.length, 2, "a 401 on a tokenised read is retried once");
+  assert.equal(detailCalls[0].init.headers.Authorization, "Bearer a.b.c-d_e~f");
+  assert.equal(detailCalls[1].init.headers, undefined, "the retry carries no token");
+
+  // A guest: no headers at all, and nothing is invented for them.
+  calls.length = 0;
+  await c.requestJson("/api/videos/v-1");
+  const guestCall = calls.find((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(guestCall.init.headers, undefined, "a guest's detail read carries no header");
+
+  // Anything that is not a bearer token is dropped, never forwarded.
+  for (const headers of [
+    { Authorization: "Basic dXNlcjpwYXNz" },
+    { Cookie: "session=abc" },
+    { Authorization: "Bearer " },
+    { Authorization: "Bearer has spaces" },
+  ]) {
+    calls.length = 0;
+    await c.requestJson("/api/videos/v-1", { headers });
+    const call = calls.find((item) => item.url === `${backendA}/api/videos/v-1`);
+    assert.equal(call.init.headers, undefined, `dropped: ${JSON.stringify(headers)}`);
+  }
+
+  // The token is never put in the URL.
+  assert.ok(calls.every((call) => !call.url.includes("a.b.c-d_e~f")));
+
+  // A host whose preflight refuses `Authorization` looks like a CORS failure, not a
+  // status: that is retried without the token too, so playback still gets an answer.
+  calls.length = 0;
+  let refusedHeaderOnce = true;
+  const corsFetcher = async (url, init) => {
+    calls.push({ url, init });
+    if (url === discoveryUrl) return Response.json({ ok: true, data: { server: backendA } });
+    if (init.headers?.Authorization && refusedHeaderOnce) {
+      refusedHeaderOnce = false;
+      throw new TypeError("Failed to fetch");
+    }
+    return Response.json({ ok: true, data: { id: "v-1" } });
+  };
+  const corsClient = client({ fetcher: corsFetcher, storage: memoryStorage(), now: () => 1_700_000_000_000, monotonicNow: () => 1_700_000_000_000 });
+  const afterCors = await corsClient.requestJson("/api/videos/v-1", { headers: { Authorization: "Bearer a.b.c" } });
+  assert.equal(afterCors.backend, backendA, "the un-tokenised answer is still used");
+  const corsCalls = calls.filter((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(corsCalls.length, 2);
+  assert.equal(corsCalls[1].init.headers, undefined, "the retry carries no token");
+
+  // That backend is not asked twice for every later play: the tab remembers that
+  // it will not take the token, so the next read is the public one straight away.
+  calls.length = 0;
+  await corsClient.requestJson("/api/videos/v-1", { headers: { Authorization: "Bearer a.b.c" } });
+  const later = calls.filter((call) => call.url === `${backendA}/api/videos/v-1`);
+  assert.equal(later.length, 1, "one request, not a refusal and then a retry");
+  assert.equal(later[0].init.headers, undefined);
+});

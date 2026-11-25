@@ -357,13 +357,13 @@ function App() {
     if (!accessGranted || !id || locallyOpenedVideo.current === id) return;
     let cancelled = false;
     if (!sharedVideoRequest.current || sharedVideoRequest.current.id !== id) {
-      sharedVideoRequest.current = { id, promise: fetchVideoDetail(id) };
+      sharedVideoRequest.current = { id, promise: account.videoDetailToken().then((token) => fetchVideoDetail(id, undefined, token)) };
     }
     const first = sharedVideoRequest.current.promise;
     // A shared link is the one address a visitor may open cold, so a transient
     // failure is retried once before "This video is currently unavailable."
     retryWithDelays(async (attempt) => {
-      const result = attempt === 0 ? await first : await fetchVideoDetail(id);
+      const result = attempt === 0 ? await first : await fetchVideoDetail(id, undefined, await account.videoDetailToken());
       // A host that refused the call is worth one retry (it may be a rate limit);
       // a 404 is the video genuinely not being there.
       if (!result.video) throw Object.assign(new Error("unavailable"), { refused: result.refused, status: result.status });
@@ -534,7 +534,11 @@ function App() {
     try {
       // The route effect must not make a second detail request: this endpoint
       // also counts a view. Back/forward may reuse this same promise.
-      const promise = fetchVideoDetail(video.id, video.backendBase);
+      // A signed-in visitor's request carries the token, so a premium title comes
+      // back as the shape this account may actually play (the full tokenised stream
+      // for an active member, the trailer otherwise). A guest asks without one.
+      const detailToken = await account.videoDetailToken();
+      const promise = fetchVideoDetail(video.id, video.backendBase, detailToken);
       if (path) sharedVideoRequest.current = { id: video.id, promise };
       const detail = await promise;
       if (!detail.video) {
@@ -546,6 +550,10 @@ function App() {
         }
         return;
       }
+      // The answer the backend just gave is the authority on what may play: a
+      // premium title whose window is open returns its full stream here, and one
+      // without a window returns only the trailer. The player installs this answer
+      // itself (see `onRefreshVideo`), keeping its position.
       if (detail.video.views === undefined) return;
       const viewCount = detail.video.views;
       const update = (item: Video) => item.id === video.id && item.backendBase === video.backendBase
@@ -564,7 +572,7 @@ function App() {
   // a `locked` premium video still only ever offers its trailer.
   const refreshActiveVideo = async (video: Video): Promise<Video | null> => {
     try {
-      const detail = await fetchVideoDetail(video.id, video.backendBase);
+      const detail = await fetchVideoDetail(video.id, video.backendBase, await account.videoDetailToken());
       if (!detail.video) {
         // A refused detail answer does not take the trailer away: the catalogue
         // already carries a public trailer link (it is public on purpose), so that

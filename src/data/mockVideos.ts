@@ -16,6 +16,9 @@ export interface Video {
   locked?: boolean;
   // The backend's own tokenised trailer link; null when it has no trailer.
   trailerUrl?: string | null;
+  // What the backend said it handed over: the full video or only the trailer.
+  // Undefined when it did not say, and then the player reads the link instead.
+  playbackType?: "full" | "trailer";
   // Null means the public API did not provide a trustworthy count.
   likes: number | null;
   category: string;

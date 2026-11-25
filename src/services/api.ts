@@ -57,6 +57,8 @@ export interface ApiVideo {
   // trailer. Both flags come from the backend and are never inferred here.
   locked?: boolean;
   hasTrailer?: boolean;
+  // What the answer says is being played: the full video, or only the trailer.
+  playbackType?: "full" | "trailer";
   trailerUrl?: string;
   trailerSize?: number;
   creator?: string;
@@ -204,6 +206,18 @@ function metadataFlag(video: Record<string, unknown>, key: string): boolean | un
   return undefined;
 }
 
+// The backend sends the type of what it just handed over (`type`, `playbackType`
+// or `videoType`, on the record or in `metadata`). Anything it does not say is
+// left undefined, so the player falls back to reading the link itself.
+function playbackTypeOf(video: Record<string, unknown>): "full" | "trailer" | undefined {
+  const raw = metadataValue(video, "playbackType") ?? metadataValue(video, "videoType") ?? metadataValue(video, "type");
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim().toLowerCase();
+  if (["trailer", "trailer_only", "trailer-only", "preview", "teaser"].includes(value)) return "trailer";
+  if (["full", "full_video", "full-video", "stream", "main", "main_video"].includes(value)) return "full";
+  return undefined;
+}
+
 function publicVideo(input: unknown): ApiVideo | null {
   if (!input || typeof input !== "object") return null;
   const video = input as Record<string, unknown>;
@@ -225,6 +239,11 @@ function publicVideo(input: unknown): ApiVideo | null {
     // Both places are read, the record winning, so a trailer that exists is never
     // missed — a missing trailer is what made a locked video unplayable.
     hasTrailer: video.hasTrailer === true || metadataFlag(video, "hasTrailer") === true,
+    // The backend also says which of the two links this answer is offering. It is
+    // read as a hint only — the links themselves stay the authority on what plays —
+    // so the player can label a trailer that arrives as a plain media file, where
+    // there is no `kind=trailer` in the URL to read.
+    playbackType: playbackTypeOf(video),
     trailerUrl: metadataLink(video, "trailerUrl"),
     trailerSize: nonnegativeNumber(video.trailerSize) ?? nonnegativeNumber(metadataValue(video, "trailerSize")),
     creator: safeText(video.creator, 200),
@@ -360,9 +379,17 @@ export async function fetchLikeCounts(ids: string[], backend: string, signal?: A
 // the call itself (a WAF rule, a rate limit, a blocked visitor): that is reported
 // as `detailFailed` instead of a generic failure, because the card the visitor
 // already has is still good — the player must not be taken away for it.
-export async function fetchVideoDetail(id: string, backend?: string) {
+//
+// `token` is the signed-in visitor's Firebase token. The backend answers this route
+// differently when it knows who is asking — a premium title comes back with its full
+// tokenised stream for an active member, and with the locked shape (a trailer) for
+// everyone else — so a signed-in visitor's request carries it. The token travels in
+// the header only; it never reaches a URL, the storage or a log. Without a token
+// (a guest) the call is exactly what it was before.
+export async function fetchVideoDetail(id: string, backend?: string, token?: string) {
+  const headers = typeof token === "string" && token ? { Authorization: `Bearer ${token}` } : undefined;
   try {
-    const result = await visitor.requestJson(videoPath(id), undefined, backend);
+    const result = await visitor.requestJson(videoPath(id), headers ? { headers } : undefined, backend);
     return { ok: true as const, video: publicVideo(result.body?.data), backend: result.backend, detailFailed: false };
   } catch (error) {
     const refused = typeof error === "object" && error !== null && (error as { detailFailed?: boolean }).detailFailed === true;
@@ -464,6 +491,7 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
     // The tokenised stream form, or the direct media file the newer answers send.
     // Only the first keeps its token; the second carries none.
     trailerUrl: mediaLinkFrom(apiVideo.trailerUrl, backend, "trailer") ?? trailerSource(apiVideo.trailerUrl, backend),
+    playbackType: apiVideo.playbackType,
     backendBase: backend,
     creator: apiVideo.creator || "Intimora",
     creatorAvatar: "/logo.png",

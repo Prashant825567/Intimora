@@ -21,7 +21,9 @@ export interface VisitorRequest {
   selectBackend(): Promise<string>;
   selectTarget(): Promise<VisitorTarget>;
   resolveTarget(pinnedBackend?: string): Promise<VisitorTarget>;
-  requestJson(path: string, init?: Pick<RequestInit, "method" | "signal" | "body">, pinnedBackend?: string): Promise<{ body: any; backend: string; invalidate(): void }>;
+  // `headers` carries at most one header: a bearer token for a public read the
+  // backend answers differently when it knows who is asking.
+  requestJson(path: string, init?: Pick<RequestInit, "method" | "signal" | "body" | "headers">, pinnedBackend?: string): Promise<{ body: any; backend: string; invalidate(): void }>;
 }
 
 export function createVisitorRequest(options: VisitorRequestOptions): VisitorRequest;

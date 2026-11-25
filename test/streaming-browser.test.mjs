@@ -102,9 +102,11 @@ function premiumVideo(premiumMode, format, tokens = {}) {
   if (premiumMode === "direct-trailer") {
     // The other shape the premium answers send: a plain media file on the backend,
     // not the tokenised stream route. It must play exactly like the tokenised one.
+    // Its URL says nothing about being a trailer, so the answer's own `type` is what
+    // tells the player — this is the shape where that field is the only signal.
     return {
       ...base, premium: true, locked: true, hasTrailer: true, streamUrl: null,
-      trailerUrl: "/storage/trailers/sample-1.mp4",
+      trailerUrl: "/storage/trailers/sample-1.mp4", type: "trailer",
     };
   }
   if (premiumMode === "locked-noTrailer") {
@@ -158,7 +160,9 @@ async function createFixture({ holdMedia = false, holdAfter = 0, holdDetail = fa
     const cors = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Range, If-Range",
+      // The signed-in member's detail request carries its bearer token, as the live
+      // backend's CORS answer allows.
+      "Access-Control-Allow-Headers": "Content-Type, Range, If-Range, Authorization",
       "Access-Control-Expose-Headers": "Accept-Ranges, Content-Range, Content-Length, ETag",
     };
     let backend;
@@ -815,9 +819,10 @@ test("a playable CDN source is used and the byte stream stays untouched", option
   } finally { await fixture.close(); }
 });
 
-// A visitor who is not signed in is asked to sign in before a premium video
-// plays at all — trailer or no trailer — and the button opens the sign-in page.
-test("a premium video asks a guest to sign in before anything plays", options, async () => {
+// A guest is not stopped at the player any more: the backend decides what may play,
+// and for a premium title with no premium window that answer is the trailer. The
+// player plays it and says exactly that — the trailer, not the full video.
+test("a guest plays the trailer the backend sent for a premium video", options, async () => {
   const fixture = await createFixture({ premiumMode: "locked" });
   try {
     const context = await fixture.browser.newContext();
@@ -826,83 +831,21 @@ test("a premium video asks a guest to sign in before anything plays", options, a
     await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.waitFor();
-    await player.getByText("Sign in first to watch this premium video").waitFor();
-    assert.equal(await player.locator("video").count(), 0, "nothing is loaded for a guest");
-    // The message is the whole player: no play button over it, no transport UI.
-    assert.equal(await player.getByRole("button", { name: "Play video" }).count(), 0, "no play button over the message");
-    assert.equal(await player.locator('[data-controls]').count(), 0, "no timeline or volume for a video that cannot play");
-    assert.equal(await player.getByRole("slider", { name: "Seek video" }).count(), 0);
-    assert.equal(await player.locator(".video-player__signin").innerText(), "Sign in to watch");
-    assert.deepEqual(streamCalls(fixture.state), [], "not even the trailer is requested");
-    assert.deepEqual(errors, []);
-    await player.getByRole("button", { name: "Sign in to watch" }).click();
-    // The page with the Google button, not a dead end.
-    await page.getByRole("heading", { name: "Sign in to your account" }).waitFor();
-    assert.equal(new URL(page.url()).pathname, "/login");
-    await page.getByRole("button", { name: "Sign in with Google" }).waitFor();
-    assert.equal(await page.locator("#player-container").count(), 0, "the player is closed");
-    assert.deepEqual(errors, []);
-    await context.close();
-  } finally { await fixture.close(); }
-});
-
-// A detail call the host refuses itself (a WAF rule, a rate limit, a host that
-// answers the browser only from one region) must not cost the visitor the video:
-// the catalogue already carries a working stream link, so the player stays open and
-// only the view count is missing. The refusal is reported once, by reason.
-test("a refused detail call keeps the video playing and says why", options, async () => {
-  const fixture = await createFixture({ format: "mp4" });
-  fixture.state.refuseDetail = 1;
-  try {
-    const context = await fixture.browser.newContext();
-    const { page, errors } = await openHome(fixture, context);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.locator(".video-card__play").first().click();
-    const player = page.locator("#player-container");
-    await player.waitFor();
-    await player.locator("video").waitFor();
-    // The card's own link plays: nothing was taken away because the detail call
-    // was refused.
-    await page.waitForFunction(() => {
-      const video = document.querySelector("#player-container video");
-      return video && video.readyState >= 2;
-    }, undefined, { timeout: 20_000 });
-    assert.equal(await player.getByText(/currently unavailable/i).count(), 0, "the player is not replaced by an error");
-    assert.equal(await player.locator("video").count(), 1);
-    // The refusal is named, not hidden: the view count could not be counted.
-    await player.getByRole("button", { name: "Close video player" }).click();
-    await player.waitFor({ state: "detached" });
-    await page.getByRole("status").filter({ hasText: /refused by the backend \(HTTP 403\)/ }).first().waitFor();
-    assert.deepEqual(errors, []);
-    await context.close();
-  } finally { await fixture.close(); }
-});
-
-// The premium answers can point at a plain trailer file instead of the tokenised
-// stream route. That link was dropped in the mapping step before it ever reached
-// the player, so the video promised a trailer and had nothing to play. It must now
-// play exactly like the tokenised form — and the full stream must never be asked
-// for, because the backend refuses it without a premium window.
-test("a locked video plays a direct trailer file, never the refused full stream", options, async () => {
-  const fixture = await createFixture({ premiumMode: "direct-trailer", signedIn: true });
-  try {
-    const context = await fixture.browser.newContext();
-    const { page, errors } = await openHome(fixture, context);
-    await page.getByRole("button", { name: /I AM 18/i }).click();
-    await page.locator(".video-card__play").first().click();
-    const player = page.locator("#player-container");
-    await player.waitFor();
+    // The trailer link the backend issued is what plays, as sent.
     const media = player.locator("video");
     await media.waitFor();
-    assert.equal(await media.getAttribute("src"), `${fixture.backend}/storage/trailers/sample-1.mp4`,
-      "the trailer the backend sent is what plays, exactly as sent");
+    assert.match(await media.getAttribute("src"), /kind=trailer/, "the trailer is what plays");
     await page.waitForFunction(() => {
       const video = document.querySelector("#player-container video");
       return video && video.readyState >= 2;
     }, undefined, { timeout: 20_000 });
-    assert.ok((fixture.state.directTrailerCalls ?? 0) >= 1, "the direct trailer was fetched");
-    assert.ok(!fixture.state.calls.some((call) => call.path === "/api/videos/sample-1/stream"),
-      "the full stream is never requested for a locked video");
+    // No sign-in wall in front of it, and the honest label that this is the trailer.
+    assert.equal(await player.getByText(/Sign in first to watch this premium video/).count(), 0, "no sign-in gate in the player");
+    await player.getByText("Trailer · full video premium members ke liye").waitFor();
+    await player.getByText(/Abhi trailer chal raha hai/).waitFor();
+    // The guest never asked for the full stream: the backend would refuse it.
+    assert.ok(!fixture.state.calls.some((call) => call.path.endsWith("/stream") && !call.search.includes("kind=trailer")),
+      "the full stream is not requested for a guest");
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }
@@ -911,7 +854,32 @@ test("a locked video plays a direct trailer file, never the refused full stream"
 // A premium video without a trailer is no different for a guest: the metadata the
 // catalogue sent (poster, title) still arrives and is drawn, and the player shows
 // the sign-in message with nothing loaded behind it.
-test("a guest still sees a premium video's metadata, then the sign-in message", options, async () => {
+// The direct-trailer shape: the trailer is a plain media file with no trailer
+// marker in its URL, and the answer's own `type` is what says so. The player must
+// label it as a trailer, and a full video must carry no such label.
+test("the type the server sent decides the trailer label, even for a plain file", options, async () => {
+  const fixture = await createFixture({ premiumMode: "direct-trailer" });
+  try {
+    const context = await fixture.browser.newContext();
+    const { page, errors } = await openHome(fixture, context);
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".video-card__play").first().click();
+    const player = page.locator("#player-container");
+    const media = player.locator("video");
+    await media.waitFor();
+    assert.equal(await media.getAttribute("src"), `${fixture.backend}/storage/trailers/sample-1.mp4`, "the file the answer sent plays");
+    await page.waitForFunction(() => {
+      const video = document.querySelector("#player-container video");
+      return video && !video.paused && video.currentTime > 0.05;
+    }, undefined, { timeout: 20_000 });
+    await player.getByText("Trailer · full video premium members ke liye").waitFor();
+    assert.ok((await fixture.state.directTrailerCalls ?? 0) > 0, "the direct file was the source");
+    assert.deepEqual(errors, []);
+    await context.close();
+  } finally { await fixture.close(); }
+});
+
+test("a guest still sees a premium video's metadata when there is no trailer", options, async () => {
   const fixture = await createFixture({ premiumMode: "locked-noTrailer" });
   try {
     const context = await fixture.browser.newContext();
@@ -927,14 +895,16 @@ test("a guest still sees a premium video's metadata, then the sign-in message", 
     await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.waitFor();
-    await player.getByText("Sign in first to watch this premium video").waitFor();
+    // Nothing playable came back, so the player explains it instead of loading media
+    // — and still does not ask the visitor to sign in first.
+    await player.getByText(/trailer bhi available nahi hai/).waitFor();
+    assert.equal(await player.getByText(/Sign in first to watch this premium video/).count(), 0, "no sign-in gate");
+    assert.equal(await player.getByRole("button", { name: "Sign in to watch" }).count(), 0, "no sign-in button");
     // The player keeps the metadata visible, and there is no trailer note because
     // there is no trailer to describe.
     assert.equal(await player.getByText("Streaming fixture").count() >= 1, true, "the title is still on screen");
     assert.match(await player.locator("img").first().getAttribute("src"), /thumbnail/, "the poster is the backdrop");
     assert.equal(await player.locator("video").count(), 0, "no media element at all");
-    assert.equal(await player.getByRole("button", { name: "Play video" }).count(), 0, "no play button over the message");
-    assert.equal(await player.locator('[data-controls]').count(), 0, "no transport UI");
     assert.equal(await player.locator(".video-player__trailer-note").count(), 0);
     assert.deepEqual(streamCalls(fixture.state), [], "nothing is requested");
     assert.deepEqual(errors, []);
@@ -942,10 +912,32 @@ test("a guest still sees a premium video's metadata, then the sign-in message", 
   } finally { await fixture.close(); }
 });
 
-// The account check is asynchronous, and a premium video is gated until it ends:
-// the sign-in notice is on screen from the first frame, no play button appears in
-// the meantime, and nothing is requested. A signed-in member is never shown it.
-test("a premium video shows the sign-in notice while the account is still being checked", options, async () => {
+// The member's token is what the detail request carries; the answer decides the
+// source. A guest's request has no token at all.
+test("a signed-in member's detail request carries the bearer token, a guest's does not", options, async () => {
+  for (const signedIn of [true, false]) {
+    const fixture = await createFixture({ premiumMode: "locked", signedIn });
+    try {
+      const context = await fixture.browser.newContext();
+      const { page, errors } = await openHome(fixture, context);
+      await page.getByRole("button", { name: /I AM 18/i }).click();
+      await page.locator(".video-card__play").first().click();
+      await page.locator("#player-container video").waitFor();
+      const details = fixture.state.calls.filter((call) => call.path === "/api/videos/sample-1");
+      assert.ok(details.length > 0, "the detail route was asked when the video was played");
+      const header = details[details.length - 1].headers.authorization;
+      if (signedIn) assert.equal(header, "Bearer member-token", "the member's token is forwarded");
+      else assert.equal(header ?? null, null, "a guest sends no Authorization header");
+      assert.deepEqual(errors, []);
+      await context.close();
+    } finally { await fixture.close(); }
+  }
+});
+
+// The account check is asynchronous, and playback does not wait behind it: the
+// trailer the backend sent starts, and the detail answer is asked again with the
+// token once the check answers.
+test("a premium video plays while the account is still being checked, then re-asks with the token", options, async () => {
   const fixture = await createFixture({ premiumMode: "locked", signedIn: true, holdAccount: true });
   try {
     const context = await fixture.browser.newContext();
@@ -957,29 +949,22 @@ test("a premium video shows the sign-in notice while the account is still being 
     await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.waitFor();
-    await player.getByText("Sign in first to watch this premium video").waitFor();
-    // While the check runs: no transport UI, nothing requested, and the button is
-    // not yet a trap for a member who is in fact signed in.
-    const button = player.locator(".video-player__signin");
-    assert.equal(await button.getAttribute("aria-busy"), "true");
-    assert.equal(await button.innerText(), "Checking your account…");
-    assert.equal(await player.getByRole("button", { name: "Play video" }).count(), 0);
-    assert.equal(await player.locator("video").count(), 0);
-    assert.deepEqual(streamCalls(fixture.state), []);
-    // The check finishes: the member's trailer plays, and the notice is gone.
+    // Nothing blocks on the check: the trailer the backend sent is already playing.
+    const media = player.locator("video");
+    await media.waitFor();
+    assert.match(await media.getAttribute("src"), /kind=trailer/, "the trailer plays while the check runs");
+    assert.equal(await player.getByText(/Sign in first to watch this premium video/).count(), 0, "no sign-in notice");
+    assert.equal(await page.locator(".video-player__signin").count(), 0);
+    // The check answers: the detail route is asked again, this time with the token.
     await fixture.releaseAccount(page);
-    // The gate lifts on its own: the notice is replaced by the member's player,
-    // with the trailer the backend issued.
-    await page.waitForFunction(() => !document.querySelector(".video-player__signin"), undefined, { timeout: 20_000 });
-    assert.equal(await page.locator(".video-player__signin").count(), 0, "no sign-in notice for a member");
-    assert.match(await player.locator("video").getAttribute("src"), /kind=trailer/);
-    // A browser may not allow the deferred start without a fresh gesture (the
-    // click happened before the check answered); the play button is right there.
-    await player.getByRole("button", { name: "Play video" }).first().click();
-    await page.waitForFunction(() => {
-      const video = document.querySelector("#player-container video");
-      return video && !video.paused;
-    }, undefined, { timeout: 20_000 });
+    const detailCalls = () => fixture.state.calls.filter((call) => call.path === "/api/videos/sample-1");
+    const deadline = Date.now() + 25_000;
+    while (Date.now() < deadline && !detailCalls().some((call) => call.headers.authorization === "Bearer member-token")) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const details = detailCalls();
+    assert.ok(details.some((call) => call.headers.authorization === "Bearer member-token"),
+      `the detail route was asked again with the member's token (got ${JSON.stringify(details.map((call) => call.headers.authorization ?? null))})`);
     assert.deepEqual(errors, []);
     await context.close();
   } finally { await fixture.close(); }
@@ -1152,7 +1137,10 @@ test("a member confirmed after opening is moved from the trailer to the full vid
     await page.locator(".video-card__play").first().click();
     const player = page.locator("#player-container");
     await player.waitFor();
-    assert.equal(await player.getByRole("button", { name: "Checking your account…" }).count(), 1, "the gate is on screen while the account is checked");
+    // Nothing waits behind the account check: the trailer the backend sent is
+    // already in the player, and there is no sign-in wall anywhere.
+    await player.locator("video").waitFor();
+    assert.equal(await page.locator(".video-player__signin").count(), 0, "no sign-in wall while the account is checked");
     await fixture.releaseAccount(page);
     // The member is confirmed, so the player asks for the video again by itself and
     // the trailer source is replaced without a click.

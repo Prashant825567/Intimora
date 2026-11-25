@@ -64,7 +64,9 @@ function preloadHint(): "auto" | "metadata" {
     ? "metadata" : "auto";
 }
 
-const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, accountChecking, onSignIn, onRefreshVideo }) => {
+// `onSignIn` stays in the props for the caller, but the player itself no longer
+// sends anyone to sign in: the backend's answer decides what plays.
+const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, accountChecking, onRefreshVideo }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   // A fresh answer from the backend (a re-issued link, or the member's full stream
   // where the first answer only had a trailer) replaces what this player was opened
@@ -77,8 +79,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
   const progressRef = useRef<HTMLDivElement>(null);
   const playAttempt = useRef(0);
   const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // A play request that arrived while the sign-in gate was up.
-  const pendingStart = useRef(false);
   const [preload] = useState(preloadHint);
   // The URL a media element is actually loading. It is the CDN file when the
   // backend offered one, and it moves to the byte stream if that link fails.
@@ -86,6 +86,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
   // never asks for the full stream — the backend is the authority on that, and a
   // request it refuses would only waste the visitor's data.
   const locked = video.locked === true && !video.videoUrl?.includes("kind=trailer") && Boolean(video.trailerUrl);
+  // What the server actually gave us: a trailer, or the video itself. The player
+  // says which one it is showing, so a member never wonders why the runtime is short
+  // and a guest never wonders why a premium title ended early.
+  const playingTrailer = (url: string | undefined | null) => typeof url === "string" && /[?&]kind=trailer\b/.test(url);
+  // The backend also names the type it sent, which is the only way to know a
+  // trailer that arrived as a plain media file is a trailer. An explicit `full`
+  // only wins when the link itself carries no trailer marker.
+  const serverSaysTrailer = video.playbackType === "trailer";
+  const trailerOnly = locked || serverSaysTrailer || playingTrailer(locked ? video.trailerUrl : video.videoUrl);
   const welcomeSource = locked ? (video.trailerUrl as string) : video.videoUrl;
   // A 4xx on a tokenised link is an expiry even when the element only reports a
   // generic decode error. Performance entries are read-only and cheap.
@@ -112,15 +121,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
   // that this visitor may not see it (`locked`); either way an ad has no place
   // in front of it.
   const premiumTitle = video.premium === true || video.locked === true;
-  // A guest never plays a premium title at all — not even its trailer: the player
-  // asks for a sign-in first, and the button opens the page that carries Google
-  // sign-in. The backend stays the authority on who may watch; this only stops a
-  // visitor who is not signed in from being shown a premium video player.
-  // Until the account check finishes, a premium video is treated as gated: the
-  // notice is on screen from the first frame and nothing is requested behind it.
-  const signInGate = premiumTitle && (!signedIn || accountChecking);
-  // The gate is the only thing on screen: no play button over the message.
-  const gateShown = signInGate;
+  // Who may watch what is the backend's answer, never a sign-in gate in the player:
+  // a premium title returns its full stream for an active member and the locked
+  // shape (a trailer) for everyone else, and those links are what plays. So a guest
+  // watches the trailer the backend sent, without being stopped first. Only a title
+  // the backend sent nothing for is blocked, and that is `lockedBlocked`.
   const [source, setSource] = useState(welcomeSource);
   const sourceSwapped = useRef(false);
   const resumeAt = useRef(0);
@@ -377,10 +382,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
   // not answered within the short grace window, playback begins instead, so an
   // ad server can never block the video.
   const startPlayback = (v: HTMLVideoElement, automatic = false) => {
-    // Nothing starts behind the sign-in gate: no trailer, no stream, no ad. The
-    // click is remembered though — if the gate lifts because the account check
-    // found a member, playback starts then without a second click.
-    if (signInGate) { pendingStart.current = true; return; }
     wantsPlay.current = true;
     const attempt = ++playAttempt.current;
     // No pre-roll for a premium title: playback starts on the click, with the
@@ -429,17 +430,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
     }
     playContent(v, false, ++playAttempt.current);
   };
-
-  // The gate lifts when the account check says "member": whatever was asked for
-  // while it was up now starts (the trailer of a premium title, never an ad).
-  useEffect(() => {
-    if (signInGate || !pendingStart.current || !videoRef.current) return;
-    pendingStart.current = false;
-    startPlayback(videoRef.current, true);
-    // `startPlayback` reads the current state on every render; re-running on it
-    // would restart playback.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signInGate]);
 
   useLayoutEffect(() => {
     // This commit follows the user's play click; shared links skip this step.
@@ -556,40 +546,15 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
           onMouseMove={() => { if (Date.now() - controlsToggledAt.current > 250) resetControlsTimer(); }}
           onMouseLeave={() => { if (playing && !adPlaying) setShowControls(false); }}
         >
-          {signInGate || lockedBlocked ? (
-            // One message, nothing else: the poster is a dim backdrop, and there
-            // is no transport UI (no play button, timeline or volume) because a
-            // visitor who may not watch should not see a player pretending to be
-            // one.
+          {lockedBlocked ? (
+            // The backend sent no stream and no trailer for this title, so there is
+            // nothing to play. It says so instead of showing a broken player.
             <div className="video-player__gate absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <img src={video.thumbnail} alt="" className="absolute inset-0 w-full h-full object-contain opacity-30" />
               <p className="relative text-white font-bold">{video.title}</p>
-              {signInGate ? (
-                <>
-                  <p className="relative text-white font-semibold">Sign in first to watch this premium video</p>
-                  <p className="relative max-w-sm text-gray-300 text-sm">
-                    Premium video sirf sign-in kiye hue premium members ke liye hai. Sign in karo, premium activate karo — phir yahi video chalti hai.
-                  </p>
-                  {/* The button only acts once the account check has finished, so a
-                      signed-in member is never bounced to the sign-in page. */}
-                  <button
-                    type="button"
-                    onClick={() => { if (!accountChecking) onSignIn(); }}
-                    disabled={accountChecking}
-                    aria-busy={accountChecking || undefined}
-                    className="video-player__signin relative mt-2 rounded-full px-5 py-2 text-sm font-bold disabled:opacity-70"
-                    style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)", color: "#000" }}
-                  >
-                    {accountChecking ? "Checking your account…" : "Sign in to watch"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="relative text-white font-semibold">Premium video · sirf premium members ke liye</p>
-                  <p className="relative text-gray-300 text-sm">Sign in karke premium activate karo — uske baad yahi video full chalegi.</p>
-                  <p className="relative text-gray-500 text-xs">Filhaal is video ka trailer bhi available nahi hai.</p>
-                </>
-              )}
+              <p className="relative text-white font-semibold">Premium video · sirf premium members ke liye</p>
+              <p className="relative text-gray-300 text-sm">Sign in karke premium activate karo — uske baad yahi video full chalegi.</p>
+              <p className="relative text-gray-500 text-xs">Filhaal is video ka trailer bhi available nahi hai.</p>
             </div>
           ) : (
           <video
@@ -664,22 +629,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
           />
           )}
 
-          {locked && !signInGate && (
+          {trailerOnly && (
             <>
-              {/* The visitor sees the trailer and is told, plainly, why that is
-                  all there is — and what unlocks the full video. */}
+              {/* The server sent a trailer, so that is what is playing and the note
+                  says exactly that. The full video is unlocked by the account, not
+                  by anything this player can do. */}
               <p className="video-player__trailer-note absolute bottom-16 left-4 z-10 rounded-full bg-black/75 px-3 py-1 text-xs text-gray-200">
                 Trailer · full video premium members ke liye
               </p>
-              <p className="video-player__premium-note absolute top-3 left-3 z-10 max-w-[16rem] rounded-lg bg-black/80 px-3 py-2 text-[11px] leading-snug text-gray-200">
-                Premium video · abhi sirf trailer. Sign in karke premium activate karo, phir full video chalegi.
-              </p>
+              {premiumTitle && (
+                <p className="video-player__premium-note absolute top-3 left-3 z-10 max-w-[16rem] rounded-lg bg-black/80 px-3 py-2 text-[11px] leading-snug text-gray-200">
+                  Abhi trailer chal raha hai. Sign in karke premium activate karo — phir yahi video full chalegi.
+                </p>
+              )}
             </>
           )}
           {adPlaying && <VideoAdOverlay ad={adPlaying} onFinish={finishAd} onClose={onClose} />}
 
           {/* The poster and native preload are used only for the selected video. */}
-          {!signInGate && !lockedBlocked && !adPlaying && !playing && !playbackError && (
+          {!lockedBlocked && !adPlaying && !playing && !playbackError && (
             <button type="button" aria-label="Play video" className="absolute inset-0 flex items-center justify-center cursor-pointer" onClick={togglePlay}>
               <span
                 className="video-player__play-button w-20 h-20 rounded-full flex items-center justify-center transition-all hover:scale-110"
@@ -708,7 +676,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
 
           {/* Top controls — only when there is something to control. Behind the
               sign-in gate the message is the only thing on screen. */}
-          {!gateShown && !lockedBlocked && (
+          {!lockedBlocked && (
           <div
             className={`video-player__top absolute top-0 left-0 right-0 p-4 flex items-center justify-between transition-all duration-300 ${adPlaying || !showControls ? "opacity-0 pointer-events-none" : "opacity-100"}`}
             style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)" }}
@@ -729,7 +697,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
           )}
 
           {/* Bottom controls */}
-          {!gateShown && !lockedBlocked && (
+          {!lockedBlocked && (
           <div
             data-controls={adPlaying || !showControls ? "hidden" : "visible"}
             className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${adPlaying || !showControls ? "opacity-0 pointer-events-none" : "opacity-100"}`}

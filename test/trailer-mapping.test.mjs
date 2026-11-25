@@ -62,3 +62,21 @@ test("a premium answer's trailer survives mapping, from the record or from metad
   // `hasTrailer` on its own (no URL) must not make a video look playable.
   assert.equal(mapApiVideoToVideo(publicVideoForTest({ id: "v-1", title: "T", locked: true, hasTrailer: true }), backend).trailerUrl, null);
 });
+
+// Z5: the backend also names the type it sent. A trailer that arrives as a plain
+// media file carries no `kind=trailer` in its URL, so the type is the only way the
+// player can tell the visitor what they are watching. An answer that does not say
+// is left undefined, so the link itself stays the fallback.
+test("the answer's own type is kept, and unknown values are not guessed", async () => {
+  const { publicVideoForTest, mapApiVideoToVideo } = await loadApi();
+  const backend = "https://intimora-api1.vercel.app";
+  const mapped = (raw) => mapApiVideoToVideo(publicVideoForTest(raw), backend);
+  const base = { id: "v-1", title: "T", premium: true, locked: true, hasTrailer: true, trailerUrl: "/storage/trailers/t1.mp4" };
+
+  assert.equal(mapped({ ...base, type: "trailer" }).playbackType, "trailer");
+  assert.equal(mapped({ ...base, videoType: "full" }).playbackType, "full");
+  assert.equal(mapped({ ...base, playbackType: "trailer" }).playbackType, "trailer", "the explicit field wins");
+  assert.equal(mapped({ ...base, metadata: { type: "trailer" } }).playbackType, "trailer", "a type inside metadata is read too");
+  assert.equal(mapped(base).playbackType, undefined, "an answer that does not say is not guessed");
+  assert.equal(mapped({ ...base, type: "something-else" }).playbackType, undefined);
+});
