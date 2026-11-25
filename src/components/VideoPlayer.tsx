@@ -16,6 +16,10 @@ import { RECOVERY_DELAY_MS, shouldAutoRecover, playbackFailureMessage } from "..
 // A link whose token expired is reported in the app's own words, and only after
 // the silent refresh above has failed too.
 const LINK_EXPIRED = "Is link ki validity khatam ho gayi. Ek baar Try again dabao — naya link aa jayega.";
+// How many times a dead premium/stream link is re-issued on its own before the
+// visitor is asked to press Try again. Enough for a slow network, small enough
+// that a backend returning dead links cannot become a request loop.
+const LINK_REFRESH_BUDGET = 3;
 
 // The ad tag is a public build constant. An empty value disables pre-roll.
 const VAST_TAG = __INTIMORA_VAST_TAG_URL__;
@@ -325,18 +329,38 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
 
   // A token that expired is not an error the visitor should act on: the app asks
   // the backend for this video again, and if the answer carries a new link the
-  // player swaps to it once, from the same position. A second expiry is reported.
+  // player swaps to it once, from the same position.
+  //
+  // One read at a time: an expiry that arrives while the backend is already
+  // answering is covered by that answer (`return true`), never turned into a second
+  // request and never into an error the visitor has to clear.
+  //
+  // A budget bounds the automatic re-issues, so a backend that keeps handing back a
+  // dead link cannot become a request loop: after three of them the honest "Try
+  // again" is shown, and that button asks once more and refills the budget. No timer
+  // is ever put on a link — this only counts answers the backend actually gave.
+  const refreshBudget = useRef(LINK_REFRESH_BUDGET);
   const refreshLinks = (element: HTMLVideoElement) => {
-    if (!onRefreshVideo || refreshed.current) return false;
+    if (!onRefreshVideo) return false;
+    if (refreshBudget.current <= 0) return false;
+    if (refreshed.current) return true;
+    refreshBudget.current -= 1;
     refreshed.current = true;
     const resume = Number.isFinite(element.currentTime) && element.currentTime > 0 ? element.currentTime : 0;
     setPlaybackError("");
     setBuffering(true);
-    void onRefreshVideo(video).then((fresh) => {
-      if (!fresh || !installFresh(fresh, resume)) { setBuffering(false); setPlaybackError(LINK_EXPIRED); return; }
-      // A fresh token means the next expiry is a new event, not a loop.
-      window.setTimeout(() => { refreshed.current = false; }, 1_000);
-    }).catch(() => { setBuffering(false); setPlaybackError(LINK_EXPIRED); });
+    const settle = (fresh: Video | null) => {
+      if (fresh && installFresh(fresh, resume)) {
+        // A fresh token means the next expiry is a new event, not a loop.
+        window.setTimeout(() => { refreshed.current = false; }, 1_000);
+        return;
+      }
+      // Nothing new arrived: keep what is already loaded rather than refusing it.
+      refreshed.current = false;
+      setBuffering(false);
+      setPlaybackError(LINK_EXPIRED);
+    };
+    void onRefreshVideo(video).then(settle).catch(() => settle(null));
     return true;
   };
 
@@ -458,7 +482,11 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
     if (!v) return;
     // An expired link is re-issued first: the button asks for a fresh one instead
     // of reloading a token the server has already stopped honouring.
-    if (playbackErrorRef.current === LINK_EXPIRED) { refreshed.current = false; if (refreshLinks(v)) return; }
+    if (playbackErrorRef.current === LINK_EXPIRED) {
+      refreshed.current = false;
+      refreshBudget.current = LINK_REFRESH_BUDGET;
+      if (refreshLinks(v)) return;
+    }
     // Reload only after a media error. For a blocked play request, retain any
     // data already buffered instead of starting a second download.
     recoveries.current = 0;

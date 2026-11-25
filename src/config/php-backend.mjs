@@ -10,9 +10,12 @@
 // (the default) means "ask the load balancer", which is the normal mode.
 export const PHP_ORIGIN_OVERRIDE = "";
 
-// The free host grants a six-hour session; a new unlock is requested a little
-// before that expires.
-export const UNLOCK_FRESH_MS = 5.5 * 60 * 60 * 1000;
+// The free host grants a six-hour cookie, and a new cookie is earned on the next
+// arrival: every visit to a PHP-backed site goes through the host's own check once,
+// because the check is also what registers the visitor there. So a proven session is
+// reused for this page load only — the visitor who reloads tomorrow (or reopens the
+// tab) meets the check again instead of inheriting yesterday's cookie.
+export const UNLOCK_FRESH_MS = 0;
 
 // An attempt only proves itself when a real answer arrives. Until then the
 // window is short: three failed unlocks (a missing CORS header, a refused
