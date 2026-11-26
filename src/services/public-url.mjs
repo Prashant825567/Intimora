@@ -2,6 +2,12 @@
 // in the client bundle; credentials must never be placed in this URL.
 export const DEFAULT_DISCOVERY_URL = "https://intimora.tmc78lxnu.workers.dev/api/get-server";
 
+// The PHP host that unlocks the visitor's identity on arrival: it hands out the
+// cookie its API needs and it is what writes the visitor row (IP, geo, device).
+// It is asked before the load balancer, so the server named afterwards can never
+// change who was registered. Empty disables the direct step (offline builds).
+export const DEFAULT_IDENTITY_URL = "https://intimora-api2.site.je";
+
 // Direct browser requests must not be pointed at credential-bearing URLs or
 // obvious local/private network targets. DNS and backend access controls still
 // have to be enforced by the backend; a browser cannot validate DNS safely.

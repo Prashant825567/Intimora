@@ -126,9 +126,8 @@ test("browser calls public discovery and backends directly, with per-tab routing
     const labels = await Promise.all([pageA, pageB].map(async (page) => (await page.locator(".hero-banner__title").textContent()).includes(" A ") ? "A" : "B"));
     assert.deepEqual(new Set(labels), new Set(["A", "B"]));
     assert.equal(state.discoveries, 2);
-    const stored = await Promise.all([pageA, pageB].map((page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("intimora_direct_backend_v1")))));
-    assert.equal(stored[0].backend, backends[labels[0]]);
-    assert.equal(stored[1].backend, backends[labels[1]]);
+    const stored = await Promise.all([pageA, pageB].map((page) => page.evaluate(() => sessionStorage.getItem("intimora_direct_backend_v1"))));
+    assert.deepEqual(stored, [null, null], "the server URL is never stored");
     await pageA.waitForFunction(() => document.querySelector(".hero-banner img")?.naturalWidth > 0);
     assert.equal(await pageA.locator(".hero-banner img").first().getAttribute("src"), `${backends[labels[0]]}/api/videos/video-1/thumbnail`);
     assert.ok(browserRequests.some((url) => url === discovery));
@@ -136,35 +135,32 @@ test("browser calls public discovery and backends directly, with per-tab routing
     assert.ok(browserRequests.some((url) => url.startsWith(backends.B)));
     assert.ok(browserRequests.every((url) => !url.includes("/_api/")), "the frontend does not call the old proxy");
 
+    const reloadDiscovery = pageA.waitForResponse((response) => response.url() === discovery);
     await pageA.reload();
+    await reloadDiscovery;
     await pageA.locator(".hero-banner__image").first().waitFor();
-    assert.equal(state.discoveries, 2, "a reload reuses the stored selection, so no new discovery");
+    assert.equal(state.discoveries, 3, "a manual refresh is a new entry: the load balancer is asked again");
 
     const popupPromise = pageA.waitForEvent("popup");
     await pageA.evaluate(() => window.open("/", "_blank"));
     const popup = await popupPromise;
     await popup.locator(".hero-banner__image").first().waitFor();
-    assert.equal(state.discoveries, 2, "a new tab of the same visitor keeps the server it already had");
+    assert.equal(state.discoveries, 4, "a new tab is a new entry too");
     await popup.close();
 
-    const original = labels[0];
-    const renewed = original === "A" ? "B" : "A";
+    const original = (await pageA.locator(".hero-banner__title").textContent()).includes(" A ") ? "A" : "B";
     const cursor = await pageA.evaluate(async () => {
       const api = await import("/src/services/api.ts");
       return (await api.fetchVideos()).data.nextCursor;
     });
     assert.equal(cursor.backend, backends[original]);
-    // A day later the stored selection has run out, so the next call asks again.
-    await pageA.evaluate(() => { window.__timeOffset = 24 * 60 * 60 * 1000 + 1_000; });
-    state.forcedNext = renewed;
     const search = pageA.getByRole("textbox", { name: "Search videos" });
     await search.fill("demo");
-    const searchResponse = pageA.waitForResponse((response) => response.url().startsWith(`${backends[renewed]}/api/search?`));
+    const searchResponse = pageA.waitForResponse((response) => response.url().startsWith(`${backends[original]}/api/search?`));
     await search.press("Enter");
     await searchResponse;
     await pageA.getByText("Search results for").waitFor();
-    assert.equal(state.discoveries, 3);
-    assert.ok(state.calls.some((call) => call.label === renewed && call.path === "/api/search"));
+    assert.equal(state.discoveries, 4, "a click inside the page keeps the server that delivered it");
     const paged = await pageA.evaluate(async (savedCursor) => {
       const api = await import("/src/services/api.ts");
       const result = await api.fetchVideos(savedCursor);

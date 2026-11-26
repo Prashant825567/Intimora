@@ -1,11 +1,5 @@
 import { publicBackendBase, publicHttpsUrl } from "./public-url.mjs";
 
-const STORAGE_KEY = "intimora_direct_backend_v1";
-// How long one discovery answer is used for. It is stored, so a reload, a new tab
-// and a return visit all keep the visitor's own server instead of asking the load
-// balancer again. A failed request clears it early, which is how a server that has
-// gone away is noticed.
-const MAX_TTL_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 20_000;
 const UNAVAILABLE = "Content is temporarily unavailable";
 const ROUTE = /^\/api\/(?:search|likes\/counts|visit|videos(?:\/[A-Za-z0-9_-]{1,128}(?:\/share)?)?)$/;
@@ -75,10 +69,12 @@ function apiUrl(base, path, method, body) {
   }
 }
 
-// Every tab keeps its own selection. The cache is an optimization, not an
-// identity or an authorization mechanism. Stored entries are reused across
-// reloads, new tabs and later visits (a day); the entry a running tab works from
-// is refreshed every few minutes, so a backend that has gone away is noticed.
+// One page load is one entry. The server the load balancer names belongs to this
+// page load and to nothing else: every request it makes — catalogue, media,
+// actions — goes to that one server, and no part of the answer is stored (no
+// sessionStorage, no localStorage, no cookie of ours). A refresh is a new entry
+// and asks the load balancer again, which is also what keeps a click inside the
+// page from silently moving the visitor to a different server.
 export function createVisitorRequest(options = {}) {
   const discoveryUrl = publicHttpsUrl(options.discoveryUrl);
   // Temporary testing mode: one fixed PHP origin instead of discovery. The
@@ -101,18 +97,8 @@ export function createVisitorRequest(options = {}) {
   // A pinned origin is treated as PHP, because that is what it is used for.
   const pinnedPhp = Boolean(backendOverride);
   const fetcher = options.fetcher ?? ((url, init) => fetch(url, init));
-  const now = options.now ?? Date.now;
-  const monotonicNow = options.monotonicNow ?? (() => globalThis.performance?.now?.() ?? now());
-  const getStorage = options.storage === undefined
-    ? () => { try { return globalThis.sessionStorage; } catch { return null; } }
-    : () => options.storage;
-  // A stored selection is the visitor's, so it is reused on any arrival — the
-  // site asked for its server once and does not need to ask again. The option
-  // stays available so a caller can force a fresh discovery.
-  const reuseStoredSelection = options.reuseStoredSelection ?? true;
+  // The selection lives in this closure for the life of the page load only.
   let cached;
-  let monotonicDeadline = 0;
-  let loaded = false;
   let bootstrap;
   let generation = 0;
   // The backend that has already refused this tab's bearer token, so it is not
@@ -122,41 +108,15 @@ export function createVisitorRequest(options = {}) {
   function clear() {
     generation += 1;
     cached = undefined;
-    monotonicDeadline = 0;
-    try { getStorage()?.removeItem(STORAGE_KEY); } catch { /* Storage can be disabled. */ }
   }
 
   function current() {
-    if (!loaded) {
-      loaded = true;
-      if (reuseStoredSelection) {
-        try {
-          const entry = JSON.parse(getStorage()?.getItem(STORAGE_KEY) || "null");
-          const backend = publicBackendBase(entry?.backend);
-          const timestamp = now();
-          if (backend && backend === entry.backend && Number.isFinite(entry.selectedAt)
-            && Number.isFinite(entry.expiresAt) && entry.selectedAt <= timestamp
-            && entry.expiresAt <= entry.selectedAt + MAX_TTL_MS && entry.expiresAt > timestamp) {
-            cached = { backend, php: entry.php === true, selectedAt: entry.selectedAt, expiresAt: entry.expiresAt };
-            monotonicDeadline = monotonicNow() + Math.max(0, entry.expiresAt - timestamp);
-          }
-        } catch { /* Keep an in-memory cache when storage is unavailable. */ }
-      }
-    }
-    if (cached && (now() < cached.selectedAt || now() >= cached.expiresAt || monotonicNow() >= monotonicDeadline)) clear();
     return cached;
   }
 
-  function save(backend, selectedAt, php = false) {
-    const timestamp = now();
-    const expiresAt = selectedAt + MAX_TTL_MS;
-    if (!Number.isFinite(timestamp) || timestamp < selectedAt || timestamp >= expiresAt) throw new Error(UNAVAILABLE);
-    cached = { backend, php: php === true, selectedAt, expiresAt };
-    // Measured from when discovery started, not from when its answer was read, so a
-    // slow answer cannot extend the selection.
-    monotonicDeadline = monotonicNow() + Math.max(0, expiresAt - timestamp);
+  function save(backend, php = false) {
+    cached = { backend, php: php === true };
     generation += 1;
-    try { getStorage()?.setItem(STORAGE_KEY, JSON.stringify(cached)); } catch { /* In-memory selection still works. */ }
   }
 
   // A CORS refusal and a dead connection look identical to `fetch`: both throw.
@@ -274,19 +234,18 @@ export function createVisitorRequest(options = {}) {
     if (bootstrap) return announce(await bootstrap);
     if (!discoveryUrl) throw new Error(UNAVAILABLE);
 
-    const selectedAt = now();
     const startedGeneration = generation;
     const request = (async () => {
       const result = await readJson(discoveryUrl, "GET");
       const backend = publicBackendBase(result.body?.data?.server);
       const php = result.body?.data?.php === true;
-      if (result.failed || !backend || !Number.isFinite(selectedAt)) throw new Error(UNAVAILABLE);
+      if (result.failed || !backend) throw new Error(UNAVAILABLE);
       if (generation !== startedGeneration) {
         const latest = current();
         if (latest) return { backend: latest.backend, php: latest.php === true };
         throw new Error(UNAVAILABLE);
       }
-      save(backend, selectedAt, php);
+      save(backend, php);
       return { backend, php };
     })();
     bootstrap = request;
@@ -298,8 +257,9 @@ export function createVisitorRequest(options = {}) {
     return (await selectTarget()).backend;
   }
 
-  // Resolves the transport for one request: the visitor's target, or a backend
-  // pinned with a video so its playback and actions keep working after a switch.
+  // Resolves the transport for one request: this page load's server, or a backend
+  // pinned with a video/cursor so its playback and actions keep working even when
+  // a failed call made this page load discover a new one.
   async function resolveTarget(pinnedBackend) {
     if (pinnedBackend === undefined) return selectTarget();
     const backend = publicBackendBase(pinnedBackend);

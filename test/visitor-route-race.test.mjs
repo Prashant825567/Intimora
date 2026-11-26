@@ -36,7 +36,6 @@ test("a delayed failure from an old backend cannot clear a refreshed selection",
 
 test("a failing pinned request never erases a newer backend selection", async () => {
   let discoveries = 0;
-  let now = 100_000;
   const slow = deferred();
   const started = deferred();
   const fetcher = async (url) => {
@@ -46,15 +45,16 @@ test("a failing pinned request never erases a newer backend selection", async ()
       await slow.promise;
       throw new Error("private upstream error");
     }
+    if (url.includes("q=fail")) return new Response("failed", { status: 503 });
     return Response.json({ ok: true });
   };
-  const visitor = createVisitorRequest({ discoveryUrl, fetcher, storage: null, now: () => now, monotonicNow: () => now });
+  const visitor = createVisitorRequest({ discoveryUrl, fetcher, storage: null });
   await visitor.requestJson("/api/videos");
-  // A day later the stored choice has run out, so the next call discovers a new
-  // server — while a pinned request is still waiting on the old one.
-  now += 24 * 60 * 60 * 1000 + 1;
+  // A failed call clears this page load's server, so the next call discovers a new
+  // one — while a pinned request is still waiting on the old one.
   const oldPage = visitor.requestJson("/api/videos?cursor=old", undefined, backendA);
   await started.promise;
+  await assert.rejects(visitor.requestJson("/api/search?q=fail"), { message: "Content is temporarily unavailable" });
   assert.equal(await visitor.selectBackend(), backendB);
   slow.resolve();
   await assert.rejects(oldPage, { message: "Content is temporarily unavailable" });

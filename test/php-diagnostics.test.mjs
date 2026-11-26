@@ -21,7 +21,6 @@ function visitorWith(answer, options = {}) {
     },
     onOutcome: (outcome) => outcomes.push(outcome),
     storage: null,
-    reuseStoredSelection: false,
     ...options,
   });
   return { visitor, calls, outcomes };
@@ -88,7 +87,6 @@ test("an ordinary backend keeps its stricter redirects and credential-free calls
     },
     onOutcome: (outcome) => outcomes.push(outcome),
     storage: null,
-    reuseStoredSelection: false,
   });
   await visitor.requestJson("/api/videos?limit=5");
   assert.equal(calls[1].init.redirect, "error");

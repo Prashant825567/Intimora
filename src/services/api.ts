@@ -12,6 +12,7 @@ import {
   setActiveTarget,
 } from "./php-session.mjs";
 import { recordDiagnostic } from "./diagnostics.mjs";
+import { registerEntry } from "./identity.mjs";
 import { playbackSources, trailerSource } from "./media-source.mjs";
 import { ensureViewerToken, viewerQuery } from "./premium-viewer.mjs";
 import { fetchAnimeStream, hlsPlayable, isHlsLink } from "./anime-api.mjs";
@@ -333,7 +334,10 @@ async function catalog(path: string, pinnedBackend?: string): Promise<CatalogRes
 }
 
 // Start discovery when the visitor arrives, including while the age gate is open.
-export const primeBackendSelection = () => visitor.selectBackend();
+// Every discovery waits for this page load's entry, so the identity step always
+// happens first and the server is chosen afterwards.
+const discover = () => visitor.selectBackend();
+export const primeBackendSelection = () => startEntry().then(discover);
 // The visitor pressed "Retry Connection": give the PHP unlock its budget back.
 export const retryPhpSession = resetPhpSession;
 // True when the visitor is on a PHP host that already spent its unlock budget
@@ -545,24 +549,15 @@ export const mapApiVideoToVideo = (apiVideo: ApiVideo, backend: string): Video =
   };
 };
 
-// Visitor log: one POST per browser session, fired after the 18+ gate. It travels
-// through the same visitor route as the catalogue, so a PHP host's HTML check,
-// its cookie and the one-time unlock are handled instead of being bypassed by a
-// raw fetch. `text/plain` keeps it a "simple" request — no preflight, which a
-// free host answers with its check page instead of JSON. Everything is
-// swallowed: logging never slows down or breaks the catalogue.
-let visitLogged = false;
-export async function logVisit() {
-  // Two guards: the flag covers this page load, sessionStorage covers reloads in
-  // the same tab. A closed tab is a new session and a new row. Storage that is
-  // disabled simply falls back to the in-memory flag.
-  if (visitLogged) return;
-  visitLogged = true;
-  try {
-    if (sessionStorage.getItem("intimora_visit_logged") === "1") return;
-    sessionStorage.setItem("intimora_visit_logged", "1");
-  } catch { /* Storage disabled: the flag above still limits this page. */ }
+// One entry per page load, in this order: the PHP identity host unlocks this
+// visitor (its cookie) and writes the visitor row — IP, geo, browser, device —
+// and only then does the load balancer name this page load's server. The server
+// URL is never stored: a refresh is a new entry and a new answer, while a click
+// inside the page keeps the server that delivered the page. Everything is
+// swallowed, so neither step can ever delay or break the catalogue.
+let entry: Promise<void> | null = null;
 
+async function visitPayload(): Promise<string> {
   // Chrome on Android exposes the device model here; Safari and iOS have no
   // such API, so the field is simply left out there.
   let model = "";
@@ -575,17 +570,31 @@ export async function logVisit() {
       if (typeof hints?.model === "string") model = hints.model;
     }
   } catch { /* No client hints: the user agent string is the fallback. */ }
+  return JSON.stringify({
+    ua: navigator.userAgent.slice(0, 500),
+    ...(model ? { model: model.slice(0, 60) } : {}),
+    lang: (navigator.language || "").slice(0, 20),
+    tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 40),
+    screen: `${window.screen.width}x${window.screen.height}`,
+    path: (location.pathname + location.search).slice(0, 250),
+    referer: (document.referrer || "").slice(0, 250),
+  });
+}
 
-  try {
-    const payload = JSON.stringify({
-      ua: navigator.userAgent.slice(0, 500),
-      ...(model ? { model: model.slice(0, 60) } : {}),
-      lang: (navigator.language || "").slice(0, 20),
-      tz: (Intl.DateTimeFormat().resolvedOptions().timeZone || "").slice(0, 40),
-      screen: `${window.screen.width}x${window.screen.height}`,
-      path: (location.pathname + location.search).slice(0, 250),
-      referer: (document.referrer || "").slice(0, 250),
-    });
-    await visitor.requestJson("/api/visit", { method: "POST", body: payload });
-  } catch { /* Logging never breaks the app. */ }
+export function startEntry(): Promise<void> {
+  if (entry) return entry;
+  entry = (async () => {
+    try {
+      const payload = await visitPayload();
+      const identity = await registerEntry({ payload });
+      // No identity host configured (an offline build or a test): the row still
+      // travels through this page load's server, exactly as it used to.
+      if (identity.skipped) {
+        await discover().catch(() => {});
+        await visitor.requestJson("/api/visit", { method: "POST", body: payload });
+      }
+    } catch { /* The identity step never blocks the catalogue. */ }
+    await discover().catch(() => {});
+  })();
+  return entry;
 }

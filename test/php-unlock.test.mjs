@@ -200,7 +200,6 @@ test("the load balancer decides the transport: a PHP host is called directly wit
       return Response.json({ ok: true, data: { videos: [] } });
     },
     storage: null,
-    reuseStoredSelection: false,
   });
   const result = await visitor.requestJson("/api/videos?limit=5");
   assert.equal(result.backend, php);
@@ -223,7 +222,6 @@ test("an ordinary backend is untouched: no cookies, no unlock, no extra hop", as
       throw new Error(`unexpected ${url}`);
     },
     storage: null,
-    reuseStoredSelection: false,
   });
   await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
   assert.equal(calls[1].init.credentials, "omit", "an ordinary API stays credential-free");
@@ -241,7 +239,6 @@ test("a discovery answer without the flag is treated as an ordinary backend", as
       return Response.json({ ok: true, data: { videos: [] } });
     },
     storage: null,
-    reuseStoredSelection: false,
   });
   await visitor.requestJson("/api/videos?limit=5");
   assert.equal(calls[1].init.credentials, "omit");
@@ -260,7 +257,6 @@ test("a direct call that hits the check triggers one unlock instead of an error 
     },
     requestUnlock: (context) => { unlocks.push(context); return true; },
     storage: null,
-    reuseStoredSelection: false,
   });
   await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
   assert.equal(unlocks.length, 1);
@@ -278,7 +274,6 @@ test("a PHP answer that arrived proves the cookie and marks the session", async 
       return Response.json({ ok: true, data: { videos: [] } });
     },
     storage: null,
-    reuseStoredSelection: false,
   });
   await visitor.requestJson("/api/videos?limit=5");
   assert.deepEqual(confirmed, ["ok"]);
@@ -294,7 +289,6 @@ test("an ordinary backend never claims the PHP session", async () => {
       return Response.json({ ok: true, data: { videos: [] } });
     },
     storage: null,
-    reuseStoredSelection: false,
   });
   await visitor.requestJson("/api/videos?limit=5");
   assert.deepEqual(confirmed, []);
@@ -330,7 +324,6 @@ test("a refused answer reaches the unlock once, and the callback is told it was 
     },
     requestUnlock: (context) => { unlocks.push(context); return true; },
     storage: null,
-    reuseStoredSelection: false,
   });
   await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
   // A cookieless answer from a PHP host looks exactly like this, so the host's
@@ -352,7 +345,6 @@ test("a request that never arrived still gets the host's own unlock page", async
     },
     requestUnlock: (context) => { unlocks.push(context); return true; },
     storage: null,
-    reuseStoredSelection: false,
   });
   await assert.rejects(visitor.requestJson("/api/videos?limit=5"), { message: "Content is temporarily unavailable" });
   assert.equal(unlocks.length, 1, "a blocked request may still be fixed by the cookie page");

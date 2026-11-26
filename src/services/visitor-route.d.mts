@@ -1,10 +1,6 @@
 export interface VisitorRequestOptions {
   discoveryUrl: string;
   fetcher?: typeof fetch;
-  storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
-  now?: () => number;
-  monotonicNow?: () => number;
-  reuseStoredSelection?: boolean;
   backendOverride?: string;
   requestUnlock?: (context: { path: string; challenge: boolean }) => boolean;
   onTarget?: (target: { backend: string; php: boolean }) => void;

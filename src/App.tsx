@@ -21,7 +21,7 @@ import type { LiveLikes } from "./hooks/useLiveLikes";
 import type { Video } from "./data/mockVideos";
 import type { BrowseView } from "./types/navigation";
 import { TrendingUp, Loader2, Upload, Wifi, WifiOff, Grid2X2, Sparkles } from "lucide-react";
-import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, logVisit, mapApiVideoToVideo, primeBackendSelection, phpConnectionBlocked, phpFailure, retryPhpSession } from "./services/api";
+import { fetchVideos, searchVideos, fetchVideoDetail, formatViews, startEntry, mapApiVideoToVideo, phpConnectionBlocked, phpFailure, retryPhpSession } from "./services/api";
 import type { CatalogResponse } from "./services/api";
 import { collectCatalog } from "./services/catalog-pages.mjs";
 import { unlockReturnedThisLoad } from "./services/unlock.mjs";
@@ -234,9 +234,11 @@ function App() {
     if (destination) goTo(`/${destination}`, true);
   }, [accessGranted, account.status, accountPage]);
 
-  // Discovery starts on arrival; a page behind the front-door gate asks for no
+  // Arrival is one entry, whatever page it is: unlock the visitor's identity on
+  // the PHP host, write the visitor row, then let the load balancer name this
+  // page load's server. A page behind the front-door gate still asks for no
   // catalog or media until the gate is answered.
-  useEffect(() => { primeBackendSelection().catch(() => {}); }, []);
+  useEffect(() => { void startEntry(); }, []);
 
   // Anime rows come from our anime API at runtime. Only metadata crosses the
   // wire; a click still opens the source's own embed player in our frame.
@@ -250,10 +252,6 @@ function App() {
     return () => { active = false; controller.abort(); };
   }, [accessGranted]);
 
-  // A deep-linked visitor never meets the gate, so the single per-session visit
-  // row is written on arrival instead of after a confirmation.
-  useEffect(() => { if (!gateRequired) void logVisit(); }, [gateRequired]);
-
   const changeHomeFilter = (next: HomeFilter) => {
     setHomeFilter(next);
     setVisibleCount(DISPLAY_PAGE_SIZE);
@@ -263,8 +261,6 @@ function App() {
     try { sessionStorage.setItem(AGE_VERIFIED_KEY, "true"); }
     catch { /* The current page can still be used when storage is disabled. */ }
     setAgeVerified(true);
-    // One visit row per session, after the 18+ confirmation.
-    void logVisit();
   };
 
   // The backend only offers date-ordered pages. Scan them in the background so

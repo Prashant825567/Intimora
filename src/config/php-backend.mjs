@@ -10,6 +10,10 @@
 // (the default) means "ask the load balancer", which is the normal mode.
 export const PHP_ORIGIN_OVERRIDE = "";
 
+// A separate guard window for the identity host's own unlock page, so unlocking
+// the identity host never spends the budget of the host serving the catalogue.
+export const IDENTITY_UNLOCK_KEY = "intimora_identity_unlock_v1";
+
 // The free host grants a six-hour cookie, and a new cookie is earned on the next
 // arrival: every visit to a PHP-backed site goes through the host's own check once,
 // because the check is also what registers the visitor there. So a proven session is

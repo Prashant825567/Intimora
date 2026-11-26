@@ -35,7 +35,7 @@ async function availablePort() {
   return port;
 }
 
-test("the visitor log posts once per session, only after the age gate, and survives a reload", {
+test("every entry writes its visitor row on arrival, before the gate, and one row per refresh", {
   skip: existsSync(browserPath) ? false : "Install Chromium or set CHROMIUM_PATH", timeout: 90_000,
 }, async () => {
   const vite = await createViteServer({
@@ -70,17 +70,17 @@ test("the visitor log posts once per session, only after the age gate, and survi
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    const arrival = page.waitForRequest(
+      (request) => request.method() === "POST" && request.url().endsWith("/api/visit"),
+      { timeout: 20_000 },
+    );
     await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+    const first = await arrival;
     await page.getByRole("button", { name: /I AM 18/i }).waitFor();
-    assert.equal(visits.length, 0, "nothing is logged before the 18+ gate");
+    await page.waitForTimeout(500);
 
-    const logged = page.waitForRequest((request) => request.method() === "POST" && request.url().endsWith("/api/visit"));
-    await page.getByRole("button", { name: /I AM 18/i }).click();
-    await logged;
-    await page.locator(".site-nav").waitFor();
-    await page.waitForTimeout(300);
-
-    assert.equal(visits.length, 1, "exactly one visit row for the session");
+    assert.equal(visits.length, 1, "the entry row is written on arrival, before the 18+ gate");
+    assert.equal(new URL(first.url()).origin, backend, "no identity host configured: the row travels through this page load's server");
     assert.equal(visits[0].method, "POST");
     assert.match(visits[0].contentType, /^text\/plain/i, "a simple content type keeps it out of the preflight path");
     const payload = JSON.parse(visits[0].body);
@@ -91,11 +91,21 @@ test("the visitor log posts once per session, only after the age gate, and survi
     assert.equal(typeof payload.tz, "string");
     assert.ok(!("password" in payload), "no credentials are collected");
 
+    await page.getByRole("button", { name: /I AM 18/i }).click();
+    await page.locator(".site-nav").waitFor();
+    await page.waitForTimeout(500);
+    assert.equal(visits.length, 1, "confirming the gate is not a second row for the same entry");
+
+    const reloaded = page.waitForRequest(
+      (request) => request.method() === "POST" && request.url().endsWith("/api/visit"),
+      { timeout: 20_000 },
+    );
     const response = await page.reload({ waitUntil: "domcontentloaded" });
     assert.equal(response.status(), 200);
+    await reloaded;
     await page.locator(".site-nav").waitFor();
-    await page.waitForTimeout(1_500);
-    assert.equal(visits.length, 1, "a reload in the same tab is the same session");
+    await page.waitForTimeout(800);
+    assert.equal(visits.length, 2, "a refresh is a new entry: the same visitor and IP are recorded again");
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();

@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { applySecurityHeaders } from "./server/security.mjs";
-import { DEFAULT_DISCOVERY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
+import { DEFAULT_DISCOVERY_URL, DEFAULT_IDENTITY_URL, publicHttpsUrl } from "./src/services/public-url.mjs";
 import { PARTNER_EMBED_URL as configuredPartnerEmbed } from "./src/config/partner-embed";
 import { VAST_SKIP_FALLBACK_SECONDS, VAST_TAG_URL as configuredVastTag } from "./src/config/vast";
 import { DEFAULT_PARTNER_EMBED_URL, partnerSource } from "./src/services/partner-embed.mjs";
@@ -22,6 +22,17 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, "");
   const discoveryUrl = publicHttpsUrl(env.INTIMORA_PUBLIC_API_DISCOVERY_URL || DEFAULT_DISCOVERY_URL);
   if (!discoveryUrl) throw new Error("Invalid public discovery URL: use HTTPS without credentials, a query, or a fragment.");
+  // The PHP host that unlocks the visitor's identity on arrival. Empty turns the
+  // direct step off (offline builds and tests); otherwise it must be an origin.
+  const identitySource = env.INTIMORA_PUBLIC_IDENTITY_URL !== undefined
+    ? env.INTIMORA_PUBLIC_IDENTITY_URL.trim()
+    : DEFAULT_IDENTITY_URL;
+  const identityUrl = identitySource ? publicHttpsUrl(identitySource) : "";
+  if (identityUrl === null) throw new Error("Invalid public identity URL: use HTTPS without credentials, a query, or a fragment.");
+  if (identityUrl) {
+    const parsed = new URL(identityUrl);
+    if (parsed.pathname !== "/" || parsed.port) throw new Error("Invalid public identity URL: use a bare origin.");
+  }
   // The sponsored TubeCorporate URL keeps its campaign `source` parameter and may
   // only point at the documented partner hosts. A campaign feed is read at build
   // time and published as same-origin JSON; a single embed page is framed as is.
@@ -107,6 +118,7 @@ export default defineConfig(({ mode }) => {
     base: "/",
     define: {
       __INTIMORA_DISCOVERY_URL__: JSON.stringify(discoveryUrl),
+      __INTIMORA_IDENTITY_URL__: JSON.stringify(identityUrl),
       __INTIMORA_AUTH_BACKENDS__: JSON.stringify(authBackends),
       // The backend now returns privacy-filtered referral users, so the tree is
       // shown by default; INTIMORA_PUBLIC_SAFE_REFERRALS=0 remains as a switch.

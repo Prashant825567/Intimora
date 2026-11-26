@@ -21,10 +21,9 @@ function client(options) {
   return createVisitorRequest({ discoveryUrl, ...options });
 }
 
-test("tabs discover independently, deduplicate concurrency, and reuse the stored choice across visits", async () => {
+test("tabs discover independently, deduplicate concurrency, and every page load asks again", async () => {
   const calls = [];
   let discoveries = 0;
-  let now = 1_700_000_000_000;
   const fetcher = async (url, init) => {
     calls.push({ url, init });
     assert.equal(init.credentials, "omit");
@@ -40,7 +39,7 @@ test("tabs discover independently, deduplicate concurrency, and reuse the stored
   };
   const storageA = memoryStorage();
   const storageB = memoryStorage();
-  const common = { fetcher, now: () => now, monotonicNow: () => now };
+  const common = { fetcher };
   const a = client({ ...common, storage: storageA });
   const b = client({ ...common, storage: storageB });
   const [a1, a2, b1, b2] = await Promise.all([
@@ -54,39 +53,31 @@ test("tabs discover independently, deduplicate concurrency, and reuse the stored
   assert.equal(calls.filter((call) => call.url === discoveryUrl).length, 2);
   assert.ok(calls.some((call) => call.url === `${a1.backend}/api/videos`));
 
-  const reloaded = client({ ...common, storage: storageA, reuseStoredSelection: true });
-  assert.equal((await reloaded.requestJson("/api/videos")).backend, a1.backend);
-  assert.equal(discoveries, 2, "the same tab may reuse its unexpired selection on reload");
+  // Nothing about the server is kept: the page load owns it, not the browser.
+  assert.deepEqual(storageA.snapshot(), {}, "no server URL is stored");
+  assert.deepEqual(storageB.snapshot(), {}, "no server URL is stored");
 
-  // A refresh, a new tab, and a return visit all keep the visitor's own server:
-  // the load balancer is asked once, not once per page load.
-  // Each arrival is its own page load: a new client, the page's own storage.
-  const reloadedAgain = client({ ...common, storage: storageA });
-  assert.equal((await reloadedAgain.requestJson("/api/videos")).backend, a1.backend);
-  const copiedStorage = memoryStorage(storageA.snapshot());
-  const newTab = client({ ...common, storage: copiedStorage });
-  assert.equal((await newTab.requestJson("/api/videos")).backend, a1.backend);
-  assert.equal(discoveries, 2, "a stored choice is reused, so no new discovery");
+  // Every arrival is a new entry: a reload, a new tab and a return visit each ask
+  // the load balancer again instead of inheriting an older answer.
+  const reloaded = client({ ...common, storage: storageA });
+  assert.equal((await reloaded.requestJson("/api/videos")).backend, backendA, "a refresh gets the answer for its own entry");
+  assert.equal(discoveries, 3);
+  const newTab = client({ ...common, storage: memoryStorage(storageA.snapshot()) });
+  await newTab.requestJson("/api/videos");
+  assert.equal(discoveries, 4, "a new tab asks for itself");
+  assert.deepEqual(storageA.snapshot(), {}, "a server URL is never written");
 
-  // Well past a minute, still the same server; the stored entry lasts a day.
-  now += 3_600_000;
-  assert.equal((await reloadedAgain.requestJson("/api/videos")).backend, a1.backend);
-  assert.equal(discoveries, 2);
-  const stored = JSON.parse(storageA.getItem("intimora_direct_backend_v1"));
-  assert.ok(stored.expiresAt <= stored.selectedAt + 24 * 60 * 60 * 1000, "stored for a day");
-  assert.ok(stored.expiresAt >= now, "and still valid an hour later");
-
-  // A tab keeps its selection for the whole day too: the load balancer is not
-  // asked again just because time passed while the page stayed open.
-  const long = client({ ...common, storage: null, now: () => now, monotonicNow: () => now });
+  // Within one page load every call uses the one server, however many clicks it
+  // takes: a visitor who opens a video stays on the server that delivered the page.
+  const long = client({ ...common, storage: null });
   const longFirst = await long.requestJson("/api/videos");
-  now += 6 * 60 * 60 * 1000;
   assert.equal((await long.requestJson("/api/videos")).backend, longFirst.backend);
-  assert.equal(discoveries, 3, "one discovery for the whole day, and none for the long-lived tab");
+  assert.equal((await long.requestJson("/api/search?q=one")).backend, longFirst.backend);
+  assert.equal(discoveries, 5, "one discovery for the whole page load");
   // A failed request is what makes the next one ask again.
   let discoveriesHere = 0;
   let failNext = false;
-  const failed = client({ ...common, storage: null, now: () => now, monotonicNow: () => now, fetcher: async (url) => {
+  const failed = client({ ...common, storage: null, fetcher: async (url) => {
     if (url === discoveryUrl) { discoveriesHere += 1; return Response.json({ ok: true, data: { server: backendB } }); }
     if (failNext) { failNext = false; return Response.json({ ok: false }, { status: 503 }); }
     return Response.json({ ok: true, data: { videos: [] } });
@@ -124,10 +115,8 @@ test("storage denial uses a per-tab memory cache and backend failures remain gen
   assert.equal(discoveries, 3);
 });
 
-test("a slow discovery body cannot extend the original deadline", async () => {
-  let now = 1_700_000_000_000;
+test("a slow discovery answer still serves the whole page load", async () => {
   let discoveries = 0;
-  const day = 24 * 60 * 60 * 1000;
   const fetcher = async (url) => {
     if (url !== discoveryUrl) return Response.json({ ok: true });
     const selected = ++discoveries === 1 ? backendA : backendB;
@@ -135,23 +124,17 @@ test("a slow discovery body cannot extend the original deadline", async () => {
     if (discoveries === 1) {
       // Ten seconds pass while the answer is read.
       const parse = response.json.bind(response);
-      response.json = async () => { now += 10_000; return parse(); };
+      response.json = async () => { await delay(10); return parse(); };
     }
     return response;
   };
-  const visitor = client({ fetcher, storage: null, now: () => now, monotonicNow: () => now });
+  const visitor = client({ fetcher, storage: null });
   assert.equal((await visitor.requestJson("/api/videos")).backend, backendA);
-  // The day is measured from when discovery started, so the ten seconds spent
-  // reading the answer are already spent — not added on top.
-  now += day - 10_001;
   assert.equal((await visitor.requestJson("/api/search?q=x")).backend, backendA);
-  now += 1;
-  assert.equal((await visitor.requestJson("/api/search?q=x")).backend, backendB);
-  assert.equal(discoveries, 2);
+  assert.equal(discoveries, 1, "one answer per page load, however slow it arrived");
 });
 
 test("pinned requests use their original backend while a new selection is discovered", async () => {
-  let now = 1_700_000_000_000;
   let discoveries = 0;
   const calls = [];
   const fetcher = async (url, init) => {
@@ -161,12 +144,15 @@ test("pinned requests use their original backend while a new selection is discov
       await delay(5);
       return Response.json({ ok: true, data: { server: `${selected}/` } });
     }
+    if (url.includes("q=reset")) return Response.json({ ok: false }, { status: 503 });
     return Response.json({ ok: true });
   };
-  const visitor = client({ fetcher, storage: null, now: () => now, monotonicNow: () => now });
+  const visitor = client({ fetcher, storage: null });
   assert.equal((await visitor.requestJson("/api/videos")).backend, backendA);
-  now += 24 * 60 * 60 * 1000 + 1;
   assert.equal((await visitor.requestJson("/api/videos?cursor=next%20page", undefined, backendA)).backend, backendA);
+  // A failed call clears this page load's server, so the next call discovers a new
+  // one — while a pinned cursor still works on the old one.
+  await assert.rejects(visitor.requestJson("/api/search?q=reset"));
   assert.equal(await visitor.selectBackend(), backendB);
   assert.equal((await visitor.requestJson("/api/search?q=new")).backend, backendB);
   // Likes now require Firebase auth; the public client cannot send them.
@@ -214,22 +200,17 @@ test("invalid or credential-bearing targets, malformed routes, and bad discovery
   await assert.rejects(visitor.requestJson("/api/videos", { method: "POST" }), { message: "Content is temporarily unavailable" });
 });
 
-test("untrusted stored timestamps cannot extend a route and backward clocks expire it", async () => {
-  let now = 100_000;
+test("a server URL left in storage by an older build is ignored, not reused", async () => {
   let discoveries = 0;
-  const storage = memoryStorage({
-    // A claim longer than a day is not one this app ever writes, so it is refused.
-    intimora_direct_backend_v1: JSON.stringify({ backend: backendA, selectedAt: now, expiresAt: now + 48 * 60 * 60 * 1000 }),
-  });
+  const stale = JSON.stringify({ backend: backendA, selectedAt: 100_000, expiresAt: 100_000 + 48 * 60 * 60 * 1000 });
+  const storage = memoryStorage({ intimora_direct_backend_v1: stale });
   const fetcher = async (url) => url === discoveryUrl
     ? Response.json({ ok: true, data: { server: ++discoveries % 2 ? backendB : backendA } })
     : Response.json({ ok: true });
-  const visitor = client({ storage, fetcher, now: () => now, monotonicNow: () => now, reuseStoredSelection: true });
-  assert.equal((await visitor.requestJson("/api/videos")).backend, backendB);
+  const visitor = client({ storage, fetcher });
+  assert.equal((await visitor.requestJson("/api/videos")).backend, backendB, "the load balancer decides, not an old entry");
   assert.equal(discoveries, 1);
-  now -= 1;
-  assert.equal((await visitor.requestJson("/api/videos")).backend, backendA);
-  assert.equal(discoveries, 2);
+  assert.equal(storage.getItem("intimora_direct_backend_v1"), stale, "the old entry is left untouched and unused");
 });
 
 test("optional public like-count requests are bounded, read-only, pinned, and do not disrupt routing", async () => {

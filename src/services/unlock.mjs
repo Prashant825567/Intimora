@@ -31,10 +31,10 @@ function safely(action, fallback = null) {
   }
 }
 
-export function readUnlockState(storage) {
+export function readUnlockState(storage, key = STORAGE_KEY) {
   const store = storage === undefined ? safely(() => globalThis.localStorage) : storage;
   if (!store) return {};
-  const raw = safely(() => store.getItem(STORAGE_KEY));
+  const raw = safely(() => store.getItem(key));
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -44,28 +44,30 @@ export function readUnlockState(storage) {
   }
 }
 
-function write(storage, state) {
+// `key` lets a second PHP host (the identity host) keep its own budget instead of
+// spending the one that belongs to the host serving the catalogue.
+function write(storage, state, key = STORAGE_KEY) {
   const store = storage === undefined ? safely(() => globalThis.localStorage) : storage;
   if (!store) return;
-  safely(() => store.setItem(STORAGE_KEY, JSON.stringify(state)));
+  safely(() => store.setItem(key, JSON.stringify(state)));
 }
 
 // Remembers that the browser left for the check page. `tries` counts the
 // redirects inside one window, so a host that never confirms a session is
 // dropped after a few attempts instead of bouncing the visitor forever.
-export function markUnlockAttempt(storage, { now = Date.now(), blocked = false, freshMs = 5.5 * 60 * 60 * 1000 } = {}) {
-  const state = readUnlockState(storage);
+export function markUnlockAttempt(storage, { now = Date.now(), blocked = false, freshMs = 5.5 * 60 * 60 * 1000, key = STORAGE_KEY } = {}) {
+  const state = readUnlockState(storage, key);
   const at = Number(state.at);
   const insideWindow = Number.isFinite(at) && at > 0 && now >= at - CLOCK_SLACK_MS && now - at <= freshMs;
   const tries = insideWindow ? (Number(state.tries) || 0) + 1 : 1;
-  write(storage, { at: now, tries, ok: false, ...(blocked ? { blocked: true } : {}) });
+  write(storage, { at: now, tries, ok: false, ...(blocked ? { blocked: true } : {}) }, key);
 }
 
 // The first PHP answer that actually arrived proves the cookie works; from then
 // on this window is quiet until the host's six-hour session would have expired.
-export function confirmUnlockSession(storage, { now = Date.now() } = {}) {
+export function confirmUnlockSession(storage, { now = Date.now(), key = STORAGE_KEY } = {}) {
   provenThisLoad = true;
-  write(storage, { at: now, tries: 0, ok: true });
+  write(storage, { at: now, tries: 0, ok: true }, key);
 }
 
 // Whether the cookie was proven by *this* page load. The cookie itself can live for
@@ -81,8 +83,8 @@ export function provenSessionThisLoad() {
   return provenThisLoad;
 }
 
-export function hasProvenSession({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000 } = {}) {
-  const state = readUnlockState(storage);
+export function hasProvenSession({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000, key = STORAGE_KEY } = {}) {
+  const state = readUnlockState(storage, key);
   const at = Number(state.at);
   if (state.ok !== true || !Number.isFinite(at) || at <= 0) return false;
   // A session proven on an earlier page load does not carry over: the next visit
@@ -92,16 +94,16 @@ export function hasProvenSession({ storage, now = Date.now(), freshMs = 5.5 * 60
   return now - at <= freshMs;
 }
 
-export function clearUnlockAttempt(storage) {
+export function clearUnlockAttempt(storage, key = STORAGE_KEY) {
   const store = storage === undefined ? safely(() => globalThis.localStorage) : storage;
-  safely(() => store?.removeItem(STORAGE_KEY));
+  safely(() => store?.removeItem(key));
 }
 
 // True when a new unlock is worth asking for: a confirmed session lasts the
 // host's window, an unconfirmed one is retried a bounded number of times with a
 // minimum gap so the visitor never sees a redirect loop.
-export function shouldRequestUnlock({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000, retryMs = 2 * 60 * 1000, maxTries = MAX_TRIES, minGapMs = MIN_GAP_MS } = {}) {
-  const state = readUnlockState(storage);
+export function shouldRequestUnlock({ storage, now = Date.now(), freshMs = 5.5 * 60 * 60 * 1000, retryMs = 2 * 60 * 1000, maxTries = MAX_TRIES, minGapMs = MIN_GAP_MS, key = STORAGE_KEY } = {}) {
+  const state = readUnlockState(storage, key);
   const at = Number(state.at);
   // A refusal the browser caused (no CORS header) is not retried in a loop, but
   // it must not leave the tab dead either: the same short window applies.
@@ -189,11 +191,12 @@ export function requestUnlockNavigation({
   document: doc = globalThis.document,
   navigate = (url) => { globalThis.location.assign(url); },
   setTimeoutImpl = (fn, ms) => setTimeout(fn, ms),
+  key = STORAGE_KEY,
 } = {}) {
-  if (!shouldRequestUnlock({ storage, now, freshMs, retryMs, maxTries, minGapMs })) return false;
+  if (!shouldRequestUnlock({ storage, now, freshMs, retryMs, maxTries, minGapMs, key })) return false;
   const url = unlockUrl(phpOrigin, href);
   if (!url) return false;
-  markUnlockAttempt(storage, { now, freshMs, blocked });
+  markUnlockAttempt(storage, { now, freshMs, blocked, key });
   showUnlockSplash({ document: doc });
   // Give the splash a frame or two so the visitor never sees a frozen page.
   setTimeoutImpl(() => navigate(url), Math.max(0, splashMs));
