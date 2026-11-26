@@ -457,6 +457,11 @@ export function mediaLinkFrom(raw: unknown, backend: string, kind: "stream" | "t
     if (!token || token.length > 512) return null;
     return url.href;
   }
+  // A trailer is public on the backend: its own answers send
+  // `/api/videos/<id>/stream?kind=trailer` with no token at all, and that exact
+  // link is what the player must use. Requiring a token here dropped it, so a
+  // locked premium video promised a trailer and then had nothing to play.
+  if (kind === "trailer" && !url.hash) return url.href;
   // No `t` in the query: the token may instead be the fragment a media element
   // sends (`#t=<token>`, or the bare token some deploy scripts build). It is the
   // backend's own token either way, and nothing else may ride along with it.

@@ -33,6 +33,12 @@ test("a premium answer's trailer survives mapping, from the record or from metad
 
   assert.equal(mapped(record).trailerUrl, file, "a direct media file is kept exactly as sent");
   assert.equal(mapped({ ...record, trailerUrl: tokenised }).trailerUrl, tokenised, "the tokenised form is unchanged");
+  // The backend's own trailer link carries no token — the trailer route is public
+  // (`/api/videos/<id>/stream?kind=trailer`) — so it must survive as issued.
+  assert.equal(mapped({ ...record, trailerUrl: "/api/videos/v-1/stream?kind=trailer" }).trailerUrl,
+    `${backend}/api/videos/v-1/stream?kind=trailer`);
+  // A full stream with no token is still refused, premium or not.
+  assert.equal(mapped({ ...record, premium: true, locked: false, streamUrl: "/api/videos/v-1/stream" }).videoUrl, "");
 
   // The trailer may arrive inside `metadata` instead of on the record.
   const raw = { id: "v-1", title: "T", locked: true, metadata: { hasTrailer: true, trailerUrl: "/storage/trailers/t1.mp4" } };
