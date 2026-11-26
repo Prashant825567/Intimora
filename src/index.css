@@ -57,6 +57,17 @@ input[type="range"]::-webkit-slider-thumb {
   -webkit-user-select: none;
 }
 
+/* Fullscreen fills the screen instead of the 16/9 inline frame, so a phone the
+   player turned to landscape shows the picture edge to edge. */
+#player-container:fullscreen,
+#player-container:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  border-radius: 0;
+  aspect-ratio: auto !important;
+}
+
 /* Disable image drag */
 img {
   -webkit-user-drag: none;
@@ -209,6 +220,11 @@ img {
 
 .hero-banner__meta {
   flex-wrap: wrap;
+}
+
+/* The poster is the play button on a phone only; a desktop has WATCH NOW. */
+.hero-banner__tap {
+  display: none;
 }
 
 .hero-banner__navigation {
@@ -590,6 +606,21 @@ img {
 
   .hero-banner__image {
     max-height: min(60vh, 28rem);
+  }
+
+  /* No title and no WATCH NOW here, so a tap anywhere on the banner plays the
+     featured video. It sits under the carousel dots, which keep their taps. */
+  .hero-banner__tap {
+    display: block;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .hero-banner__content {

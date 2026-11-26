@@ -68,6 +68,24 @@ function preloadHint(): "auto" | "metadata" {
     ? "metadata" : "auto";
 }
 
+// A phone held upright would show a fullscreen video in a letterboxed strip, so
+// the player asks for landscape when it goes fullscreen. iOS has no orientation
+// lock; there the inline player simply stays as it is.
+type OrientationApi = { lock?: (value: string) => Promise<void>; unlock?: () => void };
+
+function orientationApi(): OrientationApi | undefined {
+  if (typeof screen === "undefined") return undefined;
+  return screen.orientation as unknown as OrientationApi | undefined;
+}
+
+function lockLandscape() {
+  try { void orientationApi()?.lock?.("landscape")?.catch(() => { /* unsupported */ }); } catch { /* unsupported */ }
+}
+
+function unlockOrientation() {
+  try { orientationApi()?.unlock?.(); } catch { /* unsupported */ }
+}
+
 // `onSignIn` stays in the props for the caller, but the player itself no longer
 // sends anyone to sign in: the backend's answer decides what plays.
 const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOpen, onClose, onShare, liked, saved, likePending, savePending, onLike, onSave, actionError, signedIn, accountChecking, onRefreshVideo }) => {
@@ -525,10 +543,40 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
     resetControlsTimer();
   };
 
-  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Dragging the bar scrubs, like a native player: the pointer is captured on
+  // press, so a finger that slides off the thin bar keeps seeking instead of
+  // stopping. A tap is the same gesture without movement.
+  const dragging = useRef(false);
+
+  const seekFromPointer = (clientX: number) => {
+    const v = videoRef.current;
     const rect = progressRef.current?.getBoundingClientRect();
-    if (!rect?.width || !duration) return;
-    seekTo((e.clientX - rect.left) / rect.width * duration);
+    if (!v || !rect?.width || !duration) return;
+    const at = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * duration;
+    v.currentTime = at;
+    setCurrentTime(at);
+  };
+
+  const startScrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    e.preventDefault();
+    dragging.current = true;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* older Safari */ }
+    seekFromPointer(e.clientX);
+    resetControlsTimer();
+  };
+
+  const moveScrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    seekFromPointer(e.clientX);
+  };
+
+  const endScrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+    seekFromPointer(e.clientX);
+    resetControlsTimer();
   };
 
   const skip = (seconds: number) => {
@@ -545,17 +593,37 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
     e.preventDefault();
   };
 
-  const toggleFullscreen = () => {
-    const container = document.getElementById("player-container");
-    if (!fullscreen) {
-      container?.requestFullscreen();
-      setFullscreen(true);
-    } else {
-      document.exitFullscreen();
-      setFullscreen(false);
-    }
+  // Fullscreen is read from the document, not from this component's state, so
+  // leaving with the phone's back gesture (or Esc) counts the same as pressing
+  // the button, and the orientation lock is released either way.
+  const toggleFullscreen = async () => {
     resetControlsTimer();
+    if (document.fullscreenElement) {
+      try { await document.exitFullscreen(); } catch { /* already left */ }
+      unlockOrientation();
+      return;
+    }
+    const container = document.getElementById("player-container");
+    try {
+      await container?.requestFullscreen({ navigationUI: "hide" });
+    } catch { /* iOS keeps the inline player */ }
+    lockLandscape();
   };
+
+  // The browser is the authority on fullscreen: Esc, the system back gesture or
+  // the button all land here, so the icon and the orientation lock stay in step.
+  useEffect(() => {
+    const sync = () => {
+      const active = Boolean(document.fullscreenElement);
+      setFullscreen(active);
+      if (!active) unlockOrientation();
+    };
+    document.addEventListener("fullscreenchange", sync);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      unlockOrientation();
+    };
+  }, []);
 
   const formatTime = (t: number) => {
     if (!Number.isFinite(t) || t <= 0) return "0:00";
@@ -734,7 +802,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
             className={`absolute bottom-0 left-0 right-0 transition-all duration-300 ${adPlaying || !showControls ? "opacity-0 pointer-events-none" : "opacity-100"}`}
             style={{ background: "linear-gradient(to top, rgba(0,0,0,0.9), transparent)" }}
           >
-            {/* Progress bar */}
+            {/* Progress bar — the grab strip is 24px tall so a finger can take
+                it while the visible bar stays thin. Dragging it scrubs. */}
             <div
               ref={progressRef}
               role="slider"
@@ -745,24 +814,30 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({ video: openedVideo, startOnOp
               aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
               aria-disabled={!duration}
               tabIndex={0}
-              className="mx-4 mt-2 h-1.5 bg-gray-700 rounded-full cursor-pointer relative group/progress focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
-              onClick={handleProgressClick}
+              className="mx-4 mt-2 flex h-6 items-center cursor-pointer touch-none group/progress focus-visible:outline focus-visible:outline-2 focus-visible:outline-yellow-400"
+              style={{ touchAction: "none" }}
+              onPointerDown={startScrub}
+              onPointerMove={moveScrub}
+              onPointerUp={endScrub}
+              onPointerCancel={endScrub}
               onKeyDown={handleProgressKeyDown}
             >
-              {/* Seeking can create disjoint buffered ranges. */}
-              {buffered.map((range, index) => (
-                <div key={index} className="video-player__buffered-range absolute inset-y-0 bg-gray-500 rounded-full" style={{ left: `${range.start}%`, width: `${range.end - range.start}%` }} />
-              ))}
-              {/* Progress */}
-              <div
-                className="absolute inset-y-0 left-0 rounded-full transition-all"
-                style={{ width: `${progress}%`, background: "linear-gradient(to right, #c9a84c, #f0d080)" }}
-              />
-              {/* Thumb */}
-              <div
-                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-yellow-400 bg-white opacity-0 group-hover/progress:opacity-100 transition"
-                style={{ left: `calc(${progress}% - 8px)` }}
-              />
+              <div className="relative h-1.5 w-full rounded-full bg-gray-700">
+                {/* Seeking can create disjoint buffered ranges. */}
+                {buffered.map((range, index) => (
+                  <div key={index} className="video-player__buffered-range absolute inset-y-0 bg-gray-500 rounded-full" style={{ left: `${range.start}%`, width: `${range.end - range.start}%` }} />
+                ))}
+                {/* Progress */}
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{ width: `${progress}%`, background: "linear-gradient(to right, #c9a84c, #f0d080)" }}
+                />
+                {/* Thumb: shown while hovering, always while dragging. */}
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-yellow-400 bg-white opacity-0 group-hover/progress:opacity-100 group-active/progress:opacity-100 transition"
+                  style={{ left: `calc(${progress}% - 8px)` }}
+                />
+              </div>
             </div>
 
             {/* Controls row */}

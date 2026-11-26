@@ -18,6 +18,8 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
   const [current, setCurrent] = useState(0);
   const [paused, setPaused] = useState(false);
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  // A tap that ends a swipe must move the carousel, not start a video.
+  const lastSwipeAt = useRef(0);
   const featured = videos.slice(0, 5);
   const count = featured.length;
 
@@ -55,9 +57,20 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
         // A short drag is a scroll, not a swipe: only a mostly-horizontal move
         // counts, so the page keeps scrolling normally over the hero.
         if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        lastSwipeAt.current = Date.now();
         setCurrent((value) => (dx < 0 ? (value + 1) % count : (value - 1 + count) % count));
       }}
     >
+      {/* A phone shows the poster alone — no title, no WATCH NOW. There the whole
+          banner is the play button, and a tap that just ended a swipe is ignored
+          so the carousel stays swipeable. The dots keep their own taps. */}
+      <button
+        type="button"
+        className="hero-banner__tap"
+        aria-label={`Play ${video.title}`}
+        onClick={() => { if (Date.now() - lastSwipeAt.current < 500) return; onPlay(video); }}
+      />
+
       <div className="hero-banner__media">
         <img
           key={video.id}
