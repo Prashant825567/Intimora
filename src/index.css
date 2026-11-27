@@ -1268,3 +1268,277 @@ img {
   font-size: 0.875rem;
   padding: 2rem 0;
 }
+
+/* Grace: the floating assistant in the bottom-right corner. One circle that
+   opens the chat panel in place, so no visitor ever leaves the page. */
+.grace {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.grace__fab {
+  position: relative;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(240, 208, 128, 0.55);
+  background: linear-gradient(135deg, #c9a84c, #f0d080);
+  color: #12100c;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.grace__fab:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6), 0 0 0 4px rgba(201, 168, 76, 0.18);
+}
+
+.grace__fab:focus-visible {
+  outline: 2px solid #f0d080;
+  outline-offset: 3px;
+}
+
+.grace__fab-dot {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 2px #12100c;
+}
+
+.grace__panel {
+  width: min(360px, calc(100vw - 2rem));
+  max-height: min(540px, calc(100vh - 6rem));
+  display: flex;
+  flex-direction: column;
+  background: #12100c;
+  border: 1px solid rgba(201, 168, 76, 0.35);
+  border-radius: 1rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  animation: grace-in 0.18s ease-out;
+}
+
+@keyframes grace-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.grace__header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.18);
+  background: linear-gradient(135deg, rgba(201, 168, 76, 0.16), rgba(201, 168, 76, 0.03));
+}
+
+.grace__avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #c9a84c, #f0d080);
+  color: #12100c;
+  font-weight: 800;
+  font-size: 0.875rem;
+}
+
+.grace__heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.grace__title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #f7f3ea;
+}
+
+.grace__subtitle {
+  margin: 0.1rem 0 0;
+  font-size: 0.6875rem;
+  color: #9c9488;
+}
+
+.grace__close {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: #9c9488;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.grace__close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.grace__log {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+}
+
+.grace__bubble {
+  margin: 0;
+  max-width: 85%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.85rem;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.grace__bubble--grace {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e7e2d8;
+  border-bottom-left-radius: 0.25rem;
+}
+
+.grace__bubble--user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #c9a84c, #f0d080);
+  color: #12100c;
+  font-weight: 500;
+  border-bottom-right-radius: 0.25rem;
+}
+
+.grace__typing {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.grace__typing span {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 9999px;
+  background: #c9a84c;
+  animation: grace-blink 1s ease-in-out infinite;
+}
+
+.grace__typing span:nth-child(2) { animation-delay: 0.15s; }
+.grace__typing span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes grace-blink {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+.grace__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.grace__chip {
+  border: 1px solid rgba(201, 168, 76, 0.4);
+  background: transparent;
+  color: #e0c88a;
+  font-size: 0.6875rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+
+.grace__chip:hover {
+  background: rgba(201, 168, 76, 0.12);
+}
+
+.grace__form {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.85rem;
+  border-top: 1px solid rgba(201, 168, 76, 0.18);
+  background: #0d0b08;
+}
+
+.grace__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.6rem;
+  border: 1px solid rgba(201, 168, 76, 0.25);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f7f3ea;
+  font-size: 0.8125rem;
+  outline: none;
+}
+
+.grace__input::placeholder { color: #6b6459; }
+
+.grace__input:focus {
+  border-color: rgba(240, 208, 128, 0.7);
+}
+
+.grace__send {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 0.6rem;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #c9a84c, #f0d080);
+  color: #12100c;
+  cursor: pointer;
+}
+
+.grace__send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.grace__note {
+  margin: 0;
+  padding: 0 0.85rem 0.6rem;
+  font-size: 0.625rem;
+  color: #6b6459;
+}
+
+.grace__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .grace { right: 0.85rem; bottom: 0.85rem; }
+  .grace__panel { max-height: calc(100vh - 7rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grace__panel { animation: none; }
+  .grace__typing span { animation: none; }
+  .grace__fab { transition: none; }
+}
