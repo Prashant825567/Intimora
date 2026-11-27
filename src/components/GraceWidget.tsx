@@ -29,8 +29,53 @@ type Message = {
 const WELCOME: Message = {
   id: 0,
   from: "grace",
-  text: "Hi, I'm Grace. Ask me about premium, saving videos, search or anything that looks broken on Intimora.",
+  text: "Hi, I'm Grace, made by Intimora. Ask me about premium, saving videos, search or anything that looks broken.",
 };
+
+// Grace's system prompt. It lives here in the frontend, with her answers, so the
+// page writes every reply itself and no backend is involved.
+const GRACE_PROMPT =
+  "You are Grace, made by Intimora, the assistant on the Intimora site. Help visitors with premium, signing in, saving and liking videos, search, uploads, downloads and playback problems. Answer in the visitor's own language, keep it to two or three sentences, and never invent a feature the site does not have.";
+
+// Optional model endpoint (OpenAI-compatible chat/completions). With no endpoint
+// configured the rules below answer instantly in the browser; with one set at
+// build time the same prompt is sent straight from the page to that server.
+type GraceModel = { endpoint: string; key?: string; model: string };
+
+function graceModel(): GraceModel | null {
+  const env = (import.meta.env || {}) as Record<string, string | undefined>;
+  const endpoint = env.VITE_GRACE_ENDPOINT;
+  if (!endpoint) return null;
+  return { endpoint, key: env.VITE_GRACE_KEY, model: env.VITE_GRACE_MODEL || "gpt-4o-mini" };
+}
+
+async function askModel(question: string): Promise<string | null> {
+  const target = graceModel();
+  if (!target) return null;
+  try {
+    const response = await fetch(target.endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(target.key ? { authorization: `Bearer ${target.key}` } : {}),
+      },
+      body: JSON.stringify({
+        model: target.model,
+        messages: [
+          { role: "system", content: GRACE_PROMPT },
+          { role: "user", content: question },
+        ],
+        max_tokens: 220,
+      }),
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const reply = body?.choices?.[0]?.message?.content;
+    return typeof reply === "string" && reply.trim() ? reply.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 const SUGGESTIONS = ["What is premium?", "How do I save a video?", "Search is not working"];
 
@@ -38,7 +83,7 @@ function has(text: string, words: string[]): boolean {
   return words.some((word) => text.includes(word));
 }
 
-/** In-site answers. No network call, no key, no cost. */
+/** Grace's own answers, used whenever no model endpoint is configured. */
 function answer(raw: string): string {
   const text = raw.toLowerCase();
 
@@ -91,7 +136,6 @@ const GraceWidget = () => {
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [typing, setTyping] = useState(false);
   const nextId = useRef(1);
-  const timer = useRef<number | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -115,12 +159,6 @@ const GraceWidget = () => {
     if (log) log.scrollTop = log.scrollHeight;
   }, [messages, typing, open]);
 
-  useEffect(() => {
-    return () => {
-      if (timer.current) window.clearTimeout(timer.current);
-    };
-  }, []);
-
   const send = useCallback(
     (text: string) => {
       const value = text.trim();
@@ -130,12 +168,12 @@ const GraceWidget = () => {
       setDraft("");
       setTyping(true);
 
-      if (timer.current) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(() => {
-        setMessages((prev) => [...prev, { id: nextId.current++, from: "grace", text: answer(value) }]);
+      // The page asks the model itself when one is configured; otherwise Grace's
+      // own answers reply immediately, so a question is never left hanging.
+      void askModel(value).then((reply) => {
+        setMessages((prev) => [...prev, { id: nextId.current++, from: "grace", text: reply ?? answer(value) }]);
         setTyping(false);
-        timer.current = null;
-      }, 450);
+      });
     },
     [],
   );
@@ -160,7 +198,7 @@ const GraceWidget = () => {
             <div className="grace__avatar" aria-hidden="true">G</div>
             <div className="grace__heading">
               <p className="grace__title">Grace</p>
-              <p className="grace__subtitle">Intimora assistant</p>
+              <p className="grace__subtitle">made by Intimora</p>
             </div>
             <button
               type="button"
@@ -222,7 +260,7 @@ const GraceWidget = () => {
               <Send className="w-4 h-4" aria-hidden="true" />
             </button>
           </form>
-          <p className="grace__note">Automated answers about Intimora.</p>
+          <p className="grace__note">Grace — made by Intimora.</p>
         </section>
       )}
     </div>
