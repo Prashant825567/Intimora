@@ -1,5 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/api/grace", "destination": "https://notrack.ai/api/dispatch" }
-  ]
-}

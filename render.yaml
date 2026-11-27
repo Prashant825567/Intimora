@@ -34,6 +34,12 @@ services:
       - type: rewrite
         source: /dashboard/
         destination: /index.html
+      # Grace's chat. Her model endpoint sends no CORS headers, so a browser on
+      # this domain cannot read it directly. Render proxies the call to the
+      # destination, and the page only ever talks to its own origin.
+      - type: rewrite
+        source: /api/grace
+        destination: https://notrack.ai/api/dispatch
       # SPA fallback for all current and future client-side pages. Render
       # serves existing static files before evaluating rewrite rules.
       - type: rewrite
