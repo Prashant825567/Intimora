@@ -1306,6 +1306,12 @@ img {
   outline-offset: 3px;
 }
 
+.grace__mark {
+  width: 1.75rem;
+  height: 1.75rem;
+  filter: drop-shadow(0 1px 1px rgba(18, 16, 12, 0.35));
+}
+
 .grace__fab-dot {
   position: absolute;
   top: 0.5rem;

@@ -1,5 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MessageCircle, Send, X } from "lucide-react";
+import { Send, X } from "lucide-react";
+
+// Grace's own mark: a four-point sparkle with a smaller star and a dot beside it.
+// Drawn inline so it keeps its exact shape at any size and needs no icon package.
+function GraceMark() {
+  return (
+    <svg className="grace__mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M11.4 2.3c.55 4.05 2.1 5.6 6.15 6.15-4.05.55-5.6 2.1-6.15 6.15-.55-4.05-2.1-5.6-6.15-6.15 4.05-.55 5.6-2.1 6.15-6.15Z"
+        fill="currentColor"
+      />
+      <path
+        d="M18.05 13.7c.32 2.25 1.18 3.1 3.43 3.43-2.25.32-3.1 1.18-3.43 3.43-.32-2.25-1.18-3.1-3.43-3.43 2.25-.32 3.1-1.18 3.43-3.43Z"
+        fill="currentColor"
+        opacity="0.72"
+      />
+      <circle cx="5.9" cy="17.9" r="1.5" fill="currentColor" opacity="0.55" />
+    </svg>
+  );
+}
 
 type Message = {
   id: number;
@@ -130,7 +149,7 @@ const GraceWidget = () => {
           onClick={() => setOpen(true)}
           aria-label="Open Grace"
         >
-          <MessageCircle className="w-6 h-6" aria-hidden="true" />
+          <GraceMark />
           <span className="grace__fab-dot" aria-hidden="true" />
         </button>
       )}
