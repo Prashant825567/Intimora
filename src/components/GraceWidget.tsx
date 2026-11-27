@@ -37,41 +37,84 @@ const WELCOME: Message = {
 const GRACE_PROMPT =
   "You are Grace, made by Intimora, the assistant on the Intimora site. Help visitors with premium, signing in, saving and liking videos, search, uploads, downloads and playback problems. Answer in the visitor's own language, keep it to two or three sentences, and never invent a feature the site does not have.";
 
-// Optional model endpoint (OpenAI-compatible chat/completions). With no endpoint
-// configured the rules below answer instantly in the browser; with one set at
-// build time the same prompt is sent straight from the page to that server.
-type GraceModel = { endpoint: string; key?: string; model: string };
-
-function graceModel(): GraceModel | null {
+// Grace's answers come from the notrack.ai dispatch endpoint. That endpoint
+// sends no CORS headers, so the page calls it through the site's own /api/grace
+// rewrite (vercel.json): same origin for the browser, while the upstream still
+// sees its own page. The reply streams in and is shown once it is complete.
+const GRACE_ENDPOINT = (() => {
   const env = (import.meta.env || {}) as Record<string, string | undefined>;
-  const endpoint = env.VITE_GRACE_ENDPOINT;
-  if (!endpoint) return null;
-  return { endpoint, key: env.VITE_GRACE_KEY, model: env.VITE_GRACE_MODEL || "gpt-4o-mini" };
+  return env.VITE_GRACE_ENDPOINT || "/api/grace";
+})();
+
+// The dispatch call has no system field, so her prompt opens the message, and
+// chat_id is reused so a follow-up question keeps the same thread.
+let graceChatId: string | null = null;
+
+function graceBody(question: string): string {
+  return JSON.stringify({
+    user_input: `${GRACE_PROMPT}\n\nVisitor: ${question}`,
+    mode: "usual",
+    model: "C",
+    persona: "normal",
+    max_turns: 4,
+    chat_id: graceChatId,
+    attachments: [],
+    regenerate: false,
+    edit: false,
+    edit_mid: null,
+    via: "typed",
+  });
+}
+
+function readGraceFrame(frame: string, streamed: { text: string }): string | null {
+  const line = frame.split("\n").find((part) => part.startsWith("data:"));
+  if (!line) return null;
+  try {
+    const payload = JSON.parse(line.slice(5).trim()) as {
+      type?: string;
+      chat_id?: string;
+      content?: string;
+      chunk?: string;
+    };
+    if (payload.type === "chat_meta" && typeof payload.chat_id === "string") graceChatId = payload.chat_id;
+    if (payload.type === "delta" && typeof payload.chunk === "string") streamed.text += payload.chunk;
+    if (payload.type === "message" && typeof payload.content === "string" && payload.content.trim()) {
+      return payload.content.trim();
+    }
+  } catch {
+    /* a partial frame is skipped; the next one carries the text */
+  }
+  return null;
 }
 
 async function askModel(question: string): Promise<string | null> {
-  const target = graceModel();
-  if (!target) return null;
   try {
-    const response = await fetch(target.endpoint, {
+    const response = await fetch(GRACE_ENDPOINT, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(target.key ? { authorization: `Bearer ${target.key}` } : {}),
-      },
-      body: JSON.stringify({
-        model: target.model,
-        messages: [
-          { role: "system", content: GRACE_PROMPT },
-          { role: "user", content: question },
-        ],
-        max_tokens: 220,
-      }),
+      headers: { "content-type": "application/json" },
+      body: graceBody(question),
     });
-    if (!response.ok) return null;
-    const body = await response.json();
-    const reply = body?.choices?.[0]?.message?.content;
-    return typeof reply === "string" && reply.trim() ? reply.trim() : null;
+    if (!response.ok || !response.body) return null;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const streamed = { text: "" };
+    let buffer = "";
+    let answer: string | null = null;
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      for (let cut = buffer.indexOf("\n\n"); cut !== -1; cut = buffer.indexOf("\n\n")) {
+        const frame = buffer.slice(0, cut);
+        buffer = buffer.slice(cut + 2);
+        answer = readGraceFrame(frame, streamed) ?? answer;
+      }
+    }
+
+    const reply = (answer ?? streamed.text).trim();
+    return reply ? reply : null;
   } catch {
     return null;
   }
