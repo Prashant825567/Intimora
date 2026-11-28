@@ -194,7 +194,7 @@ async function openPlayer(context, base) {
   return { page, errors };
 }
 
-test("a pre-roll plays before the content, tracks impressions and can be skipped", options, async () => {
+test("a pre-roll plays before the content, tracks impressions and hands over to it", options, async () => {
   await withPlayer({ vast: () => ({ xml: vastXml() }), run: async ({ context, base, requests }) => {
     const { page, errors } = await openPlayer(context, base);
     const ad = page.locator("[data-ad-video]");
@@ -221,16 +221,18 @@ test("a pre-roll plays before the content, tracks impressions and can be skipped
     assert.equal(await link.getAttribute("target"), "_blank");
     assert.match(await link.getAttribute("rel"), /noopener/);
 
-    const skip = page.getByRole("button", { name: "Skip advertisement" });
-    await skip.waitFor({ timeout: 30_000 });
-    await skip.click();
+    // There is no skip button any more: the whole creative is one link, and the ad
+    // ends by finishing, which is what hands the player over to the content.
+    assert.equal(await page.getByRole("button", { name: "Skip advertisement" }).count(), 0, "the ad has no skip button");
+    assert.equal(await page.getByRole("link", { name: "Visit advertiser" }).count(), 1, "a click anywhere on the ad visits the advertiser");
+    await page.locator("[data-ad-video]").evaluate((element) => element.dispatchEvent(new Event("ended")));
     await page.locator("[data-ad-overlay]").waitFor({ state: "detached" });
     await page.waitForFunction(() => {
       const element = document.querySelector("#player-container video");
       return element && !element.paused && element.currentTime > 0;
     });
-    assert.equal(await page.locator("#player-container video").count(), 1, "the ad element is removed after the skip");
-    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/skip"), "the skip event fired");
+    assert.equal(await page.locator("#player-container video").count(), 1, "the ad element is removed once the creative finishes");
+    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/complete"), "the complete event fired");
 
     // Closing and reopening the player requests the ad once more, not twice.
     await page.getByRole("button", { name: "Close video player" }).click();
@@ -254,10 +256,9 @@ test("a playing pre-roll is not cut short by the start-up watchdog", options, as
     assert.equal(await page.locator("[data-ad-overlay]").count(), 1, "a playing pre-roll stays on screen");
     const played = await ad.evaluate((element) => element.currentTime);
     assert.ok(played > 6, `the creative kept playing (t=${played.toFixed(1)}s)`);
-    // The skip button unlocks at the tag's own 15 second offset, not earlier.
-    const skip = page.getByRole("button", { name: "Skip advertisement" });
-    await skip.waitFor({ timeout: 20_000 });
-    await skip.click();
+    // No skip button at all, so the only exit is the creative finishing.
+    assert.equal(await page.getByRole("button", { name: "Skip advertisement" }).count(), 0);
+    await page.locator("[data-ad-video]").evaluate((element) => element.dispatchEvent(new Event("ended")));
     await page.locator("[data-ad-overlay]").waitFor({ state: "detached" });
     assert.deepEqual(errors, []);
   } });
@@ -347,15 +348,14 @@ test("a pre-roll still plays from the published snapshot when the browser cannot
     const link = page.getByRole("link", { name: /Visit Cached campaign/ });
     assert.equal(await link.getAttribute("href"), "https://advertiser.example/landing");
 
-    const skip = page.getByRole("button", { name: "Skip advertisement" });
-    await skip.waitFor({ timeout: 30_000 });
-    await skip.click();
+    assert.equal(await page.getByRole("link", { name: "Visit advertiser" }).count(), 1, "the cached ad is clickable everywhere");
+    await page.locator("[data-ad-video]").evaluate((element) => element.dispatchEvent(new Event("ended")));
     await page.locator("[data-ad-overlay]").waitFor({ state: "detached" });
     await page.waitForFunction(() => {
       const element = document.querySelector("#player-container video");
       return element && !element.paused && element.currentTime > 0;
     });
-    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/skip"), "the cached skip event fired");
+    assert.ok(requests.some((item) => item.kind === "track" && item.path === "/complete"), "the cached complete event fired");
     assert.deepEqual(errors, []);
     await page.close();
   } });

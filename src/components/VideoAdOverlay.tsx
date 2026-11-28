@@ -34,7 +34,6 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
   // state value captured there would stay false forever and cut a playing ad.
   const playing = useRef(false);
   const [muted, setMuted] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState<number | null>(ad.skippable ? Math.ceil(ad.skipAfterSeconds ?? 0) : null);
 
   const track = (event: string) => {
     if (fired.current.has(event)) return;
@@ -77,17 +76,6 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!ad.skippable) return undefined;
-    const timer = setInterval(() => {
-      const element = videoRef.current;
-      const skipAt = ad.skipAfterSeconds ?? 0;
-      const remaining = Math.max(0, Math.ceil(skipAt - (element?.currentTime ?? 0)));
-      setSecondsLeft(remaining);
-    }, 250);
-    return () => clearInterval(timer);
-  }, [ad.skippable, ad.skipAfterSeconds]);
-
   const handleTimeUpdate = () => {
     const element = videoRef.current;
     if (!element) return;
@@ -99,9 +87,11 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
     }
   };
 
-  const skip = () => {
-    track("skip");
-    finish("skip");
+  // The creative is one big link: any click on the player opens the advertiser,
+  // so there is no separate skip button to reach for.
+  const visit = () => {
+    if (!ad.clickThrough) return;
+    firePixels(ad.clickTracking);
   };
 
   const toggleMute = () => {
@@ -111,8 +101,6 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
     setMuted(!muted);
     track(!muted ? "mute" : "unmute");
   };
-
-  const skippableNow = ad.skippable && (secondsLeft ?? 0) <= 0;
 
   return (
     <div
@@ -136,7 +124,19 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
         onError={() => finish("error")}
       />
 
-      <div className="absolute top-0 left-0 right-0 flex items-start justify-between p-3" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)" }}>
+      {ad.clickThrough && (
+        <a
+          href={ad.clickThrough}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={visit}
+          aria-label="Visit advertiser"
+          data-ad-click=""
+          className="absolute inset-0 z-[1] cursor-pointer"
+        />
+      )}
+
+      <div className="absolute top-0 left-0 right-0 z-[2] flex items-start justify-between p-3" style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)" }}>
         <span className="rounded px-2 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white/90" style={{ background: "rgba(0,0,0,0.6)", border: "1px solid rgba(255,255,255,0.25)" }}>
           Advertisement
         </span>
@@ -150,35 +150,23 @@ const VideoAdOverlay: React.FC<VideoAdOverlayProps> = ({ ad, onFinish, onClose }
         </div>
       </div>
 
-      <div className="absolute bottom-0 left-0 right-0 flex flex-wrap items-center justify-between gap-3 p-3" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85), transparent)" }}>
+      <div className="absolute bottom-0 left-0 right-0 z-[2] flex flex-wrap items-center justify-between gap-3 p-3" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.85), transparent)" }}>
         {ad.clickThrough ? (
           <a
             href={ad.clickThrough}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={() => firePixels(ad.clickTracking)}
+            onClick={visit}
             className="rounded-full px-4 py-2 text-xs font-semibold text-black"
             style={{ background: "linear-gradient(135deg, #c9a84c, #f0d080)" }}
           >
             {ad.title ? `Visit ${ad.title}` : "Visit advertiser"}
           </a>
         ) : <span />}
-        {ad.skippable ? (
-          skippableNow ? (
-            <button
-              type="button"
-              onClick={skip}
-              aria-label="Skip advertisement"
-              className="rounded-full px-4 py-2 text-xs font-bold text-white"
-              style={{ background: "rgba(0,0,0,0.7)", border: "1px solid rgba(255,255,255,0.4)" }}
-            >
-              Skip ad
-            </button>
-          ) : (
-            <span role="status" className="rounded-full px-3 py-2 text-xs text-white/80" style={{ background: "rgba(0,0,0,0.7)" }}>
-              Skip in {Math.max(0, secondsLeft ?? 0)}s
-            </span>
-          )
+        {ad.clickThrough ? (
+          <span className="rounded-full px-3 py-2 text-[11px] font-semibold text-white/85" style={{ background: "rgba(0,0,0,0.7)" }}>
+            Click anywhere to visit
+          </span>
         ) : null}
       </div>
     </div>
