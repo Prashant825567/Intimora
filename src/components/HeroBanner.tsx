@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Play, ChevronLeft, ChevronRight, Star } from "lucide-react";
+import { Play, ChevronLeft, ChevronRight, Lock, Star } from "lucide-react";
 import type { Video } from "../data/mockVideos";
 import { isPremiumLabel } from "../utils/video-labels";
 import { mediaCrossOrigin } from "../services/media-credentials.mjs";
@@ -80,6 +80,19 @@ const HeroBanner: React.FC<HeroBannerProps> = ({ videos, onPlay }) => {
           alt={video.title}
           className="hero-banner__image"
         />
+
+        {/* A phone has no text panel, so the poster carries the card's own
+            furniture: the badge row at the top and the title at the bottom. */}
+        <div className="hero-banner__card-labels">
+          {video.isExclusive && <span className="hero-banner__card-label">EXCLUSIVE</span>}
+          {video.locked && !video.isExclusive && (
+            <span className="hero-banner__card-label hero-banner__card-label--locked">
+              <Lock className="w-2.5 h-2.5" />
+              {video.trailerUrl ? "TRAILER" : "PREMIUM"}
+            </span>
+          )}
+        </div>
+        <p className="hero-banner__card-title">{video.title}</p>
       </div>
 
       <div className="hero-banner__content">
